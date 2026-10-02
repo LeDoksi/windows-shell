@@ -12,7 +12,7 @@
 - [ ] CI: GitHub Actions на `windows-latest`, сборка установщика как артефакт — `area:infra`
 - [ ] Браузерный режим `dev:web` с мок-бэкендом — `area:infra`
 - [x] Спайк: Acrylic-подложка + прозрачное окно иконок, magnification, скругления — `type:spike risk:high`
-- [ ] Спайк: окно без активации (`NOACTIVATE`), topmost — `type:spike risk:high`
+- [x] Спайк: окно без активации (`NOACTIVATE`), topmost — `type:spike risk:high`
 - [ ] Спайк: спрятать Taskbar и вернуть его при выходе/падении — `type:spike risk:high`
 - [ ] Спайк: свой трей — получать иконки фоновых программ и пересылать им клики — `type:spike risk:high`
 - [ ] Спайк: autohide через опрос курсора, полноэкранные приложения, мультимонитор/DPI — `type:spike`
