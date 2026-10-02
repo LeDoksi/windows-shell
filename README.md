@@ -21,3 +21,7 @@ pnpm tauri dev     # приложение с горячей перезагруз
 pnpm dev           # только фронт в браузере, http://localhost:1420
 pnpm check         # всё сразу: типы, ESLint, Prettier, тесты, cargo fmt, clippy, cargo test
 ```
+
+## Сборки
+
+Каждый PR и коммит в `main` собирается на GitHub Actions под Windows. Установщики (`.exe` и `.msi`) лежат в артефактах запуска: вкладка Actions → нужный запуск → Artifacts. Подписи нет, поэтому при первом запуске SmartScreen предупредит: «Подробнее» → «Выполнить в любом случае».
