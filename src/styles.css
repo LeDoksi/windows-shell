@@ -1,9 +1,7 @@
 :root {
   color-scheme: dark;
-  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  font-size: 13px;
-  line-height: 1.45;
-  color: #eef4f8;
+  font: var(--ws-type-body);
+  color: var(--ws-text);
   background: linear-gradient(160deg, #17a7a6, #0e8c93 45%, #0b6e7c);
 }
 
@@ -20,36 +18,31 @@ body {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: var(--ws-space-6);
 }
 
 .stub-card {
   max-width: 420px;
-  padding: 20px 24px;
-  border-radius: 16px;
-  background: rgba(12, 26, 38, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 18px 48px rgba(0, 0, 0, 0.38);
+  padding: var(--ws-space-5) var(--ws-space-6);
+  border-radius: var(--ws-radius-lg);
+  background: var(--ws-surface-strong);
+  border: 1px solid var(--ws-stroke);
+  box-shadow: var(--ws-highlight), var(--ws-elev-3);
+  backdrop-filter: var(--ws-backdrop);
 }
 
 .stub-card h1 {
   margin: 0 0 6px;
-  font:
-    600 16px/22px "Segoe UI Variable Display",
-    "Segoe UI",
-    system-ui,
-    sans-serif;
+  font: var(--ws-type-title);
 }
 
 .stub-card p {
   margin: 0;
-  color: rgba(238, 244, 248, 0.66);
+  color: var(--ws-text-2);
 }
 
 .stub-card .stub-meta {
-  margin-top: 12px;
-  font-size: 11px;
-  color: rgba(238, 244, 248, 0.44);
+  margin-top: var(--ws-space-3);
+  font: var(--ws-type-caption);
+  color: var(--ws-text-3);
 }
