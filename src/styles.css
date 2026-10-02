@@ -1,0 +1,30 @@
+:root {
+  color-scheme: dark;
+  font: var(--ws-type-body);
+  color: var(--ws-text);
+  background: linear-gradient(160deg, #17a7a6, #0e8c93 45%, #0b6e7c);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.ws-desktop {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
+.app-version {
+  position: fixed;
+  left: var(--ws-space-4);
+  bottom: var(--ws-space-3);
+  margin: 0;
+  font: var(--ws-type-caption);
+  color: var(--ws-text-3);
+}

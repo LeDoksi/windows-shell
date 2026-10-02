@@ -1,0 +1,80 @@
+/* Shell Glass — токены дизайн-системы. Описание: docs/DESIGN-SYSTEM.md. */
+:root {
+  /* Цвет */
+  --ws-surface: rgba(16, 32, 46, 0.62);
+  --ws-surface-strong: rgba(12, 26, 38, 0.8);
+  --ws-fill: rgba(255, 255, 255, 0.06);
+  --ws-fill-hover: rgba(255, 255, 255, 0.1);
+  --ws-fill-pressed: rgba(255, 255, 255, 0.04);
+  --ws-stroke: rgba(255, 255, 255, 0.1);
+  --ws-stroke-strong: rgba(255, 255, 255, 0.18);
+  --ws-text: #eef4f8;
+  --ws-text-2: rgba(238, 244, 248, 0.66);
+  --ws-text-3: rgba(238, 244, 248, 0.44);
+  --ws-accent: #3d8ef0;
+  --ws-accent-fill: rgba(61, 142, 240, 0.38);
+  --ws-accent-stroke: rgba(61, 142, 240, 0.55);
+  --ws-focus: #8cc4ff;
+  --ws-danger: #ff7a7a;
+  --ws-attention: #ff6b6b;
+
+  /* Форма */
+  --ws-radius-sm: 8px;
+  --ws-radius-md: 12px;
+  --ws-radius-lg: 16px;
+  --ws-radius-xl: 22px;
+  --ws-radius-pill: 999px;
+
+  /* Отступы, сетка 4px */
+  --ws-space-1: 4px;
+  --ws-space-2: 8px;
+  --ws-space-3: 12px;
+  --ws-space-4: 16px;
+  --ws-space-5: 20px;
+  --ws-space-6: 24px;
+  --ws-space-7: 32px;
+  --ws-space-8: 40px;
+
+  /* Тени */
+  --ws-elev-1: 0 2px 8px rgba(0, 0, 0, 0.18);
+  --ws-elev-2: 0 8px 24px rgba(0, 0, 0, 0.28);
+  --ws-elev-3: 0 18px 48px rgba(0, 0, 0, 0.38);
+  --ws-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+
+  /* Типографика */
+  --ws-font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --ws-font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --ws-type-caption: 400 11px/14px var(--ws-font);
+  --ws-type-body-sm: 400 12px/16px var(--ws-font);
+  --ws-type-body: 400 13px/18px var(--ws-font);
+  --ws-type-label: 600 13px/18px var(--ws-font);
+  --ws-type-title: 600 16px/22px var(--ws-font-display);
+  --ws-type-section: 600 11px/14px var(--ws-font);
+  --ws-tracking-section: 0.06em;
+
+  /* Движение */
+  --ws-dur-fast: 120ms;
+  --ws-dur-base: 180ms;
+  --ws-dur-slow: 260ms;
+  --ws-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ws-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Стекло: blur в браузере; в приложении его даёт DWM Acrylic */
+  --ws-backdrop: blur(26px) saturate(150%);
+}
+
+/* Фолбэк, когда размытия нет: системные эффекты прозрачности выключены
+   или окно без Acrylic. Тонировка плотнее, чтобы текст оставался читаемым. */
+:root[data-glass="off"] {
+  --ws-surface: rgba(14, 30, 43, 0.86);
+  --ws-surface-strong: rgba(11, 24, 35, 0.93);
+  --ws-backdrop: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ws-dur-fast: 0ms;
+    --ws-dur-base: 0ms;
+    --ws-dur-slow: 0ms;
+  }
+}

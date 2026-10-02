@@ -1,0 +1,111 @@
+.ws-dock {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  z-index: 10;
+  transform: translateX(-50%);
+}
+
+.ws-dock__pill {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--ws-space-2);
+  height: calc(var(--ws-dock-icon) + 20px);
+  padding: 10px 12px;
+  border-radius: var(--ws-radius-xl);
+}
+
+.ws-dock__apps {
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+}
+
+.ws-dock__item {
+  position: relative;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  /* Иконки растут вверх, за пределы таблетки. */
+  transform-origin: bottom center;
+}
+
+.ws-dock__item:focus-visible {
+  outline: none;
+}
+
+.ws-dock__item:focus-visible .ws-app-glyph {
+  box-shadow: 0 0 0 2px var(--ws-focus);
+}
+
+.ws-dock__item:active .ws-app-glyph {
+  filter: brightness(0.85);
+}
+
+.ws-app-glyph {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 24%;
+  color: #fff;
+  font-family: "Segoe UI Variable Display", "Segoe UI", system-ui;
+  font-weight: 600;
+  font-size: inherit;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 4px 10px rgba(0, 0, 0, 0.25);
+}
+
+.ws-dock__indicator {
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  width: 4px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ws-text);
+  opacity: 0;
+  transform: translateX(-50%);
+  transition:
+    width var(--ws-dur-base) var(--ws-ease-standard),
+    opacity var(--ws-dur-base);
+}
+
+.ws-dock__item[data-state="running"] .ws-dock__indicator {
+  opacity: 0.7;
+}
+
+.ws-dock__item[data-state="active"] .ws-dock__indicator {
+  width: 14px;
+  opacity: 1;
+  background: var(--ws-accent);
+}
+
+.ws-dock__item[data-state="attention"] .ws-dock__indicator {
+  opacity: 1;
+  background: #f0a64a;
+  animation: ws-dock-attention 1.2s ease-in-out infinite;
+}
+
+@keyframes ws-dock-attention {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.ws-dock__separator {
+  flex: none;
+  align-self: center;
+  width: 1px;
+  height: 36px;
+  background: var(--ws-stroke-strong);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-dock__item[data-state="attention"] .ws-dock__indicator {
+    animation: none;
+  }
+}

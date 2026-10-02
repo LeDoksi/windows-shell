@@ -1,0 +1,426 @@
+/* Базовые компоненты Shell Glass. Только токены из tokens.css. */
+
+:where(button, input, [tabindex]):focus-visible {
+  outline: 2px solid var(--ws-focus);
+  outline-offset: 2px;
+}
+
+/* ---------- GlassSurface ---------- */
+.ws-glass {
+  color: var(--ws-text);
+  background: var(--ws-surface);
+  border: 1px solid var(--ws-stroke);
+  box-shadow: var(--ws-highlight), var(--ws-elev-2);
+  backdrop-filter: var(--ws-backdrop);
+}
+.ws-glass--bar {
+  border-radius: var(--ws-radius-lg);
+}
+.ws-glass--panel,
+.ws-glass--menu {
+  background: var(--ws-surface-strong);
+  box-shadow: var(--ws-highlight), var(--ws-elev-3);
+}
+.ws-glass--panel {
+  border-radius: var(--ws-radius-lg);
+}
+.ws-glass--menu {
+  border-radius: var(--ws-radius-md);
+}
+
+/* ---------- IconButton ---------- */
+.ws-icon-button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  color: var(--ws-text);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--ws-dur-fast) var(--ws-ease-standard);
+}
+.ws-icon-button:hover {
+  background: var(--ws-fill-hover);
+}
+.ws-icon-button:active {
+  background: var(--ws-fill-pressed);
+}
+.ws-icon-button:disabled {
+  color: var(--ws-text-3);
+  background: transparent;
+  cursor: default;
+}
+
+/* ---------- CategoryPill ---------- */
+.ws-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ws-space-2);
+  height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  font: var(--ws-type-label);
+  color: var(--ws-text);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--ws-dur-fast) var(--ws-ease-standard);
+}
+.ws-pill:hover {
+  background: var(--ws-fill-hover);
+}
+.ws-pill[aria-pressed="true"] {
+  background: var(--ws-accent-fill);
+  box-shadow: inset 0 0 0 1px var(--ws-accent-stroke);
+}
+.ws-pill--drag-over {
+  box-shadow: inset 0 0 0 2px var(--ws-accent);
+}
+.ws-folder {
+  position: relative;
+  flex: none;
+  width: 20px;
+  height: 16px;
+  border-radius: 3px;
+}
+.ws-folder::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -3px;
+  width: 9px;
+  height: 5px;
+  border-radius: 2px 2px 0 0;
+  background: inherit;
+  filter: brightness(0.85);
+}
+
+/* ---------- Tile ---------- */
+.ws-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: 96px;
+  padding: 14px 12px 12px;
+  border: 1px solid var(--ws-stroke);
+  border-radius: var(--ws-radius-md);
+  color: var(--ws-text);
+  background: var(--ws-fill);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--ws-dur-fast) var(--ws-ease-standard),
+    border-color var(--ws-dur-fast),
+    box-shadow var(--ws-dur-fast),
+    transform var(--ws-dur-fast);
+}
+.ws-tile:hover {
+  background: var(--ws-fill-hover);
+  border-color: var(--ws-stroke-strong);
+  box-shadow: var(--ws-elev-1);
+}
+.ws-tile:active {
+  transform: scale(0.98);
+  background: var(--ws-fill-pressed);
+}
+.ws-tile--selected {
+  border-color: var(--ws-accent-stroke);
+  background: var(--ws-accent-fill);
+}
+.ws-tile--missing {
+  opacity: 0.55;
+}
+.ws-tile__icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 10px;
+}
+.ws-tile__title {
+  max-width: 100%;
+  overflow: hidden;
+  font: var(--ws-type-label);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ws-tile__meta {
+  font: var(--ws-type-caption);
+  color: var(--ws-text-2);
+}
+.ws-tile--add {
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  color: var(--ws-text-2);
+  background: transparent;
+}
+
+/* ---------- SearchField ---------- */
+.ws-search {
+  display: flex;
+  align-items: center;
+  gap: var(--ws-space-2);
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--ws-stroke);
+  border-radius: var(--ws-radius-md);
+  color: var(--ws-text-3);
+  background: var(--ws-fill);
+  transition: border-color var(--ws-dur-fast);
+}
+.ws-search:focus-within {
+  border-color: var(--ws-accent-stroke);
+}
+.ws-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  font: var(--ws-type-body-sm);
+  color: var(--ws-text);
+  background: transparent;
+}
+.ws-search input::placeholder {
+  color: var(--ws-text-3);
+}
+.ws-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+/* ---------- Toggle ---------- */
+.ws-toggle {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--ws-stroke-strong);
+  border-radius: var(--ws-radius-pill);
+  background: rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+  transition: background var(--ws-dur-base) var(--ws-ease-standard);
+}
+.ws-toggle::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--ws-text-2);
+  transition:
+    transform var(--ws-dur-base) var(--ws-ease-standard),
+    background var(--ws-dur-base);
+}
+.ws-toggle[aria-checked="true"] {
+  border-color: transparent;
+  background: var(--ws-accent);
+}
+.ws-toggle[aria-checked="true"]::after {
+  transform: translateX(18px);
+  background: #fff;
+}
+.ws-toggle:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---------- Slider ---------- */
+.ws-slider {
+  --ws-slider-fill: 50%;
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+}
+.ws-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--ws-accent) var(--ws-slider-fill),
+    rgba(255, 255, 255, 0.18) var(--ws-slider-fill)
+  );
+}
+.ws-slider::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border: 4px solid var(--ws-accent);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  appearance: none;
+  transition: transform var(--ws-dur-fast);
+}
+.ws-slider:active::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+.ws-slider:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ---------- ContextMenu ---------- */
+.ws-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 220px;
+  padding: 6px;
+}
+.ws-menu hr {
+  margin: 5px 4px;
+  border: 0;
+  border-top: 1px solid var(--ws-stroke);
+}
+.ws-menu__item {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--ws-space-4);
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--ws-radius-sm);
+  font: var(--ws-type-body-sm);
+  color: var(--ws-text);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.ws-menu__item:hover,
+.ws-menu__item:focus-visible {
+  outline: 0;
+  background: var(--ws-fill-hover);
+}
+.ws-menu__item--danger {
+  color: var(--ws-danger);
+}
+.ws-menu__item:disabled {
+  color: var(--ws-text-3);
+  background: transparent;
+  cursor: default;
+}
+.ws-menu__item kbd {
+  font: var(--ws-type-caption);
+  color: var(--ws-text-3);
+}
+
+/* ---------- Flyout ---------- */
+.ws-flyout {
+  position: absolute;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ws-space-3);
+  padding: 14px;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity var(--ws-dur-base) var(--ws-ease-standard),
+    transform var(--ws-dur-base) var(--ws-ease-standard);
+}
+.ws-flyout--launcher {
+  transform: translateY(-8px);
+}
+.ws-flyout--dock {
+  transform: translateY(8px);
+}
+.ws-flyout--open {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+/* ---------- Tooltip ---------- */
+.ws-tooltip-host {
+  position: relative;
+  display: inline-flex;
+}
+.ws-tooltip {
+  position: absolute;
+  left: 50%;
+  z-index: 200;
+  padding: 4px 10px;
+  border: 1px solid var(--ws-stroke);
+  border-radius: var(--ws-radius-sm);
+  font: var(--ws-type-body-sm);
+  white-space: nowrap;
+  color: var(--ws-text);
+  background: var(--ws-surface-strong);
+  box-shadow: var(--ws-elev-2);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%);
+  transition: opacity var(--ws-dur-fast);
+}
+.ws-tooltip--top {
+  bottom: calc(100% + 10px);
+}
+.ws-tooltip--bottom {
+  top: calc(100% + 10px);
+}
+.ws-tooltip--shown {
+  opacity: 1;
+}
+
+/* ---------- Select ---------- */
+.ws-select {
+  position: relative;
+}
+.ws-select__button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ws-space-2);
+  min-width: 180px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--ws-stroke);
+  border-radius: var(--ws-radius-sm);
+  font: var(--ws-type-body-sm);
+  color: var(--ws-text);
+  background: var(--ws-fill);
+  cursor: pointer;
+}
+.ws-select__button:hover {
+  background: var(--ws-fill-hover);
+}
+.ws-select__list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 100;
+  min-width: 100%;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+}
+.ws-select__option {
+  display: flex;
+  align-items: center;
+  gap: var(--ws-space-2);
+  padding: 7px 10px;
+  border-radius: var(--ws-radius-sm);
+  font: var(--ws-type-body-sm);
+  cursor: pointer;
+}
+.ws-select__option[data-active] {
+  background: var(--ws-fill-hover);
+}
+.ws-select__option small {
+  margin-left: auto;
+  font: var(--ws-type-caption);
+  color: var(--ws-text-2);
+}
+.ws-select__option[aria-selected="true"] small {
+  margin-left: auto;
+}
