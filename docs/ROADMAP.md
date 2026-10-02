@@ -11,12 +11,12 @@
 - [ ] Скелет: Tauri 2 + React + TS + Vite, pnpm, ESLint/Prettier, `cargo fmt/clippy` — `area:infra`
 - [ ] CI: GitHub Actions на `windows-latest`, сборка установщика как артефакт — `area:infra`
 - [ ] Браузерный режим `dev:web` с мок-бэкендом — `area:infra`
-- [ ] Спайк: Acrylic-подложка + прозрачное окно иконок, magnification, скругления — `type:spike risk:high`
+- [x] Спайк: Acrylic-подложка + прозрачное окно иконок, magnification, скругления — `type:spike risk:high`
 - [ ] Спайк: окно без активации (`NOACTIVATE`), topmost — `type:spike risk:high`
 - [ ] Спайк: спрятать Taskbar и вернуть его при выходе/падении — `type:spike risk:high`
 - [ ] Спайк: свой трей — получать иконки фоновых программ и пересылать им клики — `type:spike risk:high`
 - [ ] Спайк: autohide через опрос курсора, полноэкранные приложения, мультимонитор/DPI — `type:spike`
-- [ ] Итог спайка: решение по стеклу записано в `ARCHITECTURE.md`
+- [x] Итог спайка: решение по стеклу записано в `ARCHITECTURE.md`
 
 ## Этап 1 — Дизайн-система и визуальный прототип
 
