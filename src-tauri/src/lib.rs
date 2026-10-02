@@ -1,3 +1,5 @@
+mod config;
+
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -17,7 +19,12 @@ fn app_info() -> AppInfo {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![app_info])
+        .manage(config::ConfigStore::default())
+        .invoke_handler(tauri::generate_handler![
+            app_info,
+            config::config_get,
+            config::config_set
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

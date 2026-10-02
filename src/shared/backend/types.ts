@@ -1,14 +1,20 @@
+import type { Config } from "../config/schema";
+
 /** Что фронт может спросить у Rust. Ключ — имя команды `#[tauri::command]`. */
 export interface Commands {
   app_info: { args: Record<string, never>; result: AppInfo };
+  config_get: { args: Record<string, never>; result: Config };
+  /** Заменяет конфиг целиком; Rust проверяет его и рассылает `config_changed`. */
+  config_set: { args: { config: Config }; result: void };
 }
 
 /**
  * Что Rust присылает фронту. Ключ — имя события.
  * Заполняется по мере появления живых данных: окна, аудио, трей.
  */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface Events {}
+export interface Events {
+  config_changed: Config;
+}
 
 export interface AppInfo {
   version: string;

@@ -20,3 +20,24 @@ describe("mock backend", () => {
     expect(handler).toHaveBeenCalledExactlyOnceWith(1);
   });
 });
+
+describe("mock config store", () => {
+  it("serves defaults and broadcasts accepted changes", async () => {
+    const backend = createMockBackend();
+    const config = await backend.call("config_get");
+    const handler = vi.fn();
+    await backend.on("config_changed", handler);
+    const next = { ...config, categories: config.categories.slice(1) };
+    await backend.call("config_set", { config: next });
+    expect(handler).toHaveBeenCalledExactlyOnceWith(next);
+    await expect(backend.call("config_get")).resolves.toEqual(next);
+  });
+
+  it("rejects invalid configs and keeps the old one", async () => {
+    const backend = createMockBackend();
+    const config = await backend.call("config_get");
+    const broken = { ...config, categories: [config.categories[0], config.categories[0]] };
+    await expect(backend.call("config_set", { config: broken })).rejects.toThrow(/повторяется/);
+    await expect(backend.call("config_get")).resolves.toEqual(config);
+  });
+});
