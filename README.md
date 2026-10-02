@@ -10,3 +10,14 @@
 - [Без Taskbar: системный хвост и свой трей](docs/SYSTEM-TAIL.md)
 - [План по этапам](docs/ROADMAP.md)
 - [Дизайн-система «Shell Glass»](docs/DESIGN-SYSTEM.md) и [живое превью](docs/design/preview.html)
+
+## Разработка
+
+Нужны Node 22+, pnpm 10, Rust stable и [зависимости Tauri для Windows](https://v2.tauri.app/start/prerequisites/) (WebView2 уже есть в Windows 11, плюс Microsoft C++ Build Tools).
+
+```bash
+pnpm install
+pnpm tauri dev     # приложение с горячей перезагрузкой
+pnpm dev           # только фронт в браузере, http://localhost:1420
+pnpm check         # всё сразу: типы, ESLint, Prettier, тесты, cargo fmt, clippy, cargo test
+```
