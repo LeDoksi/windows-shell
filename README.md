@@ -7,5 +7,6 @@
 - [Исходный MVP](docs/mvp-v2-original.md) и [концепт](docs/concept.png)
 - [Архитектура и оценка осуществимости](docs/ARCHITECTURE.md)
 - [Система виджетов и аудио-виджет](docs/WIDGETS.md)
+- [Без Taskbar: системный хвост и свой трей](docs/SYSTEM-TAIL.md)
 - [План по этапам](docs/ROADMAP.md)
 - [Дизайн-система «Shell Glass»](docs/DESIGN-SYSTEM.md) и [живое превью](docs/design/preview.html)

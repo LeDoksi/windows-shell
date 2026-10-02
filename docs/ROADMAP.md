@@ -12,7 +12,9 @@
 - [ ] CI: GitHub Actions на `windows-latest`, сборка установщика как артефакт — `area:infra`
 - [ ] Браузерный режим `dev:web` с мок-бэкендом — `area:infra`
 - [ ] Спайк: Acrylic-подложка + прозрачное окно иконок, magnification, скругления — `type:spike risk:high`
-- [ ] Спайк: окно без активации (`NOACTIVATE`), topmost против Taskbar — `type:spike risk:high`
+- [ ] Спайк: окно без активации (`NOACTIVATE`), topmost — `type:spike risk:high`
+- [ ] Спайк: спрятать Taskbar и вернуть его при выходе/падении — `type:spike risk:high`
+- [ ] Спайк: свой трей — получать иконки фоновых программ и пересылать им клики — `type:spike risk:high`
 - [ ] Спайк: autohide через опрос курсора, полноэкранные приложения, мультимонитор/DPI — `type:spike`
 - [ ] Итог спайка: решение по стеклу записано в `ARCHITECTURE.md`
 
@@ -26,6 +28,7 @@
 - [ ] Top Launcher: панель категорий (мок) — `area:launcher`
 - [ ] Окно категории: сетка плиток, поиск, футер — `area:launcher`
 - [ ] Dock: иконки, индикаторы, magnification (spring), разделитель — `area:dock`
+- [ ] Системный хвост дока: трей, сеть, звук, батарея, часы (моки) — `area:system`
 - [ ] Конфиг-стор (схема v1, дефолты = моки) — `area:core`
 
 ## Этап 2 — Реальные окна
@@ -73,10 +76,17 @@
 - [ ] Окно настроек (минимальный набор из MVP + виджеты) — `area:core`
 - [ ] Автозапуск с Windows — `area:core`
 
-## Этап 8 — Интеграция с Taskbar (Windhawk)
+## Этап 8 — Системный хвост и замена Taskbar
 
-- [ ] Пресет Windows 11 Taskbar Styler: прозрачный фон, скрыть Пуск/поиск/задачи, оставить трей — `area:infra`
-- [ ] Проверка z-order и autohide дока вместе со стилизованным Taskbar — `area:dock`
+Подробно в [SYSTEM-TAIL.md](SYSTEM-TAIL.md).
+
+- [ ] Прятать Taskbar, ловить его повторное появление, все мониторы — `area:system risk:high`
+- [ ] Сторож: вернуть Taskbar при выходе и падении, аварийный хоткей — `area:system`
+- [ ] Свой трей: приём иконок, перерегистрация, клики и меню программ — `area:system risk:high`
+- [ ] Flyout фоновых приложений, точка «требует внимания» — `area:system`
+- [ ] Сеть: статус, список Wi-Fi, переключатель — `area:system`
+- [ ] Часы и календарь — `area:system`
+- [ ] Батарея только на ноутбуке: процент, время, режим питания — `area:system`
 
 ## После MVP
 
