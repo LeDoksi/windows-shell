@@ -47,3 +47,9 @@ body {
   margin: 0;
   color: rgba(238, 244, 248, 0.66);
 }
+
+.stub-card .stub-meta {
+  margin-top: 12px;
+  font-size: 11px;
+  color: rgba(238, 244, 248, 0.44);
+}

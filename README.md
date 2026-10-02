@@ -18,7 +18,7 @@
 ```bash
 pnpm install
 pnpm tauri dev     # приложение с горячей перезагрузкой
-pnpm dev           # только фронт в браузере, http://localhost:1420
+pnpm dev:web       # только UI в браузере на мок-бэкенде, http://localhost:1420
 pnpm check         # всё сразу: типы, ESLint, Prettier, тесты, cargo fmt, clippy, cargo test
 ```
 
