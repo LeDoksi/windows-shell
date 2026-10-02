@@ -1,4 +1,6 @@
 mod config;
+#[cfg(all(windows, feature = "spike"))]
+mod spike;
 
 use serde::Serialize;
 
@@ -18,13 +20,26 @@ fn app_info() -> AppInfo {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .manage(config::ConfigStore::default())
+    let builder = tauri::Builder::default().manage(config::ConfigStore::default());
+
+    #[cfg(not(all(windows, feature = "spike")))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        app_info,
+        config::config_get,
+        config::config_set
+    ]);
+
+    #[cfg(all(windows, feature = "spike"))]
+    let builder = builder
+        .setup(|app| Ok(spike::setup(app.handle())?))
         .invoke_handler(tauri::generate_handler![
             app_info,
             config::config_get,
-            config::config_set
-        ])
+            config::config_set,
+            spike::spike_pill
+        ]);
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

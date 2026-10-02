@@ -1,0 +1,32 @@
+/* Окна спайка прозрачные: видно рабочий стол. */
+:root[data-spike] {
+  background: transparent;
+}
+
+/* A и B: размытие даёт DWM, CSS только обводит и подсвечивает. */
+:root[data-spike^="a"] .ws-dock__pill,
+:root[data-spike="b"] .ws-dock__pill {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: none;
+  box-shadow: var(--ws-highlight);
+}
+
+/* Полосы и мелкий текст: размытие под доком сразу видно. */
+.spike-bg {
+  position: fixed;
+  inset: 0;
+  padding: 8px;
+  overflow: hidden;
+  font:
+    600 18px/1.3 "Segoe UI",
+    sans-serif;
+  color: #111;
+  word-break: break-all;
+  background: repeating-linear-gradient(
+    90deg,
+    #ffd23f 0 40px,
+    #ee4266 40px 80px,
+    #3bceac 80px 120px,
+    #fff 120px 160px
+  );
+}
