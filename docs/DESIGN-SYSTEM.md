@@ -101,7 +101,7 @@
 | `AddTile` | — | Пунктир, «＋ Добавить» |
 | `SearchField` | default, focus, with-value | Иконка поиска, Esc очищает |
 | `ContextMenu` | item, separator, danger, submenu, disabled | Клавиатура: стрелки, Enter, Esc |
-| `Flyout` | `anchor: dock \| launcher` | Хвостика нет, отступ 8px от якоря |
+| `Flyout` | `anchor: launcher \| dock` (виджеты / список окон) | Хвостика нет, отступ 8px от якоря |
 | `DockItem` | idle, hover (magnified), running, active, attention, dragging | Индикатор 4×4px, active — 14×4px |
 | `DockSeparator` | — | 1px `--ws-stroke-strong` |
 | `Slider` | default, hover, dragging, disabled; опционально с уровнем пика | Для громкости: колесо мыши ±2% |
@@ -109,7 +109,7 @@
 | `Select` | — | Нативно-подобный список устройств |
 | `ListRow` | с иконкой, с ползунком (аудио по приложениям) | |
 | `Tooltip` | — | Задержка 500ms, имя приложения над иконкой дока |
-| `WidgetSlot` | `dock \| launcher` | Хост для `compact`-вида виджета |
+| `WidgetSlot` | — | Хост для `compact`-вида виджета |
 
 ## Иконки
 
