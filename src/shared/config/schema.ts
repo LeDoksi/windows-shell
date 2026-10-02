@@ -20,7 +20,16 @@ export type Category = {
   items: LauncherItem[];
 };
 
+/** Закреплённое в доке приложение. */
+export type DockPin = {
+  id: string;
+  title: string;
+  /** AUMID или путь к exe. */
+  target: string;
+};
+
 export type Config = {
   schemaVersion: 1;
   categories: Category[];
+  dock: { pinned: DockPin[] };
 };

@@ -120,4 +120,20 @@ export const defaultConfig: Config = {
       items: [],
     },
   ],
+  dock: {
+    pinned: [
+      { id: "explorer", title: "Проводник", target: "Microsoft.Windows.Explorer" },
+      { id: "chrome", title: "Chrome", target: "Chrome" },
+      { id: "telegram", title: "Telegram", target: "TelegramDesktop" },
+      { id: "code", title: "VS Code", target: "Microsoft.VisualStudioCode" },
+      { id: "steam", title: "Steam", target: "Valve.Steam.Client" },
+      { id: "spotify", title: "Spotify", target: "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify" },
+      {
+        id: "settings",
+        title: "Параметры",
+        target:
+          "windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel",
+      },
+    ],
+  },
 };

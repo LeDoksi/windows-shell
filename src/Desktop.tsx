@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { Dock } from "./dock/Dock";
+import { buildDock, clickApp } from "./dock/model";
+import { mockRunning } from "./dock/mockRunning";
 import { CategoryWindow } from "./launcher/CategoryWindow";
 import { TopPanel } from "./launcher/TopPanel";
 import { defaultConfig, type Category } from "./shared/config";
@@ -11,6 +14,8 @@ export function Desktop() {
   const [categories, setCategories] = useState<Category[]>(defaultConfig.categories);
   const [openCategoryId, setOpenCategoryId] = useState<string | null>(null);
   const openCategory = categories.find((c) => c.id === openCategoryId);
+  const [running, setRunning] = useState(mockRunning);
+  const dock = buildDock(defaultConfig.dock.pinned, running);
 
   // Запуск объектов появится на этапе 3; пока клики ничего не делают.
   const noop = () => {};
@@ -42,6 +47,11 @@ export function Desktop() {
           }
         />
       )}
+      <Dock
+        pinned={dock.pinned}
+        transient={dock.transient}
+        onClickApp={(entry) => setRunning((r) => clickApp(r, entry.id, entry.title))}
+      />
     </div>
   );
 }
