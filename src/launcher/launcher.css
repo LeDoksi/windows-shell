@@ -1,0 +1,51 @@
+.ws-top-panel {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--ws-space-1);
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  border-radius: var(--ws-radius-lg);
+  transform: translateX(-50%);
+  transition:
+    transform var(--ws-dur-slow) var(--ws-ease-standard),
+    opacity var(--ws-dur-slow) var(--ws-ease-standard);
+}
+
+.ws-top-panel[data-hidden] {
+  transform: translate(-50%, calc(-100% - 20px));
+  opacity: 0;
+  transition-timing-function: var(--ws-ease-exit);
+}
+
+.ws-top-panel__categories {
+  display: flex;
+  align-items: center;
+  gap: var(--ws-space-1);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ws-top-panel__separator {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  margin: 0 6px;
+  background: var(--ws-stroke-strong);
+}
+
+.ws-top-panel__widgets:empty {
+  display: none;
+}
+
+.ws-top-panel__widgets,
+.ws-top-panel__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--ws-space-1);
+}

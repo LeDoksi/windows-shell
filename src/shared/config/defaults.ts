@@ -1,0 +1,122 @@
+import type { Config } from "./schema";
+
+/** Дефолтный конфиг. В браузерном режиме он же — моки. */
+export const defaultConfig: Config = {
+  schemaVersion: 1,
+  categories: [
+    {
+      id: "work",
+      name: "Работа",
+      color: "#43B4F5",
+      items: [
+        {
+          id: "excel",
+          kind: "app",
+          title: "Excel",
+          target: "Microsoft.Office.EXCEL.EXE.15",
+          meta: "Приложение",
+        },
+        {
+          id: "teams",
+          kind: "app",
+          title: "Teams",
+          target: "MSTeams_8wekyb3d8bbwe!MSTeams",
+          meta: "Приложение",
+        },
+        { id: "wfm", kind: "url", title: "WFM", target: "https://example.com/wfm", meta: "Сайт" },
+        {
+          id: "reports",
+          kind: "folder",
+          title: "Отчёты",
+          target: "D:\\Work\\Отчёты",
+          meta: "Папка",
+        },
+        {
+          id: "planning",
+          kind: "file",
+          title: "Planning.xlsx",
+          target: "D:\\Work\\Planning.xlsx",
+          meta: "Документ · 2.4 МБ",
+        },
+      ],
+    },
+    {
+      id: "projects",
+      name: "Проекты",
+      color: "#B07CF0",
+      items: [
+        {
+          id: "vscode",
+          kind: "app",
+          title: "VS Code",
+          target: "Microsoft.VisualStudioCode",
+          meta: "Приложение",
+        },
+        { id: "repos", kind: "folder", title: "Репозитории", target: "D:\\Code", meta: "Папка" },
+        { id: "github", kind: "url", title: "GitHub", target: "https://github.com", meta: "Сайт" },
+      ],
+    },
+    {
+      id: "personal",
+      name: "Личное",
+      color: "#56D27A",
+      items: [
+        {
+          id: "photos",
+          kind: "folder",
+          title: "Фото",
+          target: "C:\\Users\\Georgy\\Pictures",
+          meta: "Папка",
+        },
+        {
+          id: "telegram",
+          kind: "app",
+          title: "Telegram",
+          target: "TelegramDesktop",
+          meta: "Приложение",
+        },
+      ],
+    },
+    {
+      id: "games",
+      name: "Игры",
+      color: "#F0A64A",
+      items: [
+        {
+          id: "steam",
+          kind: "app",
+          title: "Steam",
+          target: "C:\\Program Files (x86)\\Steam\\steam.exe",
+          meta: "Приложение",
+        },
+        {
+          id: "discord",
+          kind: "app",
+          title: "Discord",
+          target: "com.squirrel.Discord.Discord",
+          meta: "Приложение",
+        },
+      ],
+    },
+    {
+      id: "downloads",
+      name: "Скачать",
+      color: "#4C9BF5",
+      items: [
+        {
+          id: "dl",
+          kind: "folder",
+          title: "Загрузки",
+          target: "C:\\Users\\Georgy\\Downloads",
+          meta: "Папка",
+        },
+      ],
+    },
+    {
+      id: "frequent",
+      name: "Частое",
+      color: "#F2C94C",
+      items: [],
+    },
+  ],
+};
