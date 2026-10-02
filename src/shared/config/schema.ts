@@ -15,6 +15,8 @@ export type Category = {
   id: string;
   name: string;
   color: string;
+  /** Папка, из которой собрана категория; кнопка «Открыть папку» в футере. */
+  sourceFolder?: string;
   items: LauncherItem[];
 };
 

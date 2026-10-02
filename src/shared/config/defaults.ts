@@ -102,6 +102,7 @@ export const defaultConfig: Config = {
       id: "downloads",
       name: "Скачать",
       color: "#4C9BF5",
+      sourceFolder: "C:\\Users\\Georgy\\Downloads",
       items: [
         {
           id: "dl",

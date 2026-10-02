@@ -12,6 +12,10 @@ const paths = {
   chevronRight: "m8 6 4 4-4 4",
   folder: "M2.5 5.5h5l1.5 2h8.5v8.5h-15z",
   check: "m4.5 10.5 3.5 3.5 7.5-8",
+  document: "M5 2.5h6.5L15 6v11.5H5zM11.5 2.5V6H15M7.5 10h5M7.5 13h5",
+  globe:
+    "M10 2.5a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15zM2.5 10h15M10 2.5c2 2.2 3 4.7 3 7.5s-1 5.3-3 7.5c-2-2.2-3-4.7-3-7.5s1-5.3 3-7.5z",
+  folderOpen: "M2.5 15.5v-10h5l1.5 2h7v2M2.5 15.5l2.5-6h13l-2.5 6z",
 } as const;
 
 export type IconName = keyof typeof paths;

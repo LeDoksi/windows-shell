@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { GlassSurface } from "./GlassSurface";
 import { cx } from "./cx";
 import { nextEnabledIndex } from "./menuNavigation";
@@ -50,7 +51,8 @@ export function ContextMenu({ open, x, y, items, onClose, label = "Меню" }: 
   const actionIndex = items.map(
     (_, i) => i - items.slice(0, i + 1).filter((entry) => entry.kind === "separator").length,
   );
-  return (
+  // Портал: у стеклянных предков backdrop-filter ломает position: fixed.
+  return createPortal(
     <GlassSurface
       ref={ref}
       level="menu"
@@ -87,6 +89,7 @@ export function ContextMenu({ open, x, y, items, onClose, label = "Меню" }: 
           </button>
         );
       })}
-    </GlassSurface>
+    </GlassSurface>,
+    document.body,
   );
 }

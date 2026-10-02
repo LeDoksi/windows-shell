@@ -28,6 +28,8 @@ export function TopPanel({
       level="bar"
       aria-label="Категории"
       className="ws-top-panel"
+      // Клики по панели переключают окно категории сами.
+      data-dismiss-ignore
       data-hidden={hidden || undefined}
     >
       <div className="ws-top-panel__categories">

@@ -12,3 +12,4 @@ export { Slider } from "./Slider";
 export { AddTile, Tile } from "./Tile";
 export { Toggle } from "./Toggle";
 export { Tooltip } from "./Tooltip";
+export { useDismiss } from "./useDismiss";
