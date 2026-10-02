@@ -1,0 +1,454 @@
+<title>Shell Glass</title>
+<style>
+/* Layout: живая сцена-рабочий стол сверху, под ней токены и компоненты на тёмном «стекле». Single dark look by choice. */
+:root{
+  color-scheme: dark;
+  --page:#0B1720; --page-2:#10212D; --ink:#EEF4F8; --ink-2:rgba(238,244,248,.66); --ink-3:rgba(238,244,248,.44);
+  --ws-surface:rgba(16,32,46,.62); --ws-surface-strong:rgba(12,26,38,.80);
+  --ws-fill:rgba(255,255,255,.06); --ws-fill-hover:rgba(255,255,255,.10); --ws-fill-pressed:rgba(255,255,255,.04);
+  --ws-stroke:rgba(255,255,255,.10); --ws-stroke-strong:rgba(255,255,255,.18);
+  --ws-text:#EEF4F8; --ws-text-2:rgba(238,244,248,.66); --ws-text-3:rgba(238,244,248,.44);
+  --ws-accent:#3D8EF0; --ws-accent-fill:rgba(61,142,240,.38); --ws-focus:#8CC4FF; --ws-danger:#FF7A7A;
+  --ws-radius-sm:8px; --ws-radius-md:12px; --ws-radius-lg:16px; --ws-radius-xl:22px; --ws-radius-pill:999px;
+  --ws-elev-1:0 2px 8px rgba(0,0,0,.18); --ws-elev-2:0 8px 24px rgba(0,0,0,.28); --ws-elev-3:0 18px 48px rgba(0,0,0,.38);
+  --ws-highlight:inset 0 1px 0 rgba(255,255,255,.08);
+  --ws-dur-fast:120ms; --ws-dur-base:180ms; --ws-dur-slow:260ms; --ws-ease:cubic-bezier(.2,0,0,1);
+  --font:"Segoe UI Variable Text","Segoe UI","Selawik",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --font-display:"Segoe UI Variable Display","Segoe UI",system-ui,-apple-system,Arial,sans-serif;
+  --mono:"Cascadia Code","Consolas",ui-monospace,monospace;
+  --wall-a:#0E8C93; --wall-b:#17A7A6; --wall-c:#0B6E7C;
+}
+*{box-sizing:border-box}
+body{background:var(--page);color:var(--ink);font:13px/1.45 var(--font);margin:0}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:20px;padding-block:28px 64px;display:flex;flex-direction:column;gap:44px}
+header.top{display:flex;flex-direction:column;gap:6px}
+h1{font:600 30px/1.15 var(--font-display);margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font:600 19px/1.3 var(--font-display);margin:0 0 4px;text-wrap:balance}
+.lead{color:var(--ink-2);max-width:68ch;margin:0;font-size:14px}
+.sec-label{font:600 11px/14px var(--font);letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3)}
+section{display:flex;flex-direction:column;gap:14px}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.chip{font:inherit;color:var(--ink);background:var(--page-2);border:1px solid var(--ws-stroke);border-radius:var(--ws-radius-pill);padding:6px 12px;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--ws-accent-fill);border-color:rgba(61,142,240,.6)}
+.chip:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--ws-focus);outline-offset:2px}
+
+/* ---------- Stage ---------- */
+.stage-outer{width:100%;border-radius:14px;overflow:hidden;box-shadow:0 0 0 1px var(--ws-stroke)}
+.stage{width:1280px;height:780px;position:relative;transform-origin:0 0;overflow:hidden;font-family:var(--font);color:var(--ws-text);
+  background:
+   radial-gradient(60% 70% at 78% 62%,rgba(255,255,255,.10),transparent 60%),
+   radial-gradient(40% 40% at 20% 85%,rgba(0,60,80,.35),transparent 70%),
+   linear-gradient(160deg,var(--wall-b),var(--wall-a) 45%,var(--wall-c));}
+.wall-deco{position:absolute;right:120px;top:300px;font:600 64px/1 var(--font-display);color:rgba(170,255,250,.55);transform:rotate(12deg);letter-spacing:.04em}
+.wall-deco small{display:block;font-size:26px;margin-top:10px;opacity:.8}
+.wall-blob{position:absolute;border-radius:50%;filter:blur(2px)}
+
+.glass{background:var(--ws-surface);border:1px solid var(--ws-stroke);box-shadow:var(--ws-highlight),var(--ws-elev-2);
+  -webkit-backdrop-filter:blur(26px) saturate(150%);backdrop-filter:blur(26px) saturate(150%)}
+.glass.strong{background:var(--ws-surface-strong);box-shadow:var(--ws-highlight),var(--ws-elev-3)}
+.stage.noblur .glass{-webkit-backdrop-filter:none;backdrop-filter:none}
+.stage.noblur .glass{background:rgba(14,30,43,.86)}
+.stage.noblur .glass.strong{background:rgba(11,24,35,.93)}
+
+.topbar{position:absolute;left:50%;top:14px;transform:translateX(-50%);display:flex;align-items:center;gap:4px;padding:6px;border-radius:var(--ws-radius-lg);transition:transform var(--ws-dur-slow) var(--ws-ease),opacity var(--ws-dur-slow)}
+.stage.hidden-bars .topbar{transform:translate(-50%,-80px);opacity:0}
+.pill{display:flex;align-items:center;gap:8px;height:36px;padding:0 14px;border-radius:10px;font:600 13px/18px var(--font);color:var(--ws-text);background:transparent;border:0;cursor:pointer;transition:background var(--ws-dur-fast) var(--ws-ease)}
+.pill:hover{background:var(--ws-fill-hover)}
+.pill[aria-selected="true"]{background:var(--ws-accent-fill);box-shadow:inset 0 0 0 1px rgba(61,142,240,.55)}
+.ico-btn{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;border:0;background:transparent;color:var(--ws-text);cursor:pointer;transition:background var(--ws-dur-fast)}
+.ico-btn:hover{background:var(--ws-fill-hover)}
+.ico-btn:active{background:var(--ws-fill-pressed)}
+.topbar .sep{width:1px;height:20px;background:var(--ws-stroke-strong);margin:0 6px}
+.folder{width:20px;height:16px;border-radius:3px;position:relative;flex:none}
+.folder::before{content:"";position:absolute;left:0;top:-3px;width:9px;height:5px;border-radius:2px 2px 0 0;background:inherit;filter:brightness(.85)}
+
+.panel{position:absolute;left:212px;top:78px;width:620px;border-radius:var(--ws-radius-lg);padding:18px 18px 0;transition:opacity var(--ws-dur-base) var(--ws-ease),transform var(--ws-dur-base) var(--ws-ease)}
+.panel[hidden]{display:block!important;opacity:0;transform:translateY(-6px) scale(.98);pointer-events:none}
+.panel-head{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.panel-head .t{font:600 16px/22px var(--font-display);flex:1}
+.search{display:flex;align-items:center;gap:8px;height:32px;width:230px;padding:0 10px;border-radius:var(--ws-radius-md);background:var(--ws-fill);border:1px solid var(--ws-stroke);color:var(--ws-text-3);font-size:12px}
+.search input{all:unset;flex:1;color:var(--ws-text);font-size:12px}
+.search input::placeholder{color:var(--ws-text-3)}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.tile{display:flex;flex-direction:column;gap:2px;align-items:flex-start;padding:14px 12px 12px;border-radius:var(--ws-radius-md);background:var(--ws-fill);border:1px solid var(--ws-stroke);text-align:left;color:var(--ws-text);font:inherit;cursor:pointer;min-height:96px;transition:background var(--ws-dur-fast) var(--ws-ease),border-color var(--ws-dur-fast),transform var(--ws-dur-fast),box-shadow var(--ws-dur-fast)}
+.tile:hover{background:var(--ws-fill-hover);border-color:var(--ws-stroke-strong);box-shadow:var(--ws-elev-1)}
+.tile:active{transform:scale(.98);background:var(--ws-fill-pressed)}
+.tile .app{margin-bottom:10px}
+.tile b{font:600 13px/18px var(--font);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.tile span{font-size:11px;line-height:14px;color:var(--ws-text-2)}
+.tile.add{border-style:dashed;align-items:center;justify-content:center;color:var(--ws-text-2)}
+.panel-foot{display:flex;justify-content:space-between;align-items:center;margin:16px -18px 0;padding:10px 18px;border-top:1px solid var(--ws-stroke);font-size:13px;color:var(--ws-text-2)}
+.panel-foot button{all:unset;display:flex;gap:8px;align-items:center;cursor:pointer;padding:4px 8px;border-radius:8px}
+.panel-foot button:hover{background:var(--ws-fill-hover);color:var(--ws-text)}
+
+.app{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;font:700 15px/1 var(--font-display);color:#fff;flex:none;box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 1px 2px rgba(0,0,0,.25)}
+
+/* Dock */
+.dock-zone{position:absolute;left:0;right:0;bottom:0;height:160px;display:flex;justify-content:center;align-items:flex-end;padding-bottom:16px;pointer-events:none;transition:transform var(--ws-dur-slow) var(--ws-ease)}
+.stage.hidden-bars .dock-zone{transform:translateY(110px)}
+.dock{pointer-events:auto;display:flex;align-items:flex-end;gap:8px;padding:10px 12px 12px;border-radius:var(--ws-radius-xl);height:78px}
+.di{position:relative;width:52px;height:52px;border:0;padding:0;background:transparent;cursor:pointer;transform-origin:50% 100%;will-change:width,height}
+.di .app{width:100%;height:100%;border-radius:24%;font-size:calc(100% * 0 + 20px)}
+.di .dot{position:absolute;left:50%;bottom:-8px;width:4px;height:4px;border-radius:2px;background:var(--ws-accent);transform:translateX(-50%);transition:width var(--ws-dur-base) var(--ws-ease)}
+.di.active .dot{width:14px}
+.di .tip{position:absolute;bottom:calc(100% + 12px);left:50%;transform:translateX(-50%);padding:4px 10px;border-radius:8px;font-size:12px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity var(--ws-dur-fast)}
+.di:hover .tip{opacity:1}
+.dock .sep{width:1px;align-self:stretch;margin:4px 4px;background:var(--ws-stroke-strong)}
+.widget{background:var(--ws-fill);border-radius:24%;display:grid;place-items:center;color:var(--ws-text);box-shadow:inset 0 0 0 1px var(--ws-stroke)}
+.widget svg{width:46%;height:46%}
+
+.tray{position:absolute;right:14px;bottom:16px;display:flex;align-items:center;gap:14px;padding:10px 16px;border-radius:var(--ws-radius-lg);font-size:12px;line-height:16px}
+.tray .clock{text-align:right}
+
+/* Audio flyout */
+.flyout{position:absolute;bottom:112px;width:340px;border-radius:var(--ws-radius-lg);padding:14px;display:flex;flex-direction:column;gap:12px;transition:opacity var(--ws-dur-base) var(--ws-ease),transform var(--ws-dur-base) var(--ws-ease)}
+.flyout[hidden]{display:flex!important;opacity:0;transform:translateY(8px);pointer-events:none}
+.fl-sec{font:600 11px/14px var(--font);letter-spacing:.06em;text-transform:uppercase;color:var(--ws-text-3)}
+.dev{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:var(--ws-radius-sm);cursor:pointer;font-size:13px;border:0;background:transparent;color:var(--ws-text);font-family:inherit;width:100%;text-align:left}
+.dev:hover{background:var(--ws-fill-hover)}
+.dev .radio{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--ws-text-3);flex:none}
+.dev[aria-checked="true"] .radio{border:4px solid var(--ws-accent)}
+.dev small{color:var(--ws-text-2);margin-left:auto;font-size:11px}
+.vol{display:flex;align-items:center;gap:10px}
+.vol .num{width:34px;text-align:right;font-variant-numeric:tabular-nums;font-size:12px;color:var(--ws-text-2)}
+input[type=range].ws{-webkit-appearance:none;appearance:none;flex:1;height:20px;background:transparent;min-width:0;cursor:pointer;--p:60%}
+input[type=range].ws::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:linear-gradient(90deg,var(--ws-accent) var(--p),rgba(255,255,255,.18) var(--p))}
+input[type=range].ws::-moz-range-track{height:4px;border-radius:2px;background:linear-gradient(90deg,var(--ws-accent) var(--p),rgba(255,255,255,.18) var(--p))}
+input[type=range].ws::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;margin-top:-6px;background:#fff;border:4px solid var(--ws-accent);box-shadow:0 1px 3px rgba(0,0,0,.4)}
+input[type=range].ws::-moz-range-thumb{width:8px;height:8px;border-radius:50%;background:#fff;border:4px solid var(--ws-accent)}
+.meter{height:3px;border-radius:2px;background:rgba(255,255,255,.08);overflow:hidden;margin:-6px 0 0 30px}
+.meter i{display:block;height:100%;width:30%;background:linear-gradient(90deg,#4ED39A,#B6E36B);transition:width 90ms linear}
+.approw{display:flex;align-items:center;gap:10px}
+.approw .app{width:22px;height:22px;border-radius:6px;font-size:11px}
+.approw .nm{width:70px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mute{width:28px;height:28px;border-radius:8px;border:0;background:transparent;color:var(--ws-text-2);display:grid;place-items:center;cursor:pointer}
+.mute:hover{background:var(--ws-fill-hover);color:var(--ws-text)}
+.mute[aria-pressed="true"]{color:var(--ws-danger)}
+.fl-foot{border-top:1px solid var(--ws-stroke);margin:0 -14px -14px;padding:10px 14px;display:flex;justify-content:space-between;font-size:12px;color:var(--ws-text-2)}
+
+/* Context menu */
+.cmenu{position:absolute;width:220px;border-radius:12px;padding:6px;font-size:12px;z-index:5}
+.cmenu[hidden]{display:none!important}
+.cmenu button{all:unset;display:flex;justify-content:space-between;width:100%;box-sizing:border-box;padding:7px 10px;border-radius:var(--ws-radius-sm);cursor:pointer;color:var(--ws-text)}
+.cmenu button:hover{background:var(--ws-fill-hover)}
+.cmenu button.danger{color:var(--ws-danger)}
+.cmenu hr{border:0;border-top:1px solid var(--ws-stroke);margin:5px 4px}
+.cmenu kbd{font:11px var(--font);color:var(--ws-text-3)}
+
+/* ---------- Docs blocks ---------- */
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+.card{background:var(--page-2);border:1px solid var(--ws-stroke);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.card h3{margin:0;font:600 14px/1.3 var(--font-display)}
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.sw{border-radius:12px;overflow:hidden;border:1px solid var(--ws-stroke);background:var(--page-2);min-width:0}
+.sw .c{height:58px;background-image:linear-gradient(45deg,rgba(255,255,255,.05) 25%,transparent 25%,transparent 75%,rgba(255,255,255,.05) 75%),linear-gradient(45deg,rgba(255,255,255,.05) 25%,transparent 25%,transparent 75%,rgba(255,255,255,.05) 75%),linear-gradient(135deg,var(--wall-b),var(--wall-c));background-size:12px 12px,12px 12px,100% 100%;background-position:0 0,6px 6px,0 0;position:relative}
+.sw .c i{position:absolute;inset:0}
+.sw .m{padding:8px 10px;display:flex;flex-direction:column;gap:2px}
+.sw code{font:11px/1.3 var(--mono);color:var(--ink);overflow-wrap:anywhere}
+.sw small{font-size:11px;color:var(--ink-2)}
+table.tok{border-collapse:collapse;width:100%;font-size:12px}
+table.tok td{padding:7px 0;border-bottom:1px solid var(--ws-stroke);vertical-align:middle}
+table.tok td:first-child{font:11px var(--mono);color:var(--ink)}
+table.tok td:last-child{text-align:right;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.rad{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+.rad div{width:56px;height:56px;background:var(--ws-fill-hover);border:1px solid var(--ws-stroke-strong);display:grid;place-items:end center;padding-bottom:4px;font:10px var(--mono);color:var(--ink-2)}
+.layers{display:flex;flex-direction:column;gap:6px;font-size:12px}
+.layers div{display:flex;gap:10px;align-items:center;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.03);border:1px solid var(--ws-stroke)}
+.layers b{font:11px var(--mono);color:var(--ws-focus);min-width:96px}
+.typerow{display:flex;justify-content:space-between;align-items:baseline;gap:12px;border-bottom:1px solid var(--ws-stroke);padding-bottom:8px}
+.typerow code{font:11px var(--mono);color:var(--ink-2);flex:none}
+.comp-stage{background:linear-gradient(135deg,var(--wall-b),var(--wall-c));border-radius:12px;padding:18px;display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.toggle{width:40px;height:22px;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid var(--ws-stroke-strong);position:relative;cursor:pointer;padding:0}
+.toggle::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--ws-text-2);transition:transform var(--ws-dur-base) var(--ws-ease),background var(--ws-dur-base)}
+.toggle[aria-checked="true"]{background:var(--ws-accent);border-color:transparent}
+.toggle[aria-checked="true"]::after{transform:translateX(18px);background:#fff}
+.note{font-size:12px;color:var(--ink-2);margin:0}
+.motion-demo{display:flex;gap:10px;flex-wrap:wrap}
+.motion-demo button{font:inherit;font-size:12px}
+@media (prefers-reduced-motion:reduce){*{transition-duration:0ms!important}}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <span class="sec-label">Windows Shell · дизайн-система</span>
+    <h1>Shell Glass</h1>
+    <p class="lead">Живой макет по концепту: наведи на док, чтобы увидеть увеличение; нажми на иконку звука справа в доке, чтобы открыть аудио-виджет; правый клик по плитке открывает меню. Значения ниже — те же токены, что пойдут в <code>tokens.css</code>.</p>
+  </header>
+
+  <section aria-labelledby="s-live">
+    <h2 id="s-live">Сцена</h2>
+    <div class="controls" role="group" aria-label="Режимы сцены">
+      <button class="chip" id="t-blur" aria-pressed="false">Без blur (фолбэк)</button>
+      <button class="chip" id="t-hide" aria-pressed="false">Скрыть панели (autohide)</button>
+      <button class="chip" id="t-panel" aria-pressed="true">Окно категории</button>
+      <button class="chip" id="t-audio" aria-pressed="false">Аудио-виджет</button>
+    </div>
+    <div class="stage-outer" id="stageOuter">
+      <div class="stage" id="stage">
+        <div class="wall-blob" style="left:560px;top:520px;width:18px;height:16px;background:#3FB6E8;opacity:.6"></div>
+        <div class="wall-blob" style="left:1010px;top:560px;width:22px;height:20px;background:#3FB6E8;opacity:.5"></div>
+        <div class="wall-deco">SUNDAY?<small>2026? 12:23:15?</small></div>
+
+        <nav class="topbar glass" aria-label="Категории">
+          <button class="pill" aria-selected="true"><span class="folder" style="background:#43B4F5"></span>Работа</button>
+          <button class="pill"><span class="folder" style="background:#B07CF0"></span>Проекты</button>
+          <button class="pill"><span class="folder" style="background:#56D27A"></span>Личное</button>
+          <button class="pill"><span class="folder" style="background:#F0A64A"></span>Игры</button>
+          <button class="pill"><span class="folder" style="background:#4C9BF5"></span>Скачать</button>
+          <button class="pill"><span class="folder" style="background:#F2C94C"></span>Частое</button>
+          <span class="sep" aria-hidden="true"></span>
+          <button class="ico-btn" aria-label="Поиск"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4.5 4.5" stroke-linecap="round"/></svg></button>
+          <button class="ico-btn" aria-label="Добавить"><svg width="18" height="18" viewBox="0 0 20 20" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 4v12M4 10h12"/></svg></button>
+          <button class="ico-btn" aria-label="Звук" id="lnAudio"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3 8h3l4-3.5v11L6 12H3z"/><path d="M13 7.5a3.5 3.5 0 0 1 0 5M15.2 5.5a6.5 6.5 0 0 1 0 9" stroke-linecap="round"/></svg></button>
+          <button class="ico-btn" aria-label="Настройки"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4" stroke-linecap="round"/></svg></button>
+        </nav>
+
+        <div class="panel glass strong" id="panel" role="dialog" aria-label="Работа">
+          <div class="panel-head">
+            <span class="folder" style="background:#43B4F5;width:24px;height:19px"></span>
+            <span class="t">Работа</span>
+            <label class="search"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4.5 4.5" stroke-linecap="round"/></svg><input id="q" placeholder="Поиск в категории…" aria-label="Поиск в категории"></label>
+            <button class="ico-btn" aria-label="Закрыть" id="closePanel"><svg width="16" height="16" viewBox="0 0 20 20" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5 5l10 10M15 5 5 15"/></svg></button>
+          </div>
+          <div class="grid" id="grid"></div>
+          <div class="panel-foot"><button><svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 5.5h5l1.5 2h8.5v8.5h-15z" stroke-linejoin="round"/></svg>Открыть папку</button><button><svg width="14" height="14" viewBox="0 0 20 20" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 4v12M4 10h12"/></svg>Добавить</button></div>
+        </div>
+
+        <div class="cmenu glass strong" id="cmenu" hidden role="menu">
+          <button role="menuitem">Открыть <kbd>Enter</kbd></button>
+          <button role="menuitem">Открыть расположение</button>
+          <hr>
+          <button role="menuitem">Переименовать <kbd>F2</kbd></button>
+          <button role="menuitem">Переместить в… <kbd>›</kbd></button>
+          <hr>
+          <button role="menuitem" class="danger">Удалить из панели</button>
+        </div>
+
+        <div class="flyout glass strong" id="flyout" hidden role="dialog" aria-label="Звук">
+          <div class="fl-sec">Вывод</div>
+          <div role="radiogroup" aria-label="Устройство вывода" id="devs" style="display:flex;flex-direction:column;gap:2px;margin:-6px -6px 0"></div>
+          <div class="vol">
+            <button class="mute" id="masterMute" aria-label="Выключить звук" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3 8h3l4-3.5v11L6 12H3z"/><path d="M13 7.5a3.5 3.5 0 0 1 0 5" stroke-linecap="round"/></svg></button>
+            <input type="range" class="ws" id="master" min="0" max="100" value="64" aria-label="Общая громкость">
+            <span class="num" id="masterNum">64%</span>
+          </div>
+          <div class="meter" aria-hidden="true"><i id="peak"></i></div>
+          <div class="fl-sec">Приложения</div>
+          <div id="apps" style="display:flex;flex-direction:column;gap:6px"></div>
+          <div class="fl-sec">Ввод</div>
+          <div class="vol" style="font-size:12px"><span style="flex:1">Blue Yeti</span><button class="toggle" role="switch" aria-checked="true" aria-label="Микрофон включён"></button></div>
+          <div class="fl-foot"><span>Колесо над иконкой: ±2%</span><span>Параметры звука</span></div>
+        </div>
+
+        <div class="dock-zone">
+          <div class="dock glass" id="dock" aria-label="Dock"></div>
+        </div>
+
+        <div class="tray glass" aria-label="Системная область">
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="m6 12 4-4 4 4"/></svg>
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.5 8a11 11 0 0 1 15 0M5 11a7 7 0 0 1 10 0M7.6 13.8a3 3 0 0 1 4.8 0"/></svg>
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3 8h3l4-3.5v11L6 12H3z"/><path d="M13 7.5a3.5 3.5 0 0 1 0 5" stroke-linecap="round"/></svg>
+          <svg width="22" height="14" viewBox="0 0 24 14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="19" height="12" rx="3"/><rect x="3.5" y="3.5" width="10" height="7" rx="1.2" fill="currentColor" stroke="none"/><path d="M22 5v4" stroke-linecap="round"/></svg>
+          <div class="clock">12:23<br><span style="color:var(--ws-text-2)">Пт, 2 окт</span></div>
+        </div>
+      </div>
+    </div>
+    <p class="note">Стекло здесь сделано через CSS <code>backdrop-filter</code>. В приложении blur даёт DWM Acrylic, а тонировка, обводка, блик и тень остаются в CSS. Кнопка «Без blur» показывает, как выглядит фолбэк при выключенных эффектах прозрачности.</p>
+  </section>
+
+  <section aria-labelledby="s-mat">
+    <h2 id="s-mat">Материал</h2>
+    <div class="cols">
+      <div class="card">
+        <h3>Слои стеклянной поверхности</h3>
+        <div class="layers">
+          <div><b>--ws-elev-*</b>тень отрывает от обоев</div>
+          <div><b>--ws-stroke</b>1px край, читается на любом фоне</div>
+          <div><b>--ws-highlight</b>блик сверху, объём</div>
+          <div><b>--ws-surface</b>тонировка, контраст текста</div>
+          <div><b>DWM Acrylic</b>размытие того, что под окном</div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Скругления</h3>
+        <div class="rad">
+          <div style="border-radius:8px">8</div>
+          <div style="border-radius:12px">12</div>
+          <div style="border-radius:16px">16</div>
+          <div style="border-radius:22px">22</div>
+          <div style="border-radius:999px;width:72px">pill</div>
+        </div>
+        <p class="note">8 — пункты меню, 12 — плитки, кнопки, иконки дока, 16 — панели и flyout, 22 — Dock.</p>
+      </div>
+      <div class="card">
+        <h3>Тени</h3>
+        <table class="tok">
+          <tr><td>--ws-elev-1</td><td>0 2 8 / 18%</td></tr>
+          <tr><td>--ws-elev-2</td><td>0 8 24 / 28%</td></tr>
+          <tr><td>--ws-elev-3</td><td>0 18 48 / 38%</td></tr>
+          <tr><td>--ws-highlight</td><td>inset 0 1 0 / 8%</td></tr>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="s-col">
+    <h2 id="s-col">Цвет</h2>
+    <p class="note">Все поверхности показаны поверх обоев: цвет стекла всегда зависит от того, что под ним.</p>
+    <div class="swatches" id="sw"></div>
+  </section>
+
+  <section aria-labelledby="s-type">
+    <h2 id="s-type">Типографика и движение</h2>
+    <div class="cols">
+      <div class="card">
+        <h3>Шрифт Segoe UI Variable</h3>
+        <div class="typerow"><span style="font:600 16px/22px var(--font-display)">Работа</span><code>title 16/22 600</code></div>
+        <div class="typerow"><span style="font:600 13px/18px var(--font)">Планирование.xlsx</span><code>label 13/18 600</code></div>
+        <div class="typerow"><span style="font:13px/18px var(--font)">Открыть расположение</span><code>body 13/18</code></div>
+        <div class="typerow"><span style="font:12px/16px var(--font)">Discord · 45%</span><code>body-sm 12/16</code></div>
+        <div class="typerow"><span style="font:11px/14px var(--font);color:var(--ink-2)">Документ · 2.4 МБ</span><code>caption 11/14</code></div>
+        <div class="typerow" style="border:0"><span class="sec-label">Приложения</span><code>section 11 600 caps</code></div>
+      </div>
+      <div class="card">
+        <h3>Движение</h3>
+        <table class="tok">
+          <tr><td>--ws-dur-fast</td><td>120ms · hover, pressed</td></tr>
+          <tr><td>--ws-dur-base</td><td>180ms · меню, flyout</td></tr>
+          <tr><td>--ws-dur-slow</td><td>260ms · выезд панели и дока</td></tr>
+          <tr><td>--ws-ease</td><td>cubic-bezier(.2,0,0,1)</td></tr>
+          <tr><td>magnification</td><td>spring 420/32, радиус 2.5 иконки</td></tr>
+        </table>
+        <p class="note">С системной настройкой «уменьшить движение» выезды становятся fade, а увеличение в доке выключается.</p>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="s-comp">
+    <h2 id="s-comp">Компоненты</h2>
+    <div class="comp-stage">
+      <div class="glass" style="border-radius:12px;padding:6px;display:flex;gap:4px">
+        <button class="pill" aria-selected="true"><span class="folder" style="background:#43B4F5"></span>Selected</button>
+        <button class="pill"><span class="folder" style="background:#56D27A"></span>Default</button>
+      </div>
+      <div class="glass" style="border-radius:12px;padding:6px;display:flex;gap:4px">
+        <button class="ico-btn" aria-label="Поиск"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4.5 4.5" stroke-linecap="round"/></svg></button>
+        <button class="ico-btn" aria-label="Добавить"><svg width="18" height="18" viewBox="0 0 20 20" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M10 4v12M4 10h12"/></svg></button>
+      </div>
+      <div class="glass" style="border-radius:12px;padding:12px 14px;display:flex;gap:12px;align-items:center;min-width:240px;flex:1;max-width:340px">
+        <span style="font-size:12px">Размер иконок</span><input type="range" class="ws" min="32" max="80" value="52" aria-label="Размер иконок" style="--p:42%">
+      </div>
+      <div class="glass" style="border-radius:12px;padding:12px 14px;display:flex;gap:10px;align-items:center">
+        <span style="font-size:12px">Автоскрытие</span><button class="toggle" role="switch" aria-checked="true" aria-label="Автоскрытие"></button>
+      </div>
+    </div>
+    <p class="note">Полный список (Tile, ContextMenu, Flyout, DockItem, ListRow, Select, Tooltip, WidgetSlot) с состояниями — в <code>docs/DESIGN-SYSTEM.md</code>. Большая часть уже живёт в сцене выше.</p>
+  </section>
+</div>
+
+<script>
+(function(){
+  const $=s=>document.querySelector(s);
+  const stage=$('#stage'), outer=$('#stageOuter');
+  function fit(){const s=outer.clientWidth/1280;stage.style.transform='scale('+s+')';outer.style.height=(780*s)+'px';}
+  addEventListener('resize',fit);fit();
+
+  const ic=(bg,txt)=>`<span class="app" style="background:${bg}">${txt}</span>`;
+  const tiles=[
+    ['linear-gradient(135deg,#21A366,#107C41)','X','Excel','Приложение'],
+    ['linear-gradient(135deg,#7B83EB,#4B53BC)','T','Teams','Приложение'],
+    ['linear-gradient(135deg,#28A8EA,#0364B8)','O','Outlook','Приложение'],
+    ['linear-gradient(135deg,#4FC3F7,#1E88E5)','W','WFM','Сайт'],
+    ['linear-gradient(135deg,#FFD15C,#F2A93B)','','Отчёты','Папка'],
+    ['linear-gradient(135deg,#3A8DDE,#1F5FAF)','≡','Планирование.xlsx','Документ · 2.4 МБ'],
+    ['linear-gradient(135deg,#34A853,#1E7A3A)','≡','База клиентов.xlsx','Документ · 1.1 МБ'],
+    ['linear-gradient(135deg,#F06A4A,#C43E1C)','P','Презентация.pptx','Документ · 8.7 МБ'],
+  ];
+  const grid=$('#grid');
+  function renderTiles(q){
+    q=(q||'').toLowerCase();
+    grid.innerHTML=tiles.filter(t=>t[2].toLowerCase().includes(q)).map(t=>`<button class="tile">${ic(t[0],t[1])}<b>${t[2]}</b><span>${t[3]}</span></button>`).join('');
+  }
+  renderTiles();
+  $('#q').addEventListener('input',e=>renderTiles(e.target.value));
+
+  const cmenu=$('#cmenu');
+  grid.addEventListener('contextmenu',e=>{const t=e.target.closest('.tile');if(!t||t.classList.contains('add'))return;e.preventDefault();
+    const r=stage.getBoundingClientRect(),s=r.width/1280;cmenu.style.left=((e.clientX-r.left)/s)+'px';cmenu.style.top=((e.clientY-r.top)/s)+'px';cmenu.hidden=false;});
+  document.addEventListener('click',e=>{if(!cmenu.contains(e.target))cmenu.hidden=true;});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'){cmenu.hidden=true;}});
+
+  // Dock
+  const apps=[
+    ['linear-gradient(135deg,#55B6FF,#1A73E8)','⊞','Пуск',0],
+    ['linear-gradient(135deg,#2D4B66,#1A2E40)','⌕','Поиск',0],
+    ['linear-gradient(135deg,#7289FF,#5865F2)','D','Discord',0],
+    ['linear-gradient(135deg,#1B2838,#2A475E)','S','Steam',1],
+    ['conic-gradient(from 210deg,#EA4335 0 33%,#FBBC05 0 66%,#34A853 0)','●','Chrome',2],
+    ['linear-gradient(135deg,#FFD15C,#F2A93B)','','Проводник',0],
+    ['linear-gradient(135deg,#4CC38A,#1F8A5B)','✓','Tasks',1],
+  ];
+  const dock=$('#dock');
+  dock.innerHTML=apps.map(a=>`<button class="di${a[3]===2?' active':''}"><span class="app" style="background:${a[0]}">${a[1]}</span>${a[3]?'<span class="dot"></span>':''}<span class="tip glass strong">${a[2]}</span></button>`).join('')
+   +`<span class="sep" aria-hidden="true"></span>`
+   +`<button class="di" id="dkAudio" aria-label="Звук"><span class="widget" style="width:100%;height:100%"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3 8h3l4-3.5v11L6 12H3z"/><path d="M13 7.5a3.5 3.5 0 0 1 0 5M15.2 5.5a6.5 6.5 0 0 1 0 9" stroke-linecap="round"/></svg></span><span class="tip glass strong">Звук · 64%</span></button>`
+   +`<button class="di"><span class="widget" style="width:100%;height:100%"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4" stroke-linecap="round"/></svg></span><span class="tip glass strong">Настройки</span></button>`;
+  const items=[...dock.querySelectorAll('.di')];
+  const BASE=52,MAX=1.55,RANGE=BASE*2.5;
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let target=items.map(()=>1),cur=items.map(()=>1),vel=items.map(()=>0),mx=null,raf=null;
+  function step(){
+    let moving=false;
+    items.forEach((el,i)=>{
+      const k=420,d=32,dt=1/60;const f=k*(target[i]-cur[i])-d*vel[i];vel[i]+=f*dt;cur[i]+=vel[i]*dt;
+      if(Math.abs(target[i]-cur[i])>.001||Math.abs(vel[i])>.001)moving=true;else{cur[i]=target[i];vel[i]=0;}
+      const s=BASE*cur[i];el.style.width=s+'px';el.style.height=s+'px';
+    });
+    raf=moving?requestAnimationFrame(step):null;
+  }
+  function kick(){if(!raf)raf=requestAnimationFrame(step);}
+  function centers(){return items.map(el=>{const r=el.getBoundingClientRect(),sc=stage.getBoundingClientRect().width/1280;return (r.left+r.width/2)/sc;});}
+  dock.addEventListener('mousemove',e=>{if(reduce)return;const sc=stage.getBoundingClientRect().width/1280;const x=(e.clientX)/sc;const cs=centers();
+    target=cs.map(c=>{const dd=Math.abs(x-c);return dd>RANGE?1:1+(MAX-1)*(Math.cos(Math.PI*dd/RANGE)+1)/2;});kick();});
+  dock.addEventListener('mouseleave',()=>{target=items.map(()=>1);kick();});
+
+  // Audio flyout
+  const flyout=$('#flyout'),devs=$('#devs');
+  const devices=[['Наушники','Sony WH-1000XM5'],['Динамики','Realtek'],['Монитор DELL','HDMI']];let sel=0;
+  function renderDevs(){devs.innerHTML=devices.map((d,i)=>`<button class="dev" role="radio" aria-checked="${i===sel}" data-i="${i}"><span class="radio"></span>${d[0]}<small>${d[1]}</small></button>`).join('');}
+  renderDevs();devs.addEventListener('click',e=>{const b=e.target.closest('.dev');if(!b)return;sel=+b.dataset.i;renderDevs();});
+  const appVols=[['conic-gradient(from 210deg,#EA4335 0 33%,#FBBC05 0 66%,#34A853 0)','●','Chrome',80],['linear-gradient(135deg,#7289FF,#5865F2)','D','Discord',45],['linear-gradient(135deg,#1B2838,#2A475E)','S','Steam',95]];
+  const muteSvg='<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M3 8h3l4-3.5v11L6 12H3z"/><path d="M13 7.5a3.5 3.5 0 0 1 0 5" stroke-linecap="round"/></svg>';
+  $('#apps').innerHTML=appVols.map((a,i)=>`<div class="approw"><span class="app" style="background:${a[0]}">${a[1]}</span><span class="nm">${a[2]}</span><input type="range" class="ws" min="0" max="100" value="${a[3]}" aria-label="Громкость ${a[2]}" style="--p:${a[3]}%"><span class="num" style="width:32px;text-align:right;font-size:11px;color:var(--ws-text-2);font-variant-numeric:tabular-nums">${a[3]}%</span><button class="mute" aria-pressed="false" aria-label="Выключить ${a[2]}">${muteSvg}</button></div>`).join('');
+  document.querySelectorAll('input[type=range].ws').forEach(r=>{const u=()=>{const p=(r.value-r.min)/(r.max-r.min)*100;r.style.setProperty('--p',p+'%');const n=r.parentElement.querySelector('.num');if(n)n.textContent=Math.round(r.value)+'%';};r.addEventListener('input',u);u();});
+  document.querySelectorAll('.mute,.toggle').forEach(b=>b.addEventListener('click',()=>{const a=b.classList.contains('toggle')?'aria-checked':'aria-pressed';b.setAttribute(a,b.getAttribute(a)!=='true');}));
+  const master=$('#master');
+  const dkAudio=$('#dkAudio');
+  dkAudio.addEventListener('wheel',e=>{e.preventDefault();master.value=+master.value+(e.deltaY<0?2:-2);master.dispatchEvent(new Event('input'));dkAudio.querySelector('.tip').textContent='Звук · '+master.value+'%';},{passive:false});
+  master.addEventListener('input',()=>{dkAudio.querySelector('.tip').textContent='Звук · '+master.value+'%';});
+  const peak=$('#peak');setInterval(()=>{if(flyout.hidden)return;const muted=$('#masterMute').getAttribute('aria-pressed')==='true';peak.style.width=muted?'0%':(Math.random()*master.value*.8+5)+'%';},120);
+
+  function setAudio(on,anchor){
+    flyout.hidden=!on;$('#t-audio').setAttribute('aria-pressed',on);
+    if(on){const sc=stage.getBoundingClientRect().width/1280;
+      if(anchor==='launcher'){flyout.style.top='72px';flyout.style.bottom='auto';flyout.style.left='860px';}
+      else{const r=dkAudio.getBoundingClientRect(),sr=stage.getBoundingClientRect();flyout.style.top='auto';flyout.style.bottom='112px';flyout.style.left=Math.min(1280-354,((r.left-sr.left)/sc+26-170))+'px';}}
+  }
+  dkAudio.addEventListener('click',()=>setAudio(flyout.hidden,'dock'));
+  $('#lnAudio').addEventListener('click',()=>setAudio(flyout.hidden,'launcher'));
+  $('#t-audio').addEventListener('click',()=>setAudio(flyout.hidden,'dock'));
+
+  const panel=$('#panel');
+  function setPanel(on){panel.hidden=!on;$('#t-panel').setAttribute('aria-pressed',on);}
+  $('#t-panel').addEventListener('click',()=>setPanel(panel.hidden));
+  $('#closePanel').addEventListener('click',()=>setPanel(false));
+  document.querySelectorAll('.topbar .pill').forEach(p=>p.addEventListener('click',()=>{document.querySelectorAll('.topbar .pill').forEach(x=>x.setAttribute('aria-selected',x===p));setPanel(true);panel.querySelector('.t').textContent=p.textContent.trim();}));
+  $('#t-blur').addEventListener('click',e=>{const on=stage.classList.toggle('noblur');e.target.setAttribute('aria-pressed',on);});
+  $('#t-hide').addEventListener('click',e=>{const on=stage.classList.toggle('hidden-bars');e.target.setAttribute('aria-pressed',on);if(on){setAudio(false);setPanel(false);}});
+
+  // swatches
+  const sw=[['--ws-surface','Dock, верхняя панель'],['--ws-surface-strong','Окно категории, flyout, меню'],['--ws-fill','Плитки, поля'],['--ws-fill-hover','Hover'],['--ws-stroke','Края поверхностей'],['--ws-stroke-strong','Разделители, hover-край'],['--ws-accent','Выбор, ползунки, индикатор'],['--ws-accent-fill','Выбранная категория'],['--ws-text','Основной текст'],['--ws-text-2','Подписи'],['--ws-focus','Кольцо фокуса'],['--ws-danger','Mute, удаление']];
+  const cs=getComputedStyle(document.documentElement);
+  $('#sw').innerHTML=sw.map(s=>`<div class="sw"><div class="c"><i style="background:var(${s[0]})"></i></div><div class="m"><code>${s[0]}</code><code style="color:var(--ink-2)">${cs.getPropertyValue(s[0]).trim()}</code><small>${s[1]}</small></div></div>`).join('');
+})();
+</script>
