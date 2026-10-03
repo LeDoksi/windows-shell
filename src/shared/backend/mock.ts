@@ -31,6 +31,15 @@ export function createMockBackend(): Backend {
     reveal: ({ target }) => console.info(`[mock] показать в Проводнике: ${target}`),
     paths_exist: ({ paths }) => paths.map(() => true),
     item_icon: () => null,
+    pick_paths: ({ folders }) => [
+      folders ? "C:\\Users\\Demo\\Музыка" : "C:\\Users\\Demo\\Заметки.txt",
+    ],
+    installed_apps: () => [
+      { name: "Калькулятор", id: "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App" },
+      { name: "Paint", id: "Microsoft.Paint_8wekyb3d8bbwe!App" },
+      { name: "Блокнот", id: "Microsoft.WindowsNotepad_8wekyb3d8bbwe!App" },
+      { name: "Telegram", id: "TelegramDesktop" },
+    ],
     glass_rect: () => {},
   };
 

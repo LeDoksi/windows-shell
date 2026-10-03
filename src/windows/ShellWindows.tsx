@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Dock } from "../dock/Dock";
 import { buildDock, clickApp } from "../dock/model";
@@ -6,6 +6,14 @@ import { mockRunning } from "../dock/mockRunning";
 import { CategoryWindow } from "../launcher/CategoryWindow";
 import { ItemIcon } from "../launcher/ItemIcon";
 import { TopPanel } from "../launcher/TopPanel";
+import { addItems } from "../launcher/add";
+import {
+  addCategory,
+  moveCategory,
+  recolorCategory,
+  removeCategory,
+  renameCategory,
+} from "../launcher/categories";
 import { openFolder, openItem, removeItem, revealItem, useMissing } from "../launcher/items";
 import { matchesQuery } from "../launcher/search";
 import { backend, type EventName, type Events } from "../shared/backend";
@@ -63,11 +71,8 @@ function useEvent<E extends EventName>(event: E, handler: (payload: Events[E]) =
   }, [event, handler]);
 }
 
-// «＋» и управление категориями — следующие задачи этапа 3.
-const noop = () => {};
-
 function LauncherWindow() {
-  const { config } = useConfig();
+  const { config, update } = useConfig();
   const [openId, setOpenId] = useState<string | null>(null);
   useEvent(
     "category_closed",
@@ -89,6 +94,13 @@ function LauncherWindow() {
         }
       }}
       onSearch={() => void showWindow("search")}
+      onAdd={() => {
+        const added = addCategory(config);
+        setOpenId(added.id);
+        void update(() => added.config)
+          .then(() => backend.emit("category_open", { id: added.id, edit: true }))
+          .then(() => showWindow("category"));
+      }}
     />
   );
 }
@@ -96,21 +108,32 @@ function LauncherWindow() {
 function CategoryPopup() {
   const { config, update } = useConfig();
   // `n` пересоздаёт окно при каждом открытии: сброс поиска и автофокус.
-  const [open, setOpen] = useState<{ id: string; n: number } | null>(null);
+  const [open, setOpen] = useState<{ id: string; edit: boolean; n: number } | null>(null);
   useEvent(
     "category_open",
-    useCallback(({ id }) => setOpen((o) => ({ id, n: (o?.n ?? 0) + 1 })), []),
+    useCallback(
+      ({ id, edit }: Events["category_open"]) =>
+        setOpen((o) => ({ id, edit: edit ?? false, n: (o?.n ?? 0) + 1 })),
+      [],
+    ),
   );
   const close = useCallback(() => {
     setOpen(null);
     void hideWindow("category");
     void backend.emit("category_closed", null);
   }, []);
-  useCloseOnBlur(open !== null, close);
+  // Системный диалог выбора забирает фокус — окно категории при этом не закрываем.
+  const picking = useRef(false);
+  useCloseOnBlur(
+    open !== null,
+    useCallback(() => !picking.current && close(), [close]),
+  );
   // Неудачный запуск — перепроверить диск: плитка могла пропасть, пока окно было открыто.
   const [failed, setFailed] = useState(0);
 
-  const category = config?.categories.find((c) => c.id === open?.id);
+  const categories = config?.categories ?? [];
+  const index = categories.findIndex((c) => c.id === open?.id);
+  const category = categories[index];
   const missing = useMissing(category?.items ?? [], `${open?.n}-${failed}`);
   if (!open || !category) return null;
   // Открыли — окно категории уходит, фокус достаётся запущенной программе.
@@ -124,11 +147,29 @@ function CategoryPopup() {
       key={`${category.id}-${open.n}`}
       category={category}
       missing={missing}
+      startEditing={open.edit}
+      isFirst={index === 0}
+      isLast={index === categories.length - 1}
+      onRename={(name) => update((c) => renameCategory(c, category.id, name))}
+      onRecolor={(color) => update((c) => recolorCategory(c, category.id, color))}
+      onMove={(delta) => update((c) => moveCategory(c, category.id, delta))}
+      onDelete={() => void update((c) => removeCategory(c, category.id)).then(close)}
       onClose={close}
       onOpenItem={(item) => void run(openItem(item))}
       onRevealItem={(item) => void run(revealItem(item))}
       onOpenFolder={(path) => void run(openFolder(path))}
-      onAdd={noop}
+      onAddItems={(items) => update((c) => addItems(c, category.id, items))}
+      onPickPaths={async (folders) => {
+        picking.current = true;
+        try {
+          return await backend.call("pick_paths", { folders });
+        } catch (e) {
+          console.error(e);
+          return [];
+        } finally {
+          picking.current = false;
+        }
+      }}
       onRemoveItem={(item) => update((c) => removeItem(c, category.id, item.id))}
     />
   );

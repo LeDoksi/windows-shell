@@ -25,6 +25,8 @@ describe("paths", () => {
   it("tells disk paths from app ids and links", () => {
     expect(isPath("D:\\Work\\Planning.xlsx")).toBe(true);
     expect(isPath("MSTeams_8wekyb3d8bbwe!MSTeams")).toBe(false);
+    expect(isPath("{6D809377-6AF0-444B-8957-A3773F02200E}\\Notepad++\\notepad++.exe")).toBe(false);
+    expect(isPath("\\\\nas\\share")).toBe(true);
     expect(canReveal({ id: "u", kind: "url", title: "", target: "https://a.b/c" })).toBe(false);
     expect(canReveal({ id: "a", kind: "app", title: "", target: "Microsoft.Edge" })).toBe(false);
     expect(canReveal({ id: "f", kind: "file", title: "", target: "C:\\a.txt" })).toBe(true);

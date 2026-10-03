@@ -11,6 +11,8 @@ mod icons;
 #[cfg(not(feature = "spike"))]
 mod launch;
 #[cfg(not(feature = "spike"))]
+mod pick;
+#[cfg(not(feature = "spike"))]
 mod shell;
 #[cfg(all(windows, feature = "spike"))]
 mod spike;
@@ -71,6 +73,8 @@ pub fn run() {
             launch::reveal,
             launch::paths_exist,
             icons::item_icon,
+            pick::pick_paths,
+            pick::installed_apps,
             shell::glass_rect
         ]);
 

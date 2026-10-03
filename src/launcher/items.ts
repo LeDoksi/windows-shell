@@ -2,9 +2,12 @@ import { useEffect, useState } from "react";
 import { backend } from "../shared/backend";
 import type { Config, LauncherItem } from "../shared/config";
 
-/** Путь на диске, а не AUMID приложения и не ссылка (то же правило, что `is_path` в Rust). */
+/**
+ * Абсолютный путь на диске, а не AUMID приложения и не ссылка (то же правило, что `is_path`
+ * в Rust). У приложений из «Пуска» AUMID бывает с обратными слешами: `{GUID}\\Foo\\foo.exe`.
+ */
 export function isPath(target: string): boolean {
-  return /[\\/]/.test(target);
+  return /^([a-z]:[\\/]|\\\\|\/)/i.test(target);
 }
 
 /** «Открыть расположение» есть только у того, что лежит на диске. */

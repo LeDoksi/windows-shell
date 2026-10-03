@@ -14,9 +14,16 @@ pub struct Plan {
     pub dir: Option<String>,
 }
 
-/// Путь на диске, а не AUMID (`Microsoft.WindowsCalculator_8wekyb3d8bbwe!App`) и не ссылка.
+/// Абсолютный путь на диске (`C:\…`, `\\server\…`), а не AUMID и не ссылка.
+/// У приложений из «Пуска» AUMID бывает с обратными слешами (`{GUID}\Foo\foo.exe`).
 pub fn is_path(target: &str) -> bool {
-    target.contains('\\') || target.contains('/')
+    let b = target.as_bytes();
+    target.starts_with(r"\\")
+        || target.starts_with('/')
+        || (b.len() >= 3
+            && b[0].is_ascii_alphabetic()
+            && b[1] == b':'
+            && matches!(b[2], b'\\' | b'/'))
 }
 
 fn existing(target: &str) -> Result<&Path, String> {
@@ -222,6 +229,19 @@ mod tests {
             "shell:AppsFolder\\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"
         );
         assert_eq!(plan.dir, None);
+    }
+
+    #[test]
+    fn start_menu_ids_with_backslashes_are_not_paths() {
+        let id = "{6D809377-6AF0-444B-8957-A3773F02200E}\\Notepad++\\notepad++.exe";
+        assert!(!is_path(id));
+        assert_eq!(
+            plan(&ItemKind::App, id).unwrap().file,
+            format!("shell:AppsFolder\\{id}")
+        );
+        assert!(is_path("C:\\Windows"));
+        assert!(is_path("\\\\nas\\share"));
+        assert!(is_path("/tmp"));
     }
 
     #[test]

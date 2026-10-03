@@ -424,3 +424,33 @@
 .ws-select__option[aria-selected="true"] small {
   margin-left: auto;
 }
+
+/* ---------- Button ---------- */
+.ws-button {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--ws-stroke);
+  border-radius: var(--ws-radius-md);
+  color: var(--ws-text);
+  background: var(--ws-fill);
+  font: var(--ws-type-body-sm);
+  cursor: pointer;
+  transition: background var(--ws-dur-fast);
+}
+.ws-button:hover:not(:disabled) {
+  background: var(--ws-fill-hover);
+}
+.ws-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ws-button--accent {
+  border-color: var(--ws-accent-stroke);
+  background: var(--ws-accent-fill);
+}
+.ws-button--accent:hover:not(:disabled) {
+  background: var(--ws-accent);
+}
+.ws-button--danger {
+  color: var(--ws-danger);
+}
