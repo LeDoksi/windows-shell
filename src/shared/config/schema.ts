@@ -31,6 +31,16 @@ export type DockPin = {
 /** «Стекло» (Acrylic) или «Тонировка». Только ручной выбор, без автопереключения. */
 export type GlassMode = "acrylic" | "tint";
 
+/**
+ * Виджет: включён ли и его настройки. Порядок в списке — порядок в панели.
+ * Настройки у каждого виджета свои, недостающие берутся из его `defaults`.
+ */
+export type WidgetEntry = {
+  id: string;
+  enabled: boolean;
+  settings: Record<string, unknown>;
+};
+
 export type Config = {
   schemaVersion: 1;
   categories: Category[];
@@ -41,4 +51,5 @@ export type Config = {
    * `monitor` — имя устройства Windows (`\\.\DISPLAY2`); `null` или не подключён — основной.
    */
   bars: { launcherPinned: boolean; dockPinned: boolean; monitor: string | null };
+  widgets: WidgetEntry[];
 };

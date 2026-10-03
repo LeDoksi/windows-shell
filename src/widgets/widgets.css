@@ -1,0 +1,329 @@
+/* ---------- Flyout под панелью ---------- */
+.ws-panel-flyout {
+  width: 380px;
+  max-height: 720px;
+  overflow-y: auto;
+}
+
+/* ---------- Звук ---------- */
+.ws-audio__level {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Полоска уровня — под ползунком: отступы как у кнопки mute и значения слева и справа. */
+.ws-audio__level .ws-peak {
+  margin: 0 48px;
+}
+
+.ws-peak {
+  position: relative;
+  display: block;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--ws-fill);
+}
+
+.ws-peak::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--ws-peak, 0%);
+  border-radius: inherit;
+  background: var(--ws-accent);
+  transition: width 90ms linear;
+}
+
+.ws-audio__profiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ws-audio__steps {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.ws-audio__steps .ws-chip {
+  padding: 0 9px;
+}
+
+.ws-audio__profiles:empty {
+  display: none;
+}
+
+.ws-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--ws-stroke);
+  border-radius: var(--ws-radius-pill);
+  color: var(--ws-text);
+  background: var(--ws-fill);
+  font: var(--ws-type-body-sm);
+  cursor: pointer;
+}
+
+.ws-chip:hover {
+  background: var(--ws-fill-hover);
+}
+
+.ws-chip:disabled {
+  color: var(--ws-text-3);
+  cursor: default;
+}
+
+.ws-chip--active {
+  border-color: var(--ws-accent-stroke);
+  background: var(--ws-accent-fill);
+}
+
+.ws-chip--add {
+  border-style: dashed;
+  color: var(--ws-text-2);
+  background: transparent;
+}
+
+.ws-audio__sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ws-session {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ws-session__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  color: var(--ws-text-2);
+}
+
+.ws-session__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ws-session__name {
+  overflow: hidden;
+  font: var(--ws-type-caption);
+  color: var(--ws-text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Сейчас играет ---------- */
+.ws-now-playing {
+  display: flex;
+  align-items: center;
+  gap: var(--ws-space-3);
+  min-width: 0;
+}
+
+.ws-now-playing__cover {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  color: var(--ws-text-2);
+  background: var(--ws-fill);
+}
+
+.ws-now-playing--large {
+  flex-wrap: wrap;
+}
+
+.ws-now-playing--large .ws-now-playing__cover {
+  width: 72px;
+  height: 72px;
+  border-radius: 10px;
+}
+
+.ws-now-playing--large .ws-now-playing__controls {
+  justify-content: center;
+  width: 100%;
+}
+
+.ws-now-playing__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.ws-now-playing__title,
+.ws-now-playing__artist {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-now-playing__title {
+  font: var(--ws-type-label);
+}
+
+.ws-now-playing__controls {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.ws-now-playing--small .ws-icon-button {
+  width: 32px;
+  height: 32px;
+}
+
+/* Виджет в верхней панели: обложка и название — кнопка flyout, рядом пауза. */
+.ws-media-compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ws-media-compact__track {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 220px;
+  height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--ws-text);
+  background: transparent;
+  cursor: pointer;
+}
+
+.ws-media-compact__track:hover,
+.ws-media-compact__track[aria-expanded="true"] {
+  background: var(--ws-fill-hover);
+}
+
+.ws-media-compact__cover {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.ws-media-compact__title {
+  overflow: hidden;
+  font: var(--ws-type-body-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Настройки виджетов ---------- */
+.ws-widget-settings {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ws-widget-settings__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 0;
+  border-top: 1px solid var(--ws-stroke);
+}
+
+.ws-widget-settings__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--ws-fill);
+}
+
+.ws-widget-settings__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.ws-widget-settings__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 44px;
+}
+
+.ws-widget-settings__actions:empty {
+  display: none;
+}
+
+.ws-widget-settings__actions .ws-flyout__link {
+  margin: 0;
+}
+
+.ws-widget-settings__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px 0 0 44px;
+  font: var(--ws-type-body);
+}
+
+.ws-profile-row .ws-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- Поля ---------- */
+.ws-input,
+.ws-hotkey__button {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--ws-stroke);
+  border-radius: var(--ws-radius-sm);
+  color: var(--ws-text);
+  background: var(--ws-fill);
+  font: var(--ws-type-body-sm);
+}
+
+.ws-hotkey {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.ws-hotkey .ws-icon-button {
+  width: 28px;
+  height: 28px;
+}
+
+.ws-hotkey__button {
+  min-width: 110px;
+  cursor: pointer;
+}
+
+.ws-hotkey__button[data-recording] {
+  border-color: var(--ws-accent-stroke);
+  color: var(--ws-text-2);
+}

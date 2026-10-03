@@ -181,5 +181,9 @@
     "launcherPinned": false,
     "dockPinned": false,
     "monitor": null
-  }
+  },
+  "widgets": [
+    { "id": "audio", "enabled": true, "settings": {} },
+    { "id": "media", "enabled": true, "settings": {} }
+  ]
 }

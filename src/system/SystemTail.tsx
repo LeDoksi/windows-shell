@@ -8,6 +8,8 @@ import { clockLines } from "./format";
 import { BatteryGlyph, NetworkGlyph } from "./glyphs";
 import type { SystemState } from "./model";
 import { useNow } from "./useNow";
+import { inSlot } from "../widgets/resolve";
+import { useWidgets } from "../widgets/useWidgets";
 import "./system.css";
 
 export type { FlyoutId };
@@ -32,7 +34,9 @@ export function SystemTail({ state, onChange, onFlyout, flyoutOpen }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const now = useNow();
   const { time, day } = clockLines(now);
-  const { audio, battery } = state;
+  const { battery } = state;
+  // Виджеты хвоста (звук) — вместо значков Windows.
+  const { widgets, updateSettings } = useWidgets();
   const trayAttention = state.tray.some((icon) => icon.attention);
 
   // Flyout выравниваем по правому краю дока и ставим над ним.
@@ -53,9 +57,6 @@ export function SystemTail({ state, onChange, onFlyout, flyoutOpen }: Props) {
     if (onFlyout && pill) onFlyout(open === id ? null : id, pill.getBoundingClientRect());
     else setOpen((current) => (current === id ? null : id));
   };
-  const setVolume = (volume: number) =>
-    onChange((s) => ({ ...s, audio: { ...s.audio, volume, muted: false } }));
-
   const button = (id: FlyoutId, label: string, content: ReactNode, extra?: object) => (
     <Tooltip text={label}>
       <button
@@ -90,20 +91,15 @@ export function SystemTail({ state, onChange, onFlyout, flyoutOpen }: Props) {
         </>,
       )}
       {button("network", networkLabel, <NetworkGlyph network={state.network} />)}
-      {button(
-        "audio",
-        audio.muted ? "Звук выключен" : `Громкость ${audio.volume}%`,
-        <Icon name={audio.muted ? "speakerMuted" : "speaker"} size={20} />,
-        {
-          // Колесо — громкость ±2%, средний клик — mute.
-          onWheel: (e: React.WheelEvent) =>
-            setVolume(Math.min(100, Math.max(0, audio.volume + (e.deltaY < 0 ? 2 : -2)))),
-          onMouseDown: (e: React.MouseEvent) => e.button === 1 && e.preventDefault(),
-          onAuxClick: (e: React.MouseEvent) =>
-            e.button === 1 &&
-            onChange((s) => ({ ...s, audio: { ...s.audio, muted: !s.audio.muted } })),
-        },
-      )}
+      {inSlot(widgets, "dock-tail").map(({ def, settings }) => (
+        <def.Compact
+          key={def.id}
+          settings={settings}
+          updateSettings={(change) => void updateSettings(def.id, change)}
+          open={open === def.id}
+          onToggle={() => toggle(def.id as FlyoutId)}
+        />
+      ))}
       {battery &&
         button(
           "battery",

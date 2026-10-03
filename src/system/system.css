@@ -57,6 +57,8 @@
 /* ---------- Flyout хвоста ---------- */
 .ws-tail-flyout {
   width: 340px;
+  max-height: 760px;
+  overflow-y: auto;
 }
 
 .ws-flyout__section {

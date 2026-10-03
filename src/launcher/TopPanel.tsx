@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { CategoryPill, GlassSurface, IconButton, Tooltip } from "../shared/ui";
 import type { Category } from "../shared/config";
 import "./launcher.css";
@@ -9,7 +10,11 @@ type Props = {
   onOpenCategory: (id: string | null) => void;
   onSearch?: () => void;
   onAdd?: () => void;
-  onSettings?: () => void;
+  /** Шестерёнка: настройки виджетов под ней. */
+  onSettings?: (anchor: HTMLElement) => void;
+  settingsOpen?: boolean;
+  /** Компактные виджеты слота `launcher` (`WidgetZone`). */
+  widgets?: ReactNode;
   hidden?: boolean;
 };
 
@@ -20,6 +25,8 @@ export function TopPanel({
   onSearch,
   onAdd,
   onSettings,
+  settingsOpen,
+  widgets,
   hidden,
 }: Props) {
   return (
@@ -44,8 +51,9 @@ export function TopPanel({
         ))}
       </div>
       <span className="ws-top-panel__separator" aria-hidden="true" />
-      {/* Зона виджетов слота "launcher": заполняет каркас виджетов на этапе 5. */}
-      <div className="ws-top-panel__widgets" data-slot="launcher" />
+      <div className="ws-top-panel__widgets" data-slot="launcher">
+        {widgets}
+      </div>
       <div className="ws-top-panel__actions">
         <Tooltip text="Поиск" placement="bottom">
           <IconButton icon="search" label="Поиск" onClick={onSearch} />
@@ -54,7 +62,13 @@ export function TopPanel({
           <IconButton icon="plus" label="Добавить" onClick={onAdd} />
         </Tooltip>
         <Tooltip text="Настройки" placement="bottom">
-          <IconButton icon="settings" label="Настройки" onClick={onSettings} />
+          <IconButton
+            icon="settings"
+            label="Настройки"
+            aria-expanded={settingsOpen}
+            aria-haspopup="dialog"
+            onClick={(e) => onSettings?.(e.currentTarget)}
+          />
         </Tooltip>
       </div>
     </GlassSurface>

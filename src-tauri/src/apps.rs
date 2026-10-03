@@ -191,6 +191,18 @@ pub async fn app_targets(targets: Vec<String>) -> Vec<AppTarget> {
     .unwrap_or_default()
 }
 
+/// Путь к exe процесса (для звука приложений).
+#[cfg(windows)]
+pub fn process_exe(pid: u32) -> Option<String> {
+    os::process(pid).0
+}
+
+/// Описание exe из ресурсов версии: «Google Chrome», «Discord».
+#[cfg(windows)]
+pub fn file_description(exe: &str) -> Option<String> {
+    os::file_description(exe)
+}
+
 /// Запустить трекер окон (только Windows; в других системах окон нет).
 pub fn start(app: &tauri::AppHandle) {
     #[cfg(windows)]
@@ -521,7 +533,7 @@ mod os {
     }
 
     /// Процесс по pid: путь к exe и AUMID (у упакованных приложений).
-    fn process(pid: u32) -> (Option<String>, Option<String>) {
+    pub fn process(pid: u32) -> (Option<String>, Option<String>) {
         unsafe {
             let p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
             if p.is_null() {
@@ -573,7 +585,7 @@ mod os {
     }
 
     /// Описание exe из ресурсов версии («Google Chrome», «Telegram Desktop»).
-    fn file_description(exe: &str) -> Option<String> {
+    pub fn file_description(exe: &str) -> Option<String> {
         unsafe {
             let path = wide(exe);
             let size = GetFileVersionInfoSizeW(path.as_ptr(), null_mut());

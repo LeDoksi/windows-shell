@@ -32,7 +32,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::config::{Bars, Config, ConfigStore};
-use crate::shell::{self, CATEGORY, DOCK, DOCK_MENU, FLYOUT, LAUNCHER, SEARCH};
+use crate::shell::{self, CATEGORY, DOCK, DOCK_MENU, FLYOUT, LAUNCHER, PANEL_FLYOUT, SEARCH};
 
 /// Курсор у края дольше этого — показываем (чтобы полоса не выскакивала, когда курсор пролетает).
 pub const REVEAL_DELAY_MS: u64 = 150;
@@ -331,15 +331,16 @@ pub fn start(app: &AppHandle) {
         state: Autohide::default(),
         appbar: None,
     };
-    // Поповеры держат свою полосу показанной: категория и поиск — панель, flyout и меню — док.
+    // Поповеры держат свою полосу показанной: категория, поиск и flyout виджетов — панель,
+    // flyout и меню — док.
     let bars = vec![
         (
             bar(LAUNCHER, Edge::Top, shell::LAUNCHER_BACKDROP),
-            [hwnd_of(CATEGORY), hwnd_of(SEARCH)],
+            [hwnd_of(CATEGORY), hwnd_of(SEARCH), hwnd_of(PANEL_FLYOUT)],
         ),
         (
             bar(DOCK, Edge::Bottom, shell::DOCK_BACKDROP),
-            [hwnd_of(FLYOUT), hwnd_of(DOCK_MENU)],
+            [hwnd_of(FLYOUT), hwnd_of(DOCK_MENU), std::ptr::null_mut()],
         ),
     ];
     for (bar, _) in &bars {
@@ -475,7 +476,7 @@ pub fn start(app: &AppHandle) {
 /// (спайк WSH-6, подвох 1; проверено: без этого панель осталась в масштабе 175 % на 100 %).
 /// Поэтому полосы сначала выставляем на старом мониторе, потом на новом, — Tauri пересчитает
 /// размер. Дальше поток опроса снова спрячет их, если надо.
-fn relayout(app: &AppHandle, bars: &[(Bar, [HWND; 2])], from: Option<&Layout>, lay: &Layout) {
+fn relayout(app: &AppHandle, bars: &[(Bar, [HWND; 3])], from: Option<&Layout>, lay: &Layout) {
     eprintln!("[bars] monitor {} scale {}", lay.name, lay.scale);
     if let Some(from) = from {
         place_shown(bars, from);
@@ -494,7 +495,7 @@ fn relayout(app: &AppHandle, bars: &[(Bar, [HWND; 2])], from: Option<&Layout>, l
 }
 
 /// Полосы — в показанное место у краёв рабочей области монитора.
-fn place_shown(bars: &[(Bar, [HWND; 2])], lay: &Layout) {
+fn place_shown(bars: &[(Bar, [HWND; 3])], lay: &Layout) {
     for (bar, _) in bars {
         if bar.owner.is_null() {
             continue;
@@ -511,11 +512,11 @@ fn place_shown(bars: &[(Bar, [HWND; 2])], lay: &Layout) {
 }
 
 /// Хэндлы окон из главного потока в поток опроса.
-struct SendBars(Vec<(Bar, [HWND; 2])>);
+struct SendBars(Vec<(Bar, [HWND; 3])>);
 unsafe impl Send for SendBars {}
 impl SendBars {
     /// Через метод: иначе замыкание захватит поле `.0`, а не обёртку.
-    fn into_inner(self) -> Vec<(Bar, [HWND; 2])> {
+    fn into_inner(self) -> Vec<(Bar, [HWND; 3])> {
         self.0
     }
 }

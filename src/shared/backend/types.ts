@@ -34,7 +34,79 @@ export interface Commands {
   window_close: { args: { hwnd: number }; result: void };
   /** Установлены ли приложения (AUMID или путь) и где их exe — по ответу на каждое. */
   app_targets: { args: { targets: string[] }; result: AppTarget[] };
+  /** Звук: устройства, громкость, mute (дальше — событие `audio_changed`). */
+  audio_get: { args: Record<string, never>; result: AudioState };
+  /** Громкость устройства по умолчанию, 0…100; заодно снимает mute. */
+  audio_set_volume: { args: { flow: AudioFlow; volume: number }; result: void };
+  audio_set_mute: { args: { flow: AudioFlow; muted: boolean }; result: void };
+  /** Сделать устройство (вывод или микрофон) устройством по умолчанию. */
+  audio_set_default: { args: { id: string }; result: void };
+  /** Профиль: устройство по умолчанию и его громкость. */
+  audio_apply_profile: { args: { deviceId: string; volume: number }; result: void };
+  /** Уровни и приложения — опрашивается, пока открыт flyout. */
+  audio_mixer: { args: Record<string, never>; result: AudioMixer };
+  /** Громкость или mute приложения (всех его сессий). */
+  audio_session_set: {
+    args: { id: string; volume?: number; muted?: boolean };
+    result: void;
+  };
+  /** Что играет сейчас; `null` — ничего (дальше — событие `media_changed`). */
+  media_get: { args: Record<string, never>; result: MediaInfo | null };
+  media_control: { args: { action: MediaAction }; result: void };
 }
+
+export type AudioFlow = "output" | "input";
+
+export interface AudioDevice {
+  id: string;
+  name: string;
+}
+
+/** Вывод или микрофон: устройства и громкость устройства по умолчанию. */
+export interface AudioEndpoint {
+  devices: AudioDevice[];
+  /** `null` — устройств нет. */
+  defaultId: string | null;
+  volume: number;
+  muted: boolean;
+}
+
+export interface AudioState {
+  output: AudioEndpoint;
+  input: AudioEndpoint;
+}
+
+/** Звук одного приложения (все его сессии). */
+export interface AudioSession {
+  /** Путь к exe строчными буквами или `system`. */
+  id: string;
+  name: string;
+  exe: string | null;
+  volume: number;
+  muted: boolean;
+  /** Пиковый уровень сейчас, 0…1. */
+  peak: number;
+}
+
+export interface AudioMixer {
+  outputPeak: number;
+  inputPeak: number;
+  sessions: AudioSession[];
+}
+
+export interface MediaInfo {
+  appId: string;
+  title: string;
+  artist: string;
+  playing: boolean;
+  canPlayPause: boolean;
+  canNext: boolean;
+  canPrevious: boolean;
+  /** Обложка, `data:`-URL. */
+  cover: string | null;
+}
+
+export type MediaAction = "playPause" | "next" | "previous";
 
 /** Окно программы от трекера в Rust (`src-tauri/src/apps.rs`). */
 export interface WindowInfo {
@@ -72,8 +144,11 @@ export interface Events {
   category_open: { id: string; edit?: boolean };
   /** Окно категории закрылось (Esc, клик мимо, ушёл фокус). */
   category_closed: null;
-  /** Док открывает flyout системного хвоста и передаёт текущее состояние. */
-  flyout_open: { id: FlyoutId; state: SystemState };
+  /**
+   * Док открывает flyout системного хвоста и передаёт текущее состояние.
+   * `right`, `bottom` — куда встаёт карточка: над таблеткой дока, физические пиксели экрана.
+   */
+  flyout_open: { id: FlyoutId; state: SystemState; right: number; bottom: number };
   flyout_closed: null;
   /** Flyout поменял состояние (громкость, Wi-Fi) — док подхватывает. */
   system_state: SystemState;
@@ -85,6 +160,16 @@ export interface Events {
    */
   dock_menu_open: { id: string; x: number; y: number };
   dock_menu_closed: null;
+  /** Звук поменялся: устройства, громкость, mute (от Rust). */
+  audio_changed: AudioState;
+  /** Другой трек, пауза или источник (от Rust). */
+  media_changed: MediaInfo | null;
+  /**
+   * Панель открывает flyout виджета (или настройки виджетов) под кнопкой.
+   * `right`, `top` — правый край кнопки и низ панели, физические пиксели экрана.
+   */
+  panel_flyout_open: { id: string; right: number; top: number };
+  panel_flyout_closed: null;
 }
 
 export interface AppInfo {

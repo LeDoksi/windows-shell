@@ -22,10 +22,16 @@
   max-height: calc(100vh - 16px);
 }
 
-/* Flyout прижат к правому нижнему углу окна; окно ставит над доком сам док. */
+/* Flyout прижат к правому нижнему углу окна; окно ставит себя над доком само (useAnchoredWindow). */
 :root[data-window="flyout"] .ws-tail-flyout {
   right: 12px;
   bottom: 12px;
+}
+
+/* Flyout виджетов — под панелью: карточка в правом верхнем углу окна (useAnchoredWindow). */
+:root[data-window="panel-flyout"] .ws-panel-flyout {
+  top: 12px;
+  right: 12px;
 }
 
 /* «Стекло»: размытие даёт подложка с Acrylic, радиус как у DWM-скругления (8 px).
