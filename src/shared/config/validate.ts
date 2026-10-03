@@ -29,5 +29,11 @@ export function validateConfig(config: Config): string | null {
   if (!glassModes.has(config.appearance?.glass)) {
     return `неизвестный режим стекла «${config.appearance?.glass}»`;
   }
+  if (
+    typeof config.bars?.launcherPinned !== "boolean" ||
+    typeof config.bars?.dockPinned !== "boolean"
+  ) {
+    return "закрепление панели и дока — да или нет";
+  }
   return null;
 }

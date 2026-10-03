@@ -1,3 +1,5 @@
+#[cfg(all(windows, not(feature = "spike")))]
+mod bars;
 mod config;
 // Продакшн-окна; сборка спайков (`--features spike`) поднимает вместо них свои.
 #[cfg(all(windows, not(feature = "spike")))]
@@ -45,6 +47,8 @@ pub fn run() {
     let builder = builder
         .setup(|app| {
             shell::create(app.handle())?;
+            #[cfg(windows)]
+            bars::start(app.handle());
             tray::create(app.handle())?;
             Ok(())
         })
@@ -67,8 +71,17 @@ pub fn run() {
 
     #[cfg(not(all(windows, feature = "spike")))]
     builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // Зарезервированное AppBar место иначе останется у Explorer.
+            #[cfg(windows)]
+            if let tauri::RunEvent::Exit = event {
+                bars::shutdown(_app);
+            }
+            #[cfg(not(windows))]
+            let _ = event;
+        });
 
     #[cfg(all(windows, feature = "spike"))]
     builder

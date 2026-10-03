@@ -1,13 +1,15 @@
-//! Наш значок в трее с меню (до окна настроек): «Стекло» / «Тонировка», «Перезапустить», «Выход».
+//! Наш значок в трее с меню (до окна настроек): «Стекло» / «Тонировка», закрепление панели и дока,
+//! «Перезапустить», «Выход».
 
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Listener, Manager, Wry};
+use tauri::{AppHandle, Listener, Manager};
 
 use crate::config::{self, Config, ConfigStore, GlassMode};
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
-    let mode = current(app).appearance.glass;
+    let config = current(app);
+    let mode = config.appearance.glass;
     let acrylic = CheckMenuItem::with_id(
         app,
         "glass-acrylic",
@@ -24,11 +26,30 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         mode == GlassMode::Tint,
         None::<&str>,
     )?;
+    let pin_launcher = CheckMenuItem::with_id(
+        app,
+        "pin-launcher",
+        "Закрепить панель",
+        true,
+        config.bars.launcher_pinned,
+        None::<&str>,
+    )?;
+    let pin_dock = CheckMenuItem::with_id(
+        app,
+        "pin-dock",
+        "Закрепить док",
+        true,
+        config.bars.dock_pinned,
+        None::<&str>,
+    )?;
     let menu = Menu::with_items(
         app,
         &[
             &acrylic,
             &tint,
+            &PredefinedMenuItem::separator(app)?,
+            &pin_launcher,
+            &pin_dock,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "restart", "Перезапустить", true, None::<&str>)?,
             &MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?,
@@ -40,9 +61,16 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "glass-acrylic" => set_glass(app, GlassMode::Acrylic),
-            "glass-tint" => set_glass(app, GlassMode::Tint),
-            "restart" => app.restart(),
+            "glass-acrylic" => change(app, |c| c.appearance.glass = GlassMode::Acrylic),
+            "glass-tint" => change(app, |c| c.appearance.glass = GlassMode::Tint),
+            "pin-launcher" => change(app, |c| c.bars.launcher_pinned ^= true),
+            "pin-dock" => change(app, |c| c.bars.dock_pinned ^= true),
+            "restart" => {
+                // `restart` не доходит до RunEvent::Exit — снимаем AppBar сами.
+                #[cfg(windows)]
+                crate::bars::shutdown(app);
+                app.restart()
+            }
             "quit" => app.exit(0),
             _ => {}
         });
@@ -51,11 +79,14 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     }
     tray.build(app)?;
 
-    // Галочки следуют за конфигом, откуда бы он ни поменялся (меню, позже окно настроек).
-    let checks = (acrylic, tint);
+    // Галочки следуют за конфигом (клик по пункту-галочке сам его переключает), откуда бы он ни поменялся (меню, позже окно настроек).
     app.listen_any("config_changed", move |event| {
         if let Ok(config) = serde_json::from_str::<Config>(event.payload()) {
-            sync_checks(&checks, config.appearance.glass);
+            let glass = config.appearance.glass;
+            let _ = acrylic.set_checked(glass == GlassMode::Acrylic);
+            let _ = tint.set_checked(glass == GlassMode::Tint);
+            let _ = pin_launcher.set_checked(config.bars.launcher_pinned);
+            let _ = pin_dock.set_checked(config.bars.dock_pinned);
         }
     });
     Ok(())
@@ -69,16 +100,10 @@ fn current(app: &AppHandle) -> Config {
         .clone()
 }
 
-fn set_glass(app: &AppHandle, glass: GlassMode) {
+fn change(app: &AppHandle, edit: impl FnOnce(&mut Config)) {
     let mut config = current(app);
-    config.appearance.glass = glass;
+    edit(&mut config);
     if let Err(e) = config::set(app, &app.state::<ConfigStore>(), config) {
         eprintln!("[tray] {e}");
     }
-}
-
-/// Клик по пункту-галочке сам переключает его; приводим оба к фактическому режиму.
-fn sync_checks((acrylic, tint): &(CheckMenuItem<Wry>, CheckMenuItem<Wry>), mode: GlassMode) {
-    let _ = acrylic.set_checked(mode == GlassMode::Acrylic);
-    let _ = tint.set_checked(mode == GlassMode::Tint);
 }

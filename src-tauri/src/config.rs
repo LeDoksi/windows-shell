@@ -71,6 +71,14 @@ pub struct Appearance {
     pub glass: GlassMode,
 }
 
+/// Закреплённая полоса видна всегда и резервирует место (AppBar); иначе — автоскрытие.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Bars {
+    pub launcher_pinned: bool,
+    pub dock_pinned: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
@@ -80,6 +88,8 @@ pub struct Config {
     /// Нет в старом конфиге — значения по умолчанию.
     #[serde(default)]
     pub appearance: Appearance,
+    #[serde(default)]
+    pub bars: Bars,
 }
 
 impl Config {
@@ -183,6 +193,15 @@ mod tests {
         json["appearance"] = serde_json::json!({ "glass": "tint" });
         let tint: Config = serde_json::from_value(json).unwrap();
         assert_eq!(tint.appearance.glass, GlassMode::Tint);
+    }
+
+    #[test]
+    fn bars_default_to_autohide() {
+        let mut json: serde_json::Value = serde_json::from_str(DEFAULT_CONFIG).unwrap();
+        json.as_object_mut().unwrap().remove("bars");
+        let old: Config = serde_json::from_value(json).unwrap();
+        assert_eq!(old.bars, Bars::default());
+        assert!(!Config::defaults().bars.launcher_pinned);
     }
 
     #[test]

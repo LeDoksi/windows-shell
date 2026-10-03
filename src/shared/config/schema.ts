@@ -36,4 +36,6 @@ export type Config = {
   categories: Category[];
   dock: { pinned: DockPin[] };
   appearance: { glass: GlassMode };
+  /** Закреплённая полоса видна всегда и резервирует место; иначе — автоскрытие. */
+  bars: { launcherPinned: boolean; dockPinned: boolean };
 };
