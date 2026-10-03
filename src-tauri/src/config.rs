@@ -132,6 +132,11 @@ pub fn config_set(
     store: State<'_, ConfigStore>,
     config: Config,
 ) -> Result<(), String> {
+    set(&app, &store, config)
+}
+
+/// Проверить, сохранить и разослать `config_changed` всем окнам (и слушателям в Rust).
+pub fn set(app: &AppHandle, store: &ConfigStore, config: Config) -> Result<(), String> {
     config.validate()?;
     *store.0.lock().expect("config lock") = config.clone();
     app.emit("config_changed", config)
