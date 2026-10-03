@@ -148,3 +148,89 @@
   width: 28px;
   height: 22px;
 }
+
+.ws-item-icon--system {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+
+/* ---------- «＋»: выбор приложений и ссылка ---------- */
+.ws-add-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ws-space-3);
+  min-height: 0;
+}
+
+.ws-add-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ws-space-3);
+}
+
+.ws-add-panel__head h3 {
+  margin: 0;
+  font: var(--ws-type-body);
+  font-weight: 600;
+}
+
+.ws-add-panel__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ws-space-2);
+}
+
+.ws-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font: var(--ws-type-body-sm);
+  color: var(--ws-text-2);
+}
+
+.ws-field__error {
+  color: var(--ws-danger);
+}
+
+.ws-category [hidden] {
+  display: none;
+}
+
+/* ---------- Правка категории ---------- */
+.ws-category__editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ws-space-3);
+}
+
+.ws-category__name {
+  flex: 1;
+}
+
+.ws-category__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ws-space-2);
+}
+
+.ws-category__colors {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+}
+
+.ws-category__color {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.ws-category__color[aria-checked="true"] {
+  border-color: var(--ws-text);
+}

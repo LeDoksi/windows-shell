@@ -1,4 +1,4 @@
-import type { Config } from "../config/schema";
+import type { Config, ItemKind } from "../config/schema";
 import type { FlyoutId } from "../../system/flyoutIds";
 import type { SystemState } from "../../system/model";
 
@@ -12,6 +12,18 @@ export interface Commands {
    * Прямоугольник «стеклянного» элемента окна (таблетка дока, верхняя панель) в физических
    * пикселях окна: под ним встаёт подложка с Acrylic.
    */
+  /** Открыть объект плитки, как двойной клик в Проводнике. Ошибка — текстом. */
+  launch: { args: { kind: ItemKind; target: string }; result: void };
+  /** Открыть папку объекта в Проводнике и выделить его. */
+  reveal: { args: { target: string }; result: void };
+  /** Есть ли эти пути на диске — по одному ответу на путь. */
+  paths_exist: { args: { paths: string[] }; result: boolean[] };
+  /** Иконка объекта из Windows как `data:`-URL (PNG 256 px); `null` — рисуем заглушку. */
+  item_icon: { args: { kind: ItemKind; target: string }; result: string | null };
+  /** Системный диалог «Открыть» поверх окна; пустой ответ — пользователь передумал. */
+  pick_paths: { args: { folders: boolean }; result: string[] };
+  /** Приложения из меню «Пуск»: название и AUMID. */
+  installed_apps: { args: Record<string, never>; result: { name: string; id: string }[] };
   glass_rect: { args: { x: number; y: number; w: number; h: number }; result: void };
 }
 
@@ -21,8 +33,8 @@ export interface Commands {
  */
 export interface Events {
   config_changed: Config;
-  /** Панель открывает окно категории. */
-  category_open: { id: string };
+  /** Панель открывает окно категории; `edit` — сразу в режиме правки (новая категория). */
+  category_open: { id: string; edit?: boolean };
   /** Окно категории закрылось (Esc, клик мимо, ушёл фокус). */
   category_closed: null;
   /** Док открывает flyout системного хвоста и передаёт текущее состояние. */

@@ -4006,11 +4006,14 @@ dependencies = [
 name = "windows-shell"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "png 0.18.1",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "window-vibrancy",
+ "windows",
  "windows-sys 0.61.2",
 ]
 
