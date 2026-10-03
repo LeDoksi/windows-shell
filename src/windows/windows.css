@@ -59,3 +59,8 @@
   margin: 0;
   color: var(--ws-text-3);
 }
+
+/* Окно меню дока подгоняется под меню: ширина меню не должна зависеть от ширины окна. */
+[data-window="dock-menu"] .ws-menu {
+  width: max-content;
+}

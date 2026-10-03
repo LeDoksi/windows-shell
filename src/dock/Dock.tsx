@@ -14,7 +14,12 @@ type Slot = { kind: "app"; entry: DockEntry } | { kind: "separator"; id: string 
 type Props = {
   pinned: DockEntry[];
   transient: DockEntry[];
-  onClickApp: (entry: DockEntry) => void;
+  /** `icon` — кнопка иконки: над ней открывается меню. */
+  onClickApp: (entry: DockEntry, icon: HTMLElement) => void;
+  /** Правый клик: меню приложения. */
+  onMenu?: (entry: DockEntry, icon: HTMLElement) => void;
+  /** Средний клик: новое окно. */
+  onLaunch?: (entry: DockEntry) => void;
   /** Системный хвост справа после разделителя. */
   tail?: ReactNode;
 };
@@ -26,7 +31,7 @@ const stateLabel: Record<DockEntry["state"], string> = {
   attention: "требует внимания",
 };
 
-export function Dock({ pinned, transient, onClickApp, tail }: Props) {
+export function Dock({ pinned, transient, onClickApp, onMenu, onLaunch, tail }: Props) {
   const slots = useMemo<Slot[]>(
     () => [
       ...pinned.map((entry) => ({ kind: "app" as const, entry })),
@@ -61,18 +66,30 @@ export function Dock({ pinned, transient, onClickApp, tail }: Props) {
             const { entry } = slot;
             const scale = scales[i] ?? 1;
             const size = dock.iconSize * scale;
-            const status = stateLabel[entry.state];
+            const status = entry.missing ? "не найдено" : stateLabel[entry.state];
             return (
-              <Tooltip key={entry.id} text={entry.title}>
+              <Tooltip
+                key={entry.id}
+                text={entry.missing ? `${entry.title} · Не найдено` : entry.title}
+              >
                 <button
                   type="button"
                   className="ws-dock__item"
                   data-state={entry.state}
+                  data-missing={entry.missing || undefined}
                   aria-label={status ? `${entry.title}, ${status}` : entry.title}
+                  aria-haspopup="menu"
                   style={{ width: size, height: size, fontSize: size * 0.42 }}
-                  onClick={() => onClickApp(entry)}
+                  onClick={(e) => onClickApp(entry, e.currentTarget)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    onMenu?.(entry, e.currentTarget);
+                  }}
+                  onAuxClick={(e) => {
+                    if (e.button === 1 && !entry.missing) onLaunch?.(entry);
+                  }}
                 >
-                  <AppGlyph id={entry.id} title={entry.title} />
+                  <AppGlyph id={entry.id} title={entry.title} target={entry.target} />
                   <span className="ws-dock__indicator" aria-hidden="true" />
                 </button>
               </Tooltip>

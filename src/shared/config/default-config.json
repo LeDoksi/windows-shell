@@ -87,7 +87,7 @@
           "id": "telegram",
           "kind": "app",
           "title": "Telegram",
-          "target": "TelegramDesktop",
+          "target": "Telegram.TelegramDesktop",
           "meta": "Приложение"
         }
       ]
@@ -150,7 +150,7 @@
       {
         "id": "telegram",
         "title": "Telegram",
-        "target": "TelegramDesktop"
+        "target": "Telegram.TelegramDesktop"
       },
       {
         "id": "code",

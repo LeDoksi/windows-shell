@@ -275,6 +275,7 @@
   position: fixed;
   z-index: 100;
   min-width: 220px;
+  max-width: 360px;
   padding: 6px;
 }
 .ws-menu hr {
@@ -301,6 +302,11 @@
   outline: 0;
   background: var(--ws-fill-hover);
 }
+.ws-menu__item > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .ws-menu__item--danger {
   color: var(--ws-danger);
 }
@@ -310,6 +316,7 @@
   cursor: default;
 }
 .ws-menu__item kbd {
+  flex: none;
   font: var(--ws-type-caption);
   color: var(--ws-text-3);
 }

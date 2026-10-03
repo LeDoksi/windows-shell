@@ -43,23 +43,37 @@ export function removeItem(config: Config, categoryId: string, itemId: string): 
 }
 
 /**
- * Id плиток, чьих файлов и папок нет на диске (удалили, отключили флешку).
+ * Id плиток, чьих файлов, папок и приложений нет (удалили, отключили флешку, удалили программу).
  * Проверяет при каждом новом `check` — например, при открытии окна и после неудачного запуска.
  */
 export function useMissing(items: LauncherItem[], check: unknown): ReadonlySet<string> {
   const [missing, setMissing] = useState<ReadonlySet<string>>(new Set());
-  // Строка, а не массив: эффект перезапускается, только когда пути правда поменялись.
+  // Строка, а не массив: эффект перезапускается, только когда цели правда поменялись.
   const key = JSON.stringify(
-    items.filter((item) => item.kind !== "url" && isPath(item.target)).map((i) => [i.id, i.target]),
+    items
+      .filter((item) => item.kind !== "url")
+      .map((i) => [i.id, i.target, isPath(i.target)] as const),
   );
   useEffect(() => {
     let alive = true;
-    const pairs = JSON.parse(key) as [string, string][];
-    const ids = pairs.map(([id]) => id);
-    const paths = pairs.map(([, path]) => path);
-    void backend.call("paths_exist", { paths }).then((exist) => {
-      if (alive) setMissing(new Set(ids.filter((_, i) => !exist[i])));
-    });
+    const all = JSON.parse(key) as [string, string, boolean][];
+    const paths = all.filter(([, , path]) => path);
+    // Приложение из «Пуска» (AUMID): есть ли оно в системе.
+    const apps = all.filter(([, , path]) => !path);
+    void Promise.all([
+      backend.call("paths_exist", { paths: paths.map(([, t]) => t) }),
+      apps.length
+        ? backend.call("app_targets", { targets: apps.map(([, t]) => t) })
+        : Promise.resolve([]),
+    ]).then(([exist, found]) => {
+      if (!alive) return;
+      setMissing(
+        new Set([
+          ...paths.filter((_, i) => !exist[i]).map(([id]) => id),
+          ...apps.filter((_, i) => found[i] && !found[i].exists).map(([id]) => id),
+        ]),
+      );
+    }, console.error);
     return () => {
       alive = false;
     };

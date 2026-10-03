@@ -25,6 +25,41 @@ export interface Commands {
   /** Приложения из меню «Пуск»: название и AUMID. */
   installed_apps: { args: Record<string, never>; result: { name: string; id: string }[] };
   glass_rect: { args: { x: number; y: number; w: number; h: number }; result: void };
+  /** Окна программ сейчас (дальше — событие `windows_changed`). */
+  windows_list: { args: Record<string, never>; result: WindowInfo[] };
+  /** Показать окно и сделать активным; свёрнутое — развернуть. */
+  window_activate: { args: { hwnd: number }; result: void };
+  window_minimize: { args: { hwnd: number }; result: void };
+  /** Попросить окно закрыться, как крестиком. */
+  window_close: { args: { hwnd: number }; result: void };
+  /** Установлены ли приложения (AUMID или путь) и где их exe — по ответу на каждое. */
+  app_targets: { args: { targets: string[] }; result: AppTarget[] };
+}
+
+/** Окно программы от трекера в Rust (`src-tauri/src/apps.rs`). */
+export interface WindowInfo {
+  hwnd: number;
+  title: string;
+  /** AppUserModelID окна или процесса: UWP, Chrome, Telegram… */
+  aumid: string | null;
+  /** Путь к exe. */
+  exe: string | null;
+  /** Название приложения: из «Пуска», описания exe или имени файла. */
+  appName: string;
+  minimized: boolean;
+  /** Активное окно (или владелец активного диалога). */
+  active: boolean;
+  /** Мигает, просит внимания. */
+  attention: boolean;
+  /** Порядок появления окна. */
+  seq: number;
+  /** Когда окно последний раз было активным; больше — позже, 0 — не было. */
+  focused: number;
+}
+
+export interface AppTarget {
+  exists: boolean;
+  exe: string | null;
 }
 
 /**
@@ -42,6 +77,14 @@ export interface Events {
   flyout_closed: null;
   /** Flyout поменял состояние (громкость, Wi-Fi) — док подхватывает. */
   system_state: SystemState;
+  /** Список окон программ поменялся. */
+  windows_changed: WindowInfo[];
+  /**
+   * Док открывает меню приложения (список окон, закрепить, закрыть).
+   * `x`, `y` — середина верхнего края иконки, физические пиксели экрана.
+   */
+  dock_menu_open: { id: string; x: number; y: number };
+  dock_menu_closed: null;
 }
 
 export interface AppInfo {

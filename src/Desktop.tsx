@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Dock } from "./dock/Dock";
-import { buildDock, clickApp } from "./dock/model";
-import { mockRunning } from "./dock/mockRunning";
+import type { DockEntry } from "./dock/model";
+import { useDockApps } from "./dock/useDockApps";
 import { CategoryWindow } from "./launcher/CategoryWindow";
 import { TopPanel } from "./launcher/TopPanel";
 import { addItems } from "./launcher/add";
@@ -15,6 +15,7 @@ import {
 import { backend } from "./shared/backend";
 import { openFolder, openItem, removeItem, revealItem } from "./launcher/items";
 import { useConfig } from "./shared/config";
+import { ContextMenu } from "./shared/ui";
 import { SystemTail } from "./system/SystemTail";
 import { mockSystem } from "./system/mockSystem";
 
@@ -27,7 +28,8 @@ export function Desktop() {
   const [openCategoryId, setOpenCategoryId] = useState<string | null>(null);
   /** Новая категория открывается сразу в режиме правки. */
   const [editNew, setEditNew] = useState(false);
-  const [running, setRunning] = useState(mockRunning);
+  const apps = useDockApps();
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [system, setSystem] = useState(() =>
     mockSystem(new URLSearchParams(window.location.search).has("laptop")),
   );
@@ -40,7 +42,11 @@ export function Desktop() {
     setOpenCategoryId(id);
     setEditNew(edit);
   };
-  const dock = buildDock(config.dock.pinned, running);
+  const openMenu = (entry: DockEntry, icon: HTMLElement) => {
+    const r = icon.getBoundingClientRect();
+    setMenu({ id: entry.id, x: r.left + r.width / 2, y: r.top - 10 });
+  };
+  const menuEntry = menu && apps.find(menu.id);
 
   return (
     <div className="ws-desktop">
@@ -76,10 +82,21 @@ export function Desktop() {
         />
       )}
       <Dock
-        pinned={dock.pinned}
-        transient={dock.transient}
-        onClickApp={(entry) => setRunning((r) => clickApp(r, entry.id, entry.title))}
+        pinned={apps.pinned}
+        transient={apps.transient}
+        onClickApp={(entry, icon) => apps.click(entry) === "menu" && openMenu(entry, icon)}
+        onMenu={openMenu}
+        onLaunch={apps.launch}
         tail={<SystemTail state={system} onChange={setSystem} />}
+      />
+      <ContextMenu
+        open={Boolean(menuEntry)}
+        x={menu?.x ?? 0}
+        y={menu?.y ?? 0}
+        placement="above"
+        label={menuEntry?.title}
+        items={menuEntry ? apps.menu(menuEntry) : []}
+        onClose={() => setMenu(null)}
       />
     </div>
   );

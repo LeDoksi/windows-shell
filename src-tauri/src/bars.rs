@@ -32,7 +32,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::config::{Bars, Config, ConfigStore};
-use crate::shell::{self, CATEGORY, DOCK, FLYOUT, LAUNCHER, SEARCH};
+use crate::shell::{self, CATEGORY, DOCK, DOCK_MENU, FLYOUT, LAUNCHER, SEARCH};
 
 /// Курсор у края дольше этого — показываем (чтобы полоса не выскакивала, когда курсор пролетает).
 pub const REVEAL_DELAY_MS: u64 = 150;
@@ -331,7 +331,7 @@ pub fn start(app: &AppHandle) {
         state: Autohide::default(),
         appbar: None,
     };
-    // Поповеры держат свою полосу показанной: категория и поиск — панель, flyout — док.
+    // Поповеры держат свою полосу показанной: категория и поиск — панель, flyout и меню — док.
     let bars = vec![
         (
             bar(LAUNCHER, Edge::Top, shell::LAUNCHER_BACKDROP),
@@ -339,7 +339,7 @@ pub fn start(app: &AppHandle) {
         ),
         (
             bar(DOCK, Edge::Bottom, shell::DOCK_BACKDROP),
-            [hwnd_of(FLYOUT), std::ptr::null_mut()],
+            [hwnd_of(FLYOUT), hwnd_of(DOCK_MENU)],
         ),
     ];
     for (bar, _) in &bars {
