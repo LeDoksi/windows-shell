@@ -9,6 +9,8 @@ public static class TB {
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr p, IntPtr a, string c, string w);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
   [DllImport("shell32.dll")] public static extern UIntPtr SHAppBarMessage(uint m, ref APPBARDATA d);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern uint RegisterWindowMessage(string s);
+  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
 }
 "@
 $stateFile = Join-Path $env:LOCALAPPDATA "WindowsShell\taskbar-state.txt"
@@ -18,8 +20,14 @@ if (Test-Path $stateFile) {
   $d.hWnd = [TB]::FindWindowEx([IntPtr]::Zero, [IntPtr]::Zero, "Shell_TrayWnd", $null)
   $d.lParam = [IntPtr]([int]$autohide)          # ABS_AUTOHIDE = 1, иначе 0
   [TB]::SHAppBarMessage(10, [ref]$d) | Out-Null   # ABM_SETSTATE
+  $tray = (Get-Content $stateFile -Raw) -match 'tray=1'
   Remove-Item $stateFile
   "autohide restored to $([int]$autohide)"
+  if ($tray) {
+    # Our tray intercepted icons: ask apps to register them with Explorer again.
+    [TB]::PostMessage([IntPtr]0xffff, [TB]::RegisterWindowMessage("TaskbarCreated"), [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    "TaskbarCreated broadcast"
+  }
 }
 foreach ($class in "Shell_TrayWnd", "Shell_SecondaryTrayWnd") {
   $h = [IntPtr]::Zero

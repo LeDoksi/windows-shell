@@ -1,5 +1,6 @@
 //! Спайк WSH-43: прячем панель задач Windows и гарантированно возвращаем её.
-//! Включается `WS_TASKBAR=hide` поверх спайка дока (`--features spike`).
+//! Включается `WS_TASKBAR=hide` поверх спайка дока (`--features spike`). Сторож и возврат
+//! общие со спайком трея WSH-44 (`WS_TRAY=1`).
 //!
 //! Возврат, от самого частого к аварийному:
 //! 1. обычный выход приложения (`RunEvent::Exit`) и паника;
@@ -20,7 +21,8 @@ use windows_sys::Win32::UI::Shell::{
     SHAppBarMessage, ABM_GETSTATE, ABM_SETSTATE, ABS_AUTOHIDE, APPBARDATA,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    FindWindowExW, IsWindowVisible, RegisterWindowMessageW, ShowWindow, SW_HIDE, SW_SHOW,
+    FindWindowExW, IsWindowVisible, RegisterWindowMessageW, SendNotifyMessageW, ShowWindow,
+    HWND_BROADCAST, SW_HIDE, SW_SHOW,
 };
 
 /// Сейчас прячем: фоновая проверка и `TaskbarCreated` прячут панель заново.
@@ -38,7 +40,7 @@ fn state_file() -> PathBuf {
     base.join("WindowsShell").join("taskbar-state.txt")
 }
 
-fn log(msg: &str) {
+pub(crate) fn log(msg: &str) {
     eprintln!("[taskbar] {msg}");
     let path = state_file().with_file_name("taskbar.log");
     let line = format!(
@@ -101,6 +103,20 @@ pub fn restore() {
         );
         let _ = std::fs::remove_file(&file);
         log(&format!("restored autohide={}", autohide as u8));
+        if saved.contains("tray=1") {
+            // Наш трей перехватывал иконки. Его окно уже закрыто — просим программы
+            // заново зарегистрировать иконки у Explorer (так делает сам Explorer после перезапуска).
+            crate::spike_tray::stop();
+            unsafe {
+                SendNotifyMessageW(
+                    HWND_BROADCAST,
+                    RegisterWindowMessageW(wide("TaskbarCreated").as_ptr()),
+                    0,
+                    0,
+                )
+            };
+            log("broadcast TaskbarCreated");
+        }
     }
     let n = set_visible(true);
     log(&format!("shown {n} taskbar windows"));
@@ -154,8 +170,9 @@ pub fn on_message(msg: u32) {
     }
 }
 
-/// Спрятать панель задач на всех мониторах.
-pub fn hide() {
+/// Перед любыми изменениями: сохранить исходное состояние, поднять сторожа, повесить panic hook.
+/// `tray` — будет ли работать наш трей (тогда при возврате программы перерегистрируют иконки).
+pub fn guard(tray: bool) {
     // Хвост от прошлого раза (жёсткое убийство обоих процессов) — сначала вернуть.
     if state_file().exists() {
         log("state file left from previous run");
@@ -166,11 +183,14 @@ pub fn hide() {
         Ordering::Relaxed,
     );
 
-    // Сначала сохраняем исходное состояние и поднимаем сторожа, только потом что-то меняем.
     let autohide = appbar(ABM_GETSTATE, 0) as u32 & ABS_AUTOHIDE != 0;
     let file = state_file();
     let _ = std::fs::create_dir_all(file.parent().expect("state dir"));
-    std::fs::write(&file, format!("autohide={}\n", autohide as u8)).expect("save taskbar state");
+    std::fs::write(
+        &file,
+        format!("autohide={}\ntray={}\n", autohide as u8, tray as u8),
+    )
+    .expect("save taskbar state");
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     // Сторожа не ждём: он должен пережить нас.
     #[allow(clippy::zombie_processes)]
@@ -190,7 +210,10 @@ pub fn hide() {
         restore();
         prev(info);
     }));
+}
 
+/// Спрятать панель задач на всех мониторах. Перед этим — `guard`.
+pub fn hide() {
     // Автоскрытие отдаёт место панели под рабочую область; само окно прячем поверх.
     appbar(ABM_SETSTATE, ABS_AUTOHIDE as isize);
     HIDING.store(true, Ordering::Relaxed);
