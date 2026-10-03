@@ -7,6 +7,8 @@ mod config;
 #[cfg(all(windows, not(feature = "spike")))]
 mod dock;
 #[cfg(not(feature = "spike"))]
+mod icons;
+#[cfg(not(feature = "spike"))]
 mod launch;
 #[cfg(not(feature = "spike"))]
 mod shell;
@@ -54,6 +56,7 @@ pub fn run() {
             // Раньше окон: они сразу спрашивают конфиг.
             let dir = app.path().app_config_dir()?;
             app.manage(config::ConfigStore::load(&dir));
+            app.manage(icons::IconCache::default());
             shell::create(app.handle())?;
             #[cfg(windows)]
             bars::start(app.handle());
@@ -67,6 +70,7 @@ pub fn run() {
             launch::launch,
             launch::reveal,
             launch::paths_exist,
+            icons::item_icon,
             shell::glass_rect
         ]);
 

@@ -18,6 +18,8 @@ export interface Commands {
   reveal: { args: { target: string }; result: void };
   /** Есть ли эти пути на диске — по одному ответу на путь. */
   paths_exist: { args: { paths: string[] }; result: boolean[] };
+  /** Иконка объекта из Windows как `data:`-URL (PNG 256 px); `null` — рисуем заглушку. */
+  item_icon: { args: { kind: ItemKind; target: string }; result: string | null };
   glass_rect: { args: { x: number; y: number; w: number; h: number }; result: void };
 }
 

@@ -30,6 +30,7 @@ export function createMockBackend(): Backend {
     },
     reveal: ({ target }) => console.info(`[mock] показать в Проводнике: ${target}`),
     paths_exist: ({ paths }) => paths.map(() => true),
+    item_icon: () => null,
     glass_rect: () => {},
   };
 

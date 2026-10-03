@@ -148,3 +148,9 @@
   width: 28px;
   height: 22px;
 }
+
+.ws-item-icon--system {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}

@@ -118,10 +118,10 @@ mod os {
     }
 
     /// Расширениям Проводника нужен COM в однопоточном режиме — на время вызова.
-    struct Com(bool);
+    pub struct Com(bool);
 
     impl Com {
-        fn init() -> Self {
+        pub fn init() -> Self {
             // S_FALSE (уже инициализирован) тоже требует парного CoUninitialize.
             let hr = unsafe {
                 CoInitializeEx(
@@ -186,6 +186,9 @@ mod os {
         }
     }
 }
+
+#[cfg(windows)]
+pub use os::Com;
 
 /// Вне Windows запускать нечего: сборка и тесты на других системах.
 #[cfg(not(windows))]
