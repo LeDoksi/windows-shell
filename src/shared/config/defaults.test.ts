@@ -26,6 +26,15 @@ describe("validateConfig", () => {
     expect(validateConfig(broken)).toMatch(/режим стекла/);
   });
 
+  it("defaults both bars to autohide", () => {
+    expect(defaultConfig.bars).toEqual({ launcherPinned: false, dockPinned: false });
+    const broken = {
+      ...defaultConfig,
+      bars: { launcherPinned: "yes" as unknown as boolean, dockPinned: false },
+    };
+    expect(validateConfig(broken)).toMatch(/закрепление/);
+  });
+
   it("rejects unknown schema version", () => {
     expect(validateConfig({ ...defaultConfig, schemaVersion: 2 as 1 })).toMatch(/версия/);
   });

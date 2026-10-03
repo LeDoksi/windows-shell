@@ -186,15 +186,19 @@ pub fn glass_rect(
     place_glass(&app, window.label()).map_err(|e| e.to_string())
 }
 
-/// Поставить подложку `<метка>-backdrop` под запомненный прямоугольник окна `<метка>`.
-fn place_glass(app: &AppHandle, label: &str) -> tauri::Result<()> {
-    let rect = GLASS
+/// Прямоугольник «стеклянного» элемента окна `label`, если окно его уже сообщило.
+pub fn glass_of(label: &str) -> Option<Rect> {
+    GLASS
         .lock()
         .expect("glass lock")
         .as_ref()
-        .and_then(|m| m.get(label).copied());
+        .and_then(|m| m.get(label).copied())
+}
+
+/// Поставить подложку `<метка>-backdrop` под запомненный прямоугольник окна `<метка>`.
+fn place_glass(app: &AppHandle, label: &str) -> tauri::Result<()> {
     let (Some(rect), Some(owner), Some(backdrop)) = (
-        rect,
+        glass_of(label),
         app.get_webview_window(label),
         app.get_webview_window(&format!("{label}-backdrop")),
     ) else {
