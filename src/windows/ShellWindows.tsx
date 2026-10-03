@@ -180,30 +180,46 @@ function CategoryPopup() {
 }
 
 /**
- * Каждый кадр сверяем «стеклянный» элемент и отдаём его Rust: подложка с Acrylic
- * встаёт ровно под него. В режиме «Тонировка» подложка спрятана, но держим её на месте.
+ * Сообщаем Rust прямоугольник «стеклянного» элемента: подложка с Acrylic встаёт ровно под него.
+ * Пересчёт — когда элемент меняет размер (увеличение иконок, новые иконки) или окно — масштаб,
+ * а не каждый кадр: постоянный цикл держал WebView2 на ~7 % ядра в простое.
+ * В режиме «Тонировка» подложка спрятана, но держим её на месте.
  */
 function useGlassRect(selector: string) {
   useEffect(() => {
-    let frame = 0;
     let last = "";
-    const tick = () => {
-      const el = document.querySelector(selector);
-      if (el) {
-        // Физические пиксели — по devicePixelRatio самого WebView2 (спайк WSH-6).
-        const d = window.devicePixelRatio;
-        const r = el.getBoundingClientRect();
-        const rect = { x: r.x * d, y: r.y * d, w: r.width * d, h: r.height * d };
-        const key = `${rect.x},${rect.y},${rect.w},${rect.h}`;
-        if (key !== last) {
-          last = key;
-          void backend.call("glass_rect", rect);
-        }
+    let el: Element | null = null;
+    const send = () => {
+      if (!el) return;
+      // Физические пиксели — по devicePixelRatio самого WebView2 (спайк WSH-6).
+      const d = window.devicePixelRatio;
+      const r = el.getBoundingClientRect();
+      const rect = { x: r.x * d, y: r.y * d, w: r.width * d, h: r.height * d };
+      const key = `${rect.x},${rect.y},${rect.w},${rect.h}`;
+      if (key !== last) {
+        last = key;
+        void backend.call("glass_rect", rect);
       }
-      frame = requestAnimationFrame(tick);
     };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
+    const observer = new ResizeObserver(send);
+    // Элемент появляется после загрузки конфига — ждём его без постоянного цикла.
+    const attach = () => {
+      const found = document.querySelector(selector);
+      if (found === el) return;
+      if (el) observer.unobserve(el);
+      el = found;
+      if (el) observer.observe(el);
+      send();
+    };
+    const mutations = new MutationObserver(attach);
+    mutations.observe(document.body, { childList: true, subtree: true });
+    attach();
+    window.addEventListener("resize", send);
+    return () => {
+      observer.disconnect();
+      mutations.disconnect();
+      window.removeEventListener("resize", send);
+    };
   }, [selector]);
 }
 

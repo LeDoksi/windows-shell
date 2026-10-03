@@ -16,6 +16,8 @@ export function useSystemIcon(kind: ItemKind, target: string): string | null {
     if (!request) {
       request = backend.call("item_icon", { kind, target }).catch(() => null);
       icons.set(key, request);
+      // Без иконки не запоминаем: в следующий раз спросим снова.
+      void request.then((src) => src === null && icons.delete(key));
     }
     void request.then((src) => alive && setIcon({ key, src }));
     return () => {

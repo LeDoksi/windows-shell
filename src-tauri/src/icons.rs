@@ -132,16 +132,20 @@ pub async fn item_icon(
     let icon = tauri::async_runtime::spawn_blocking(move || load(&dir, &source, &worker_key))
         .await
         .map_err(|e| e.to_string())?;
-    cache
-        .0
-        .lock()
-        .expect("icon cache")
-        .insert(key, icon.clone());
+    // Неудачу не запоминаем: иконка может появиться позже (приложение ещё грузится).
+    if icon.is_some() {
+        cache
+            .0
+            .lock()
+            .expect("icon cache")
+            .insert(key, icon.clone());
+    }
     Ok(icon)
 }
 
 #[cfg(windows)]
 mod os {
+    use windows::core::HRESULT;
     use windows::core::HSTRING;
     use windows::Win32::Foundation::SIZE;
     use windows::Win32::Graphics::Gdi::{
@@ -155,6 +159,9 @@ mod os {
     use super::{bgra_to_rgba, encode_png, SIZE};
     use crate::launch::Com;
 
+    /// «Данные ещё не готовы» (0x8000000A).
+    const E_PENDING: HRESULT = HRESULT(0x8000_000A_u32 as i32);
+
     /// Иконка объекта от Проводника — PNG. Для `.lnk` это иконка цели ярлыка.
     pub fn render(source: &str) -> Result<Vec<u8>, String> {
         let _com = Com::init();
@@ -166,9 +173,18 @@ mod os {
                 cx: SIZE as i32,
                 cy: SIZE as i32,
             };
-            let bitmap = factory
-                .GetImage(size, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK)
-                .map_err(err)?;
+            // Некоторые приложения (Xbox, AmneziaVPN) сначала отвечают E_PENDING:
+            // Проводник ещё достаёт картинку — ждём немного и спрашиваем снова.
+            let mut tries = 0;
+            let bitmap = loop {
+                match factory.GetImage(size, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK) {
+                    Err(e) if e.code() == E_PENDING && tries < 20 => {
+                        tries += 1;
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                    other => break other.map_err(err)?,
+                }
+            };
             let mut info = BITMAP::default();
             GetObjectW(
                 HGDIOBJ(bitmap.0),
