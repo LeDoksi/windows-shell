@@ -1,0 +1,52 @@
+/* Окна оболочки прозрачные: видно рабочий стол, а стекло даёт DWM или тонировка. */
+:root[data-window] {
+  background: transparent;
+}
+
+/* Окно по размеру своей части интерфейса: прокрутки быть не должно. */
+:root[data-window],
+:root[data-window] body {
+  overflow: hidden;
+}
+
+/* Окно категории уже стоит под панелью: карточка с краю окна. */
+:root[data-window="category"] .ws-category {
+  top: 8px;
+  max-height: calc(100vh - 16px);
+}
+
+/* Flyout прижат к правому нижнему углу окна; окно ставит над доком сам док. */
+:root[data-window="flyout"] .ws-tail-flyout {
+  right: 12px;
+  bottom: 12px;
+}
+
+/* Таблетка дока: размытие даёт подложка с Acrylic, радиус как у DWM-скругления (8 px). */
+:root[data-window="dock"] .ws-dock__pill {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: none;
+  box-shadow: var(--ws-highlight);
+  border-radius: 8px;
+}
+
+.ws-search-window {
+  position: absolute;
+  inset: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ws-space-3);
+  padding: var(--ws-space-4);
+  border-radius: var(--ws-radius-lg);
+}
+
+.ws-search-window__results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--ws-space-2);
+  overflow-y: auto;
+}
+
+.ws-search-window__empty {
+  margin: 0;
+  color: var(--ws-text-3);
+}
