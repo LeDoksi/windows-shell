@@ -103,6 +103,11 @@ describe("launchTarget", () => {
         win(1, { exe: "C:\\Program Files\\WindowsApps\\calc\\calc.exe", aumid: "Calc!App" }),
       ),
     ).toBe("Calc!App");
+    expect(
+      launchTarget(
+        win(1, { exe: "C:\\Windows\\System32\\ApplicationFrameHost.exe", aumid: "Xbox!App" }),
+      ),
+    ).toBe("Xbox!App");
   });
 });
 

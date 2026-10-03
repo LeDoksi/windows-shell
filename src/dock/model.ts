@@ -34,9 +34,10 @@ export function appKey(w: WindowInfo) {
 /**
  * Что запускать для незакреплённого приложения и откуда брать иконку. У UWP exe лежит
  * в WindowsApps и сам не запускается — там нужен AUMID; у обычных программ надёжнее exe.
+ * Свёрнутое UWP-окно отдаёт exe рамки, ApplicationFrameHost, — его тоже не запускаем.
  */
 export function launchTarget(w: WindowInfo) {
-  if (w.exe && !/\\windowsapps\\/i.test(w.exe)) return w.exe;
+  if (w.exe && !/\\windowsapps\\|\\applicationframehost\.exe$/i.test(w.exe)) return w.exe;
   return w.aumid ?? w.exe ?? "";
 }
 

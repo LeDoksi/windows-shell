@@ -245,8 +245,8 @@ mod os {
         ShowWindowAsync, TranslateMessage, CHILDID_SELF, EVENT_OBJECT_CLOAKED, EVENT_OBJECT_CREATE,
         EVENT_OBJECT_HIDE, EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_UNCLOAKED,
         EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND, EVENT_SYSTEM_MINIMIZESTART, GA_ROOT,
-        GA_ROOTOWNER, GWL_EXSTYLE, GW_OWNER, MSG, OBJID_WINDOW, SW_MINIMIZE, SW_RESTORE,
-        WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP, WM_CLOSE, WM_TIMER, WNDCLASSW,
+        GA_ROOTOWNER, GWL_EXSTYLE, GW_OWNER, MSG, OBJID_WINDOW, SC_CLOSE, SW_MINIMIZE, SW_RESTORE,
+        WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP, WM_SYSCOMMAND, WM_TIMER, WNDCLASSW,
         WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
     };
 
@@ -742,7 +742,8 @@ mod os {
 
     pub fn close(hwnd: i64) -> Result<(), String> {
         let h = window(hwnd)?;
-        unsafe { PostMessageW(h, WM_CLOSE, 0, 0) };
+        // Как «Закрыть окно» в панели задач: WM_CLOSE у Блокнота с вкладками закрывает одну вкладку.
+        unsafe { PostMessageW(h, WM_SYSCOMMAND, SC_CLOSE as usize, 0) };
         Ok(())
     }
 
