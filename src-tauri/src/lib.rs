@@ -10,6 +10,8 @@ mod spike;
 mod spike_autohide;
 #[cfg(all(windows, feature = "spike"))]
 mod spike_taskbar;
+#[cfg(all(windows, feature = "spike"))]
+mod spike_tray;
 
 use serde::Serialize;
 
