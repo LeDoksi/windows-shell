@@ -27,10 +27,10 @@ describe("validateConfig", () => {
   });
 
   it("defaults both bars to autohide", () => {
-    expect(defaultConfig.bars).toEqual({ launcherPinned: false, dockPinned: false });
+    expect(defaultConfig.bars).toEqual({ launcherPinned: false, dockPinned: false, monitor: null });
     const broken = {
       ...defaultConfig,
-      bars: { launcherPinned: "yes" as unknown as boolean, dockPinned: false },
+      bars: { launcherPinned: "yes" as unknown as boolean, dockPinned: false, monitor: null },
     };
     expect(validateConfig(broken)).toMatch(/закрепление/);
   });

@@ -3,7 +3,8 @@
 //! Фронт выбирает, что рисовать, по метке окна (`src/windows/`).
 
 use tauri::{
-    AppHandle, Listener, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Listener, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
 };
 
 use std::collections::HashMap;
@@ -49,7 +50,8 @@ fn window(app: &AppHandle, label: &str, (w, h): (f64, f64)) -> tauri::Result<Web
         .build()
 }
 
-/// Создать все окна на основном мониторе. Видимы сразу только панель и док.
+/// Создать все окна на основном мониторе (на выбранный их переносит `bars`). Видимы сразу только
+/// панель и док.
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let monitor = app.primary_monitor()?.expect("primary monitor");
     let s = monitor.scale_factor();
@@ -63,16 +65,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     launcher.set_position(PhysicalPosition::new(ax, ay))?;
 
     let category = window(app, CATEGORY, CATEGORY_SIZE)?;
-    category.set_position(PhysicalPosition::new(
-        centered_x(CATEGORY_SIZE.0),
-        ay + px(CATEGORY_TOP),
-    ))?;
-
     let search = window(app, SEARCH, SEARCH_SIZE)?;
-    search.set_position(PhysicalPosition::new(
-        centered_x(SEARCH_SIZE.0),
-        ay + (ah - px(SEARCH_SIZE.1)) / 3,
-    ))?;
 
     // Flyout ставит на место сам док: над кнопкой системного хвоста.
     let flyout = window(app, FLYOUT, FLYOUT_SIZE)?;
@@ -132,6 +125,22 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         }
     });
     Ok(())
+}
+
+/// Окна категории и поиска — на монитор полос `(x, y, w, h)` (физические пиксели) с масштабом `s`:
+/// категория под панелью у верхнего края монитора. Размер тоже в физических: спрятанное окно
+/// не получает `WM_DPICHANGED`, и Tauri сам его не пересчитает. Зовёт `bars` при смене монитора.
+pub fn place_popovers(app: &AppHandle, (ax, ay, aw, ah): Rect, s: f64) {
+    let px = |v: f64| (v * s).round() as i32;
+    for (label, (w, h), y) in [
+        (CATEGORY, CATEGORY_SIZE, ay + px(CATEGORY_TOP)),
+        (SEARCH, SEARCH_SIZE, ay + (ah - px(SEARCH_SIZE.1)) / 3),
+    ] {
+        if let Some(win) = app.get_webview_window(label) {
+            let _ = win.set_size(PhysicalSize::new(px(w), px(h)));
+            let _ = win.set_position(PhysicalPosition::new(ax + (aw - px(w)) / 2, y));
+        }
+    }
 }
 
 /// «Стекло» — подложки с Acrylic видны; «Тонировка» — спрятаны, фон даёт CSS.

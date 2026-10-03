@@ -35,5 +35,8 @@ export function validateConfig(config: Config): string | null {
   ) {
     return "закрепление панели и дока — да или нет";
   }
+  if (config.bars.monitor !== null && typeof config.bars.monitor !== "string") {
+    return "монитор — имя устройства или пусто";
+  }
   return null;
 }
