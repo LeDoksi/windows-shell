@@ -1,7 +1,7 @@
-import { Icon, IconButton, Slider, Toggle } from "../shared/ui";
+import { Icon, Toggle } from "../shared/ui";
 import { duration, monthGrid } from "./format";
 import { WifiGlyph } from "./glyphs";
-import type { AudioState, BatteryState, NetworkState, TrayIcon, WifiNetwork } from "./model";
+import type { BatteryState, NetworkState, TrayIcon, WifiNetwork } from "./model";
 import { AppGlyph } from "../dock/AppGlyph";
 
 export function TrayFlyout({ icons }: { icons: TrayIcon[] }) {
@@ -77,51 +77,6 @@ export function NetworkFlyout({ network, wifiEnabled, networks, onWifiEnabled }:
       <button type="button" className="ws-flyout__link">
         <Icon name="external" size={14} />
         Параметры сети
-      </button>
-    </>
-  );
-}
-
-type AudioProps = {
-  audio: AudioState;
-  onDevice: (id: string) => void;
-  onVolume: (volume: number) => void;
-  onMute: (muted: boolean) => void;
-};
-
-/** Мок-версия аудио-виджета: полная версия с приложениями и микрофоном — этап 5. */
-export function AudioFlyout({ audio, onDevice, onVolume, onMute }: AudioProps) {
-  return (
-    <>
-      <div className="ws-flyout__section">Вывод</div>
-      <div role="radiogroup" aria-label="Устройство вывода" className="ws-flyout__list">
-        {audio.devices.map((d) => (
-          <button
-            key={d.id}
-            type="button"
-            role="radio"
-            aria-checked={d.id === audio.defaultId}
-            className="ws-flyout__option"
-            onClick={() => onDevice(d.id)}
-          >
-            <span className="ws-radio" aria-hidden="true" />
-            <span className="ws-flyout__option-text">{d.name}</span>
-          </button>
-        ))}
-      </div>
-      <div className="ws-flyout__row ws-flyout__row--volume">
-        <IconButton
-          icon={audio.muted ? "speakerMuted" : "speaker"}
-          label={audio.muted ? "Включить звук" : "Выключить звук"}
-          aria-pressed={audio.muted}
-          onClick={() => onMute(!audio.muted)}
-        />
-        <Slider value={audio.volume} onChange={onVolume} label="Общая громкость" />
-        <span className="ws-flyout__value">{audio.volume}%</span>
-      </div>
-      <button type="button" className="ws-flyout__link">
-        <Icon name="external" size={14} />
-        Параметры звука Windows
       </button>
     </>
   );

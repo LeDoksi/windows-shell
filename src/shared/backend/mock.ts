@@ -1,6 +1,7 @@
 import { mockWindows } from "../../dock/mockWindows";
 import { defaultConfig } from "../config/defaults";
 import { validateConfig } from "../config/validate";
+import { createMockAudio } from "./mockAudio";
 import type { Backend, CommandName, Commands, EventName, Events, WindowInfo } from "./types";
 
 type Handlers = { [C in CommandName]: (args: Commands[C]["args"]) => Commands[C]["result"] };
@@ -89,6 +90,7 @@ export function createMockBackend(): Backend {
       ),
     window_close: ({ hwnd }) => setWindows(windows.filter((w) => w.hwnd !== hwnd)),
     app_targets: ({ targets }) => targets.map(() => ({ exists: true, exe: null })),
+    ...createMockAudio(emit),
   };
 
   return {

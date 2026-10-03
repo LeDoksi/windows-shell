@@ -86,6 +86,16 @@ pub struct Bars {
     pub monitor: Option<String>,
 }
 
+/// Виджет (этап 5): включён ли и его настройки. Порядок в списке — порядок в панели.
+/// Настройки у каждого виджета свои; Rust их не проверяет, только читает нужное (хоткеи звука).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WidgetEntry {
+    pub id: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub settings: serde_json::Map<String, serde_json::Value>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
@@ -97,6 +107,13 @@ pub struct Config {
     pub appearance: Appearance,
     #[serde(default)]
     pub bars: Bars,
+    /// Нет в старом конфиге — виджеты по умолчанию.
+    #[serde(default = "default_widgets")]
+    pub widgets: Vec<WidgetEntry>,
+}
+
+fn default_widgets() -> Vec<WidgetEntry> {
+    Config::defaults().widgets
 }
 
 impl Config {
@@ -125,6 +142,9 @@ impl Config {
         }
         for pin in &self.dock.pinned {
             unique("pin", &pin.id)?;
+        }
+        for widget in &self.widgets {
+            unique("widget", &widget.id)?;
         }
         Ok(())
     }
@@ -359,6 +379,24 @@ mod tests {
         let old: Config = serde_json::from_value(json).unwrap();
         assert_eq!(old.bars, Bars::default());
         assert!(!Config::defaults().bars.launcher_pinned);
+    }
+
+    #[test]
+    fn widgets_default_to_audio_and_media() {
+        let mut json: serde_json::Value = serde_json::from_str(DEFAULT_CONFIG).unwrap();
+        json.as_object_mut().unwrap().remove("widgets");
+        let old: Config = serde_json::from_value(json).unwrap();
+        let ids: Vec<_> = old.widgets.iter().map(|w| w.id.as_str()).collect();
+        assert_eq!(ids, ["audio", "media"]);
+        assert!(old.widgets.iter().all(|w| w.enabled));
+    }
+
+    #[test]
+    fn rejects_duplicate_widgets() {
+        let mut config = Config::defaults();
+        let first = config.widgets[0].clone();
+        config.widgets.push(first);
+        assert!(config.validate().unwrap_err().contains("widget"));
     }
 
     /// Своя пустая папка на тест: тесты идут параллельно.

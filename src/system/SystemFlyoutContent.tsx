@@ -1,8 +1,9 @@
-import { AudioFlyout, BatteryFlyout, ClockFlyout, NetworkFlyout, TrayFlyout } from "./flyouts";
+import { BatteryFlyout, ClockFlyout, NetworkFlyout, TrayFlyout } from "./flyouts";
 import type { FlyoutId } from "./flyoutIds";
 import type { SystemState } from "./model";
 import type { SystemChange } from "./SystemTail";
 import { useNow } from "./useNow";
+import { WidgetFlyout } from "../widgets/WidgetZone";
 
 /** Содержимое flyout системного хвоста: в доке (браузерный режим) или в окне flyout (Tauri). */
 export function SystemFlyoutContent({
@@ -15,9 +16,7 @@ export function SystemFlyoutContent({
   onChange: SystemChange;
 }) {
   const now = useNow();
-  const { audio, battery } = state;
-  const setVolume = (volume: number) =>
-    onChange((s) => ({ ...s, audio: { ...s.audio, volume, muted: false } }));
+  const { battery } = state;
   switch (id) {
     case "tray":
       return <TrayFlyout icons={state.tray} />;
@@ -31,14 +30,7 @@ export function SystemFlyoutContent({
         />
       );
     case "audio":
-      return (
-        <AudioFlyout
-          audio={audio}
-          onDevice={(defaultId) => onChange((s) => ({ ...s, audio: { ...s.audio, defaultId } }))}
-          onVolume={setVolume}
-          onMute={(muted) => onChange((s) => ({ ...s, audio: { ...s.audio, muted } }))}
-        />
-      );
+      return <WidgetFlyout id="audio" />;
     case "battery":
       return battery ? <BatteryFlyout battery={battery} /> : null;
     case "clock":

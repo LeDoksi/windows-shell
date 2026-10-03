@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Dock } from "../dock/Dock";
 import type { DockEntry } from "../dock/model";
@@ -24,14 +24,19 @@ import { SystemTail } from "../system/SystemTail";
 import { flyoutLabels, type FlyoutId } from "../system/flyoutIds";
 import { mockSystem } from "../system/mockSystem";
 import type { SystemState } from "../system/model";
+import { PanelFlyoutContent } from "../widgets/PanelFlyout";
+import { SETTINGS_FLYOUT, panelFlyoutLabel } from "../widgets/panelFlyoutIds";
+import { WidgetZone } from "../widgets/WidgetZone";
 import {
   fitWindowAbove,
   hideWindow,
-  placeFlyoutOver,
   screenTopCenter,
   showWindow,
+  toScreen,
+  useAnchoredWindow,
   useCloseOnBlur,
   useFitWindowTop,
+  type Anchor,
   type WindowLabel,
 } from "./shell";
 import "./windows.css";
@@ -57,6 +62,8 @@ export function ShellWindow({ label }: { label: WindowLabel }) {
       return <DockMenuWindow />;
     case "flyout":
       return <FlyoutWindow />;
+    case "panel-flyout":
+      return <PanelFlyoutWindow />;
     case "search":
       return <SearchWindow />;
     case "dock-backdrop":
@@ -78,15 +85,35 @@ function useEvent<E extends EventName>(event: E, handler: (payload: Events[E]) =
 function LauncherWindow() {
   const { config, update } = useConfig();
   const [openId, setOpenId] = useState<string | null>(null);
+  const [flyout, setFlyout] = useState<string | null>(null);
   useEvent(
     "category_closed",
     useCallback(() => setOpenId(null), []),
   );
+  useEvent(
+    "panel_flyout_closed",
+    useCallback(() => setFlyout(null), []),
+  );
   useFitWindowTop(".ws-top-panel", 16, 80);
   useGlassRect(".ws-top-panel");
   if (!config) return null;
+  // Flyout виджета или настроек — своё окно под панелью, правым краем по кнопке.
+  const toggleFlyout = async (id: string, anchor: HTMLElement) => {
+    if (flyout === id) {
+      setFlyout(null);
+      return hideWindow("panel-flyout");
+    }
+    setFlyout(id);
+    const panel = document.querySelector(".ws-top-panel")?.getBoundingClientRect();
+    const r = anchor.getBoundingClientRect();
+    const { x: right, y: top } = await toScreen(r.right, (panel?.bottom ?? r.bottom) + 8);
+    await backend.emit("panel_flyout_open", { id, right, top });
+  };
   return (
     <TopPanel
+      widgets={<WidgetZone openId={flyout} onToggle={(id, a) => void toggleFlyout(id, a)} />}
+      settingsOpen={flyout === SETTINGS_FLYOUT}
+      onSettings={(a) => void toggleFlyout(SETTINGS_FLYOUT, a)}
       categories={config.categories}
       openCategoryId={openId}
       onOpenCategory={(id) => {
@@ -259,10 +286,10 @@ function DockWindow() {
           onFlyout={(id, pill) => {
             setFlyout(id);
             if (!id) return void hideWindow("flyout");
-            void backend
-              .emit("flyout_open", { id, state: system })
-              .then(() => placeFlyoutOver(pill))
-              .then(() => showWindow("flyout"));
+            // Карточка — правым краем по таблетке, на 10 px выше неё; окно ставит себя само.
+            void toScreen(pill.right, pill.top - 10).then(({ x: right, y: bottom }) =>
+              backend.emit("flyout_open", { id, state: system, right, bottom }),
+            );
           }}
         />
       }
@@ -320,9 +347,23 @@ function DockMenuWindow() {
   );
 }
 
+/** Поле вокруг карточки flyout в его окне: под тень (windows.css). */
+const FLYOUT_MARGIN = 12;
+
 function FlyoutWindow() {
-  const [open, setOpen] = useState<{ id: FlyoutId; state: SystemState } | null>(null);
-  useEvent("flyout_open", setOpen);
+  // `n` — каждое открытие заново ставит и показывает окно.
+  const [open, setOpen] = useState<(Events["flyout_open"] & { n: number }) | null>(null);
+  useEvent(
+    "flyout_open",
+    useCallback((e: Events["flyout_open"]) => setOpen((o) => ({ ...e, n: (o?.n ?? 0) + 1 })), []),
+  );
+  const anchor = useMemo<Anchor | null>(
+    () => open && { right: open.right, bottom: open.bottom },
+    // Смена состояния (громкость колесом) окно не двигает — только новое открытие.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [open?.n],
+  );
+  useAnchoredWindow(".ws-tail-flyout", FLYOUT_MARGIN, anchor);
   useEvent(
     "system_state",
     useCallback((state: SystemState) => setOpen((o) => o && { ...o, state }), []),
@@ -349,6 +390,44 @@ function FlyoutWindow() {
           onChange={(update) => void backend.emit("system_state", update(open.state))}
         />
       )}
+    </Flyout>
+  );
+}
+
+/** Flyout виджета верхней панели или настройки виджетов: окно под панелью. */
+function PanelFlyoutWindow() {
+  // `n` — каждое открытие заново ставит окно, даже для того же виджета.
+  const [open, setOpen] = useState<(Events["panel_flyout_open"] & { n: number }) | null>(null);
+  useEvent(
+    "panel_flyout_open",
+    useCallback(
+      (e: Events["panel_flyout_open"]) => setOpen((o) => ({ ...e, n: (o?.n ?? 0) + 1 })),
+      [],
+    ),
+  );
+  const anchor = useMemo<Anchor | null>(
+    () => open && { right: open.right, top: open.top },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [open?.n],
+  );
+  useAnchoredWindow(".ws-panel-flyout", FLYOUT_MARGIN, anchor);
+  const close = useCallback(() => {
+    setOpen(null);
+    void hideWindow("panel-flyout");
+    void backend.emit("panel_flyout_closed", null);
+  }, []);
+  useCloseOnBlur(open !== null, close);
+
+  return (
+    <Flyout
+      key={open?.n}
+      open={open !== null}
+      onClose={close}
+      label={open ? panelFlyoutLabel(open.id) : ""}
+      anchor="launcher"
+      className="ws-panel-flyout"
+    >
+      {open && <PanelFlyoutContent id={open.id} />}
     </Flyout>
   );
 }

@@ -12,6 +12,7 @@ export type WindowLabel =
   | "dock-backdrop"
   | "dock-menu"
   | "flyout"
+  | "panel-flyout"
   | "search";
 
 export async function showWindow(label: WindowLabel, focus = true) {
@@ -37,25 +38,56 @@ export function useCloseOnBlur(open: boolean, onClose: () => void) {
   }, [open, onClose]);
 }
 
-/**
- * Поставить окно flyout над прямоугольником `pill` (CSS-пиксели окна дока),
- * правым краем по правому краю таблетки. У карточки отступ 12 px от краёв окна (windows.css),
- * поэтому окно опускаем на 2 px ниже верха таблетки — до карточки остаётся 10 px.
- */
-export async function placeFlyoutOver(pill: DOMRect) {
-  const flyout = await WebviewWindow.getByLabel("flyout");
-  if (!flyout) return;
+/** Куда ставить карточку поповера: её правый край и верх или низ, физические пиксели экрана. */
+export type Anchor = { right: number; top: number } | { right: number; bottom: number };
+
+/** Точка окна (CSS-пиксели) в физических пикселях экрана. */
+export async function toScreen(x: number, y: number) {
   const dpr = window.devicePixelRatio;
-  const [origin, size] = await Promise.all([
-    getCurrentWindow().outerPosition(),
-    flyout.outerSize(),
-  ]);
-  await flyout.setPosition(
-    new PhysicalPosition(
-      Math.round(origin.x + pill.right * dpr - size.width),
-      Math.round(origin.y + (pill.top + 2) * dpr - size.height),
-    ),
-  );
+  const origin = await getCurrentWindow().outerPosition();
+  return { x: Math.round(origin.x + x * dpr), y: Math.round(origin.y + y * dpr) };
+}
+
+/**
+ * Окно по размеру карточки `el` плюс поле `margin` под тень; карточка стоит в окне с отступом
+ * `margin` (windows.css), окно — так, чтобы карточка встала в `anchor`. Прозрачная часть окна
+ * перехватывала бы клики по чужим окнам, поэтому окно не больше карточки.
+ */
+export async function fitWindowAt(el: Element, margin: number, anchor: Anchor) {
+  const dpr = window.devicePixelRatio;
+  const r = el.getBoundingClientRect();
+  const w = Math.ceil((r.width + margin * 2) * dpr);
+  const h = Math.ceil((r.height + margin * 2) * dpr);
+  const win = getCurrentWindow();
+  await win.setSize(new PhysicalSize(w, h));
+  const m = Math.round(margin * dpr);
+  const y = "top" in anchor ? anchor.top - m : anchor.bottom - h + m;
+  await win.setPosition(new PhysicalPosition(anchor.right - w + m, y));
+}
+
+/**
+ * Поповер, который сам подгоняет своё окно: по карточке `selector`, к точке `anchor`.
+ * Пока открыт — следит за размером (появились приложения в микшере, раскрыли настройки).
+ * Показывается, когда уже на месте: без прыжка из старой позиции.
+ */
+export function useAnchoredWindow(selector: string, margin: number, anchor: Anchor | null) {
+  useEffect(() => {
+    if (!anchor) return;
+    const el = document.querySelector(selector);
+    if (!el) return;
+    let shown = false;
+    const fit = async () => {
+      await fitWindowAt(el, margin, anchor);
+      if (shown) return;
+      shown = true;
+      const win = getCurrentWindow();
+      await win.show();
+      await win.setFocus();
+    };
+    const observer = new ResizeObserver(() => void fit().catch(console.error));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [selector, margin, anchor]);
 }
 
 /**

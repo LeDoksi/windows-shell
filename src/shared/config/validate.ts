@@ -26,6 +26,15 @@ export function validateConfig(config: Config): string | null {
     const error = unique("pin", pin.id);
     if (error) return error;
   }
+  if (!Array.isArray(config.widgets)) return "виджеты — список";
+  for (const widget of config.widgets) {
+    const error = unique("widget", widget.id);
+    if (error) return error;
+    if (typeof widget.enabled !== "boolean") return `виджет «${widget.id}»: включён — да или нет`;
+    if (typeof widget.settings !== "object" || widget.settings === null) {
+      return `виджет «${widget.id}»: настройки — объект`;
+    }
+  }
   if (!glassModes.has(config.appearance?.glass)) {
     return `неизвестный режим стекла «${config.appearance?.glass}»`;
   }

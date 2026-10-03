@@ -1,5 +1,7 @@
 #[cfg(not(feature = "spike"))]
 mod apps;
+#[cfg(not(feature = "spike"))]
+mod audio;
 #[cfg(all(windows, not(feature = "spike")))]
 mod bars;
 // Спайки держат конфиг только в памяти: файл им не нужен.
@@ -9,9 +11,13 @@ mod config;
 #[cfg(all(windows, not(feature = "spike")))]
 mod dock;
 #[cfg(not(feature = "spike"))]
+mod hotkeys;
+#[cfg(not(feature = "spike"))]
 mod icons;
 #[cfg(not(feature = "spike"))]
 mod launch;
+#[cfg(not(feature = "spike"))]
+mod media;
 #[cfg(not(feature = "spike"))]
 mod pick;
 #[cfg(not(feature = "spike"))]
@@ -26,6 +32,8 @@ mod spike_taskbar;
 mod spike_tray;
 #[cfg(not(feature = "spike"))]
 mod tray;
+#[cfg(not(feature = "spike"))]
+mod widgets;
 
 use serde::Serialize;
 
@@ -66,6 +74,8 @@ pub fn run() {
             bars::start(app.handle());
             tray::create(app.handle())?;
             apps::start(app.handle());
+            widgets::start(app.handle());
+            hotkeys::start(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -83,7 +93,16 @@ pub fn run() {
             apps::window_activate,
             apps::window_minimize,
             apps::window_close,
-            apps::app_targets
+            apps::app_targets,
+            audio::audio_get,
+            audio::audio_set_volume,
+            audio::audio_set_mute,
+            audio::audio_set_default,
+            audio::audio_apply_profile,
+            audio::audio_mixer,
+            audio::audio_session_set,
+            media::media_get,
+            media::media_control
         ]);
 
     #[cfg(all(windows, feature = "spike"))]

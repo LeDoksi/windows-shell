@@ -4,6 +4,7 @@ export { CategoryPill } from "./CategoryPill";
 export { ContextMenu, type MenuEntry } from "./ContextMenu";
 export { Flyout } from "./Flyout";
 export { GlassSurface, type GlassLevel } from "./GlassSurface";
+export { HotkeyInput } from "./HotkeyInput";
 export { Icon, type IconName } from "./Icon";
 export { IconButton } from "./IconButton";
 export { SearchField } from "./SearchField";
