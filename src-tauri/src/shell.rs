@@ -136,14 +136,23 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
 
 /// «Стекло» — подложки с Acrylic видны; «Тонировка» — спрятаны, фон даёт CSS.
 fn apply_glass(app: &AppHandle, mode: GlassMode) -> tauri::Result<()> {
-    for label in [LAUNCHER_BACKDROP, DOCK_BACKDROP] {
-        let Some(w) = app.get_webview_window(label) else {
+    for (owner, label) in [(LAUNCHER, LAUNCHER_BACKDROP), (DOCK, DOCK_BACKDROP)] {
+        let (Some(owner), Some(backdrop)) =
+            (app.get_webview_window(owner), app.get_webview_window(label))
+        else {
             continue;
         };
         match mode {
-            GlassMode::Acrylic => w.show()?,
-            GlassMode::Tint => w.hide()?,
+            GlassMode::Acrylic => {
+                backdrop.show()?;
+                // Показанная подложка встала поверх окна с содержимым — возвращаем его наверх.
+                #[cfg(windows)]
+                crate::dock::bring_to_top(&owner);
+            }
+            GlassMode::Tint => backdrop.hide()?,
         }
+        #[cfg(not(windows))]
+        let _ = owner;
     }
     #[cfg(windows)]
     if mode == GlassMode::Acrylic {

@@ -98,6 +98,21 @@ pub fn reactivate_backdrops() {
     }
 }
 
+/// Окно с содержимым — над своей подложкой (новое показанное окно встаёт поверх всех).
+pub fn bring_to_top(w: &WebviewWindow) {
+    unsafe {
+        SetWindowPos(
+            hwnd(w),
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+        )
+    };
+}
+
 /// Поднимает док над другими topmost-окнами, не активируя его: сначала подложку, потом иконки.
 fn raise() {
     for slot in &DOCK {
