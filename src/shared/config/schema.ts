@@ -28,8 +28,12 @@ export type DockPin = {
   target: string;
 };
 
+/** «Стекло» (Acrylic) или «Тонировка». Только ручной выбор, без автопереключения. */
+export type GlassMode = "acrylic" | "tint";
+
 export type Config = {
   schemaVersion: 1;
   categories: Category[];
   dock: { pinned: DockPin[] };
+  appearance: { glass: GlassMode };
 };

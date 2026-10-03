@@ -56,12 +56,30 @@ pub struct Dock {
     pub pinned: Vec<DockPin>,
 }
 
+/// «Стекло» — Acrylic от DWM под доком и панелью; «Тонировка» — без размытия.
+/// Только ручной выбор: автоматически режим не меняется (решение владельца).
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GlassMode {
+    #[default]
+    Acrylic,
+    Tint,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Appearance {
+    pub glass: GlassMode,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
     pub schema_version: u32,
     pub categories: Vec<Category>,
     pub dock: Dock,
+    /// Нет в старом конфиге — значения по умолчанию.
+    #[serde(default)]
+    pub appearance: Appearance,
 }
 
 impl Config {
@@ -149,6 +167,17 @@ mod tests {
             .validate()
             .unwrap_err()
             .contains("повторяется id category"));
+    }
+
+    #[test]
+    fn appearance_defaults_to_glass_and_reads_tint() {
+        let mut json: serde_json::Value = serde_json::from_str(DEFAULT_CONFIG).unwrap();
+        json.as_object_mut().unwrap().remove("appearance");
+        let old: Config = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(old.appearance.glass, GlassMode::Acrylic);
+        json["appearance"] = serde_json::json!({ "glass": "tint" });
+        let tint: Config = serde_json::from_value(json).unwrap();
+        assert_eq!(tint.appearance.glass, GlassMode::Tint);
     }
 
     #[test]

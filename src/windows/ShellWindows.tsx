@@ -27,9 +27,14 @@ import "./windows.css";
 
 /** Окна оболочки в Tauri: каждое рисует свою часть, общаются событиями через Rust. */
 export function ShellWindow({ label }: { label: WindowLabel }) {
+  const glass = useConfig().config?.appearance.glass;
   useEffect(() => {
     document.documentElement.dataset.window = label;
   }, [label]);
+  // «Тонировка» — плотный фон без размытия (токены `data-glass="off"`).
+  useEffect(() => {
+    if (glass) document.documentElement.dataset.glass = glass === "tint" ? "off" : "acrylic";
+  }, [glass]);
   switch (label) {
     case "launcher":
       return <LauncherWindow />;
@@ -42,7 +47,8 @@ export function ShellWindow({ label }: { label: WindowLabel }) {
     case "search":
       return <SearchWindow />;
     case "dock-backdrop":
-      // Подложка дока — только Acrylic от DWM, рисовать нечего.
+    case "launcher-backdrop":
+      // Подложки стекла — только Acrylic от DWM, рисовать нечего.
       return null;
   }
 }
@@ -67,6 +73,7 @@ function LauncherWindow() {
     useCallback(() => setOpenId(null), []),
   );
   useFitWindowTop(".ws-top-panel", 16, 80);
+  useGlassRect(".ws-top-panel");
   if (!config) return null;
   return (
     <TopPanel
@@ -125,29 +132,32 @@ function CategoryPopup() {
   );
 }
 
-/** Каждый кадр сверяем таблетку и отдаём её Rust: подложка с Acrylic встаёт ровно под неё. */
-function usePillSync() {
+/**
+ * Каждый кадр сверяем «стеклянный» элемент и отдаём его Rust: подложка с Acrylic
+ * встаёт ровно под него. В режиме «Тонировка» подложка спрятана, но держим её на месте.
+ */
+function useGlassRect(selector: string) {
   useEffect(() => {
     let frame = 0;
     let last = "";
     const tick = () => {
-      const pill = document.querySelector(".ws-dock__pill");
-      if (pill) {
+      const el = document.querySelector(selector);
+      if (el) {
         // Физические пиксели — по devicePixelRatio самого WebView2 (спайк WSH-6).
         const d = window.devicePixelRatio;
-        const r = pill.getBoundingClientRect();
+        const r = el.getBoundingClientRect();
         const rect = { x: r.x * d, y: r.y * d, w: r.width * d, h: r.height * d };
         const key = `${rect.x},${rect.y},${rect.w},${rect.h}`;
         if (key !== last) {
           last = key;
-          void backend.call("dock_pill", rect);
+          void backend.call("glass_rect", rect);
         }
       }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, []);
+  }, [selector]);
 }
 
 function DockWindow() {
@@ -160,7 +170,7 @@ function DockWindow() {
     "flyout_closed",
     useCallback(() => setFlyout(null), []),
   );
-  usePillSync();
+  useGlassRect(".ws-dock__pill");
 
   if (!config) return null;
   const dock = buildDock(config.dock.pinned, running);

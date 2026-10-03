@@ -46,7 +46,7 @@ pub fn run() {
             app_info,
             config::config_get,
             config::config_set,
-            shell::dock_pill
+            shell::glass_rect
         ]);
 
     #[cfg(all(windows, feature = "spike"))]

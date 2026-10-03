@@ -21,8 +21,10 @@
   bottom: 12px;
 }
 
-/* Таблетка дока: размытие даёт подложка с Acrylic, радиус как у DWM-скругления (8 px). */
-:root[data-window="dock"] .ws-dock__pill {
+/* «Стекло»: размытие даёт подложка с Acrylic, радиус как у DWM-скругления (8 px).
+   «Тонировка» (data-glass="off") — обычный GlassSurface на плотных токенах. */
+:root[data-glass="acrylic"] .ws-dock__pill,
+:root[data-glass="acrylic"] .ws-top-panel {
   background: rgba(255, 255, 255, 0.04);
   backdrop-filter: none;
   box-shadow: var(--ws-highlight);

@@ -3,13 +3,24 @@
 //! Фронт выбирает, что рисовать, по метке окна (`src/windows/`).
 
 use tauri::{
-    AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Listener, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+use crate::config::{Config, ConfigStore, GlassMode};
+
+/// Последний прямоугольник «стеклянного» элемента каждого окна (физические пиксели в окне):
+/// когда окно двигается, подложку переставляем по нему же.
+type Rect = (i32, i32, i32, i32);
+static GLASS: Mutex<Option<HashMap<String, Rect>>> = Mutex::new(None);
 
 pub const LAUNCHER: &str = "launcher";
 pub const CATEGORY: &str = "category";
 pub const DOCK: &str = "dock";
 pub const DOCK_BACKDROP: &str = "dock-backdrop";
+pub const LAUNCHER_BACKDROP: &str = "launcher-backdrop";
 pub const FLYOUT: &str = "flyout";
 pub const SEARCH: &str = "search";
 
@@ -66,6 +77,8 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     // Flyout ставит на место сам док: над кнопкой системного хвоста.
     let flyout = window(app, FLYOUT, FLYOUT_SIZE)?;
 
+    // Подложки стекла создаём раньше окон с содержимым: так они ниже в z-order.
+    let launcher_backdrop = window(app, LAUNCHER_BACKDROP, (1.0, 1.0))?;
     let backdrop = window(app, DOCK_BACKDROP, (1.0, 1.0))?;
     let dock = window(app, DOCK, DOCK_SIZE)?;
     dock.set_position(PhysicalPosition::new(
@@ -75,32 +88,121 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
 
     #[cfg(windows)]
     {
-        for w in [&launcher, &category, &search, &flyout, &backdrop, &dock] {
+        for w in [
+            &launcher,
+            &category,
+            &search,
+            &flyout,
+            &launcher_backdrop,
+            &backdrop,
+            &dock,
+        ] {
             crate::dock::tool_window(w);
         }
-        crate::dock::setup(&backdrop, &dock);
+        crate::dock::setup(&backdrop, &dock, &launcher_backdrop);
+    }
+
+    // Окно сдвинулось (подгонка под ширину панели, позже автоскрытие) — подложка за ним.
+    for owner in [&launcher, &dock] {
+        let (app, label) = (app.clone(), owner.label().to_string());
+        owner.on_window_event(move |event| {
+            if let tauri::WindowEvent::Moved(_) = event {
+                let _ = place_glass(&app, &label);
+            }
+        });
     }
 
     launcher.show()?;
-    backdrop.show()?;
     dock.show()?;
+    let glass = app
+        .state::<ConfigStore>()
+        .0
+        .lock()
+        .expect("config lock")
+        .appearance
+        .glass;
+    apply_glass(app, glass)?;
+    // Режим меняется на лету: конфиг поменяли — показываем или прячем подложки.
+    let handle = app.clone();
+    app.listen_any("config_changed", move |event| {
+        if let Ok(config) = serde_json::from_str::<Config>(event.payload()) {
+            if let Err(e) = apply_glass(&handle, config.appearance.glass) {
+                eprintln!("[glass] {e}");
+            }
+        }
+    });
     Ok(())
 }
 
-/// Окно иконок дока сообщает прямоугольник таблетки (физические пиксели внутри окна).
-#[tauri::command]
-pub fn dock_pill(app: AppHandle, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
-    let icons = app.get_webview_window(DOCK).ok_or("no dock window")?;
+/// «Стекло» — подложки с Acrylic видны; «Тонировка» — спрятаны, фон даёт CSS.
+fn apply_glass(app: &AppHandle, mode: GlassMode) -> tauri::Result<()> {
+    for (owner, label) in [(LAUNCHER, LAUNCHER_BACKDROP), (DOCK, DOCK_BACKDROP)] {
+        let (Some(owner), Some(backdrop)) =
+            (app.get_webview_window(owner), app.get_webview_window(label))
+        else {
+            continue;
+        };
+        match mode {
+            GlassMode::Acrylic => {
+                backdrop.show()?;
+                // Показанная подложка встала поверх окна с содержимым — возвращаем его наверх.
+                #[cfg(windows)]
+                crate::dock::bring_to_top(&owner);
+            }
+            GlassMode::Tint => backdrop.hide()?,
+        }
+        #[cfg(not(windows))]
+        let _ = owner;
+    }
     #[cfg(windows)]
-    crate::dock::place_backdrop(
-        &icons,
+    if mode == GlassMode::Acrylic {
+        crate::dock::reactivate_backdrops();
+    }
+    Ok(())
+}
+
+/// Окно сообщает прямоугольник своего «стеклянного» элемента (таблетка дока, верхняя панель)
+/// в физических пикселях внутри окна — под ним встаёт подложка `<метка>-backdrop`.
+#[tauri::command]
+pub fn glass_rect(
+    app: AppHandle,
+    window: WebviewWindow,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Result<(), String> {
+    let rect = (
         x.round() as i32,
         y.round() as i32,
         w.round() as i32,
         h.round() as i32,
-    )
-    .map_err(|e| e.to_string())?;
+    );
+    GLASS
+        .lock()
+        .expect("glass lock")
+        .get_or_insert_with(HashMap::new)
+        .insert(window.label().to_string(), rect);
+    place_glass(&app, window.label()).map_err(|e| e.to_string())
+}
+
+/// Поставить подложку `<метка>-backdrop` под запомненный прямоугольник окна `<метка>`.
+fn place_glass(app: &AppHandle, label: &str) -> tauri::Result<()> {
+    let rect = GLASS
+        .lock()
+        .expect("glass lock")
+        .as_ref()
+        .and_then(|m| m.get(label).copied());
+    let (Some(rect), Some(owner), Some(backdrop)) = (
+        rect,
+        app.get_webview_window(label),
+        app.get_webview_window(&format!("{label}-backdrop")),
+    ) else {
+        return Ok(());
+    };
+    #[cfg(windows)]
+    crate::dock::place_backdrop(&owner, &backdrop, rect)?;
     #[cfg(not(windows))]
-    let _ = (icons, x, y, w, h);
+    let _ = (rect, owner, backdrop);
     Ok(())
 }

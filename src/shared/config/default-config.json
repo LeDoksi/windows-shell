@@ -173,5 +173,8 @@
         "target": "windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel"
       }
     ]
+  },
+  "appearance": {
+    "glass": "acrylic"
   }
 }

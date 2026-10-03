@@ -8,8 +8,11 @@ export interface Commands {
   config_get: { args: Record<string, never>; result: Config };
   /** Заменяет конфиг целиком; Rust проверяет его и рассылает `config_changed`. */
   config_set: { args: { config: Config }; result: void };
-  /** Прямоугольник таблетки дока в физических пикселях окна дока: под ней встаёт подложка. */
-  dock_pill: { args: { x: number; y: number; w: number; h: number }; result: void };
+  /**
+   * Прямоугольник «стеклянного» элемента окна (таблетка дока, верхняя панель) в физических
+   * пикселях окна: под ним встаёт подложка с Acrylic.
+   */
+  glass_rect: { args: { x: number; y: number; w: number; h: number }; result: void };
 }
 
 /**
