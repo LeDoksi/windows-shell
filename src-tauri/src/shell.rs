@@ -6,7 +6,15 @@ use tauri::{
     AppHandle, Listener, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 
+use std::collections::HashMap;
+use std::sync::Mutex;
+
 use crate::config::{Config, ConfigStore, GlassMode};
+
+/// Последний прямоугольник «стеклянного» элемента каждого окна (физические пиксели в окне):
+/// когда окно двигается, подложку переставляем по нему же.
+type Rect = (i32, i32, i32, i32);
+static GLASS: Mutex<Option<HashMap<String, Rect>>> = Mutex::new(None);
 
 pub const LAUNCHER: &str = "launcher";
 pub const CATEGORY: &str = "category";
@@ -94,6 +102,16 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         crate::dock::setup(&backdrop, &dock, &launcher_backdrop);
     }
 
+    // Окно сдвинулось (подгонка под ширину панели, позже автоскрытие) — подложка за ним.
+    for owner in [&launcher, &dock] {
+        let (app, label) = (app.clone(), owner.label().to_string());
+        owner.on_window_event(move |event| {
+            if let tauri::WindowEvent::Moved(_) = event {
+                let _ = place_glass(&app, &label);
+            }
+        });
+    }
+
     launcher.show()?;
     dock.show()?;
     let glass = app
@@ -145,22 +163,37 @@ pub fn glass_rect(
     w: f64,
     h: f64,
 ) -> Result<(), String> {
-    let backdrop = app
-        .get_webview_window(&format!("{}-backdrop", window.label()))
-        .ok_or("no backdrop for this window")?;
+    let rect = (
+        x.round() as i32,
+        y.round() as i32,
+        w.round() as i32,
+        h.round() as i32,
+    );
+    GLASS
+        .lock()
+        .expect("glass lock")
+        .get_or_insert_with(HashMap::new)
+        .insert(window.label().to_string(), rect);
+    place_glass(&app, window.label()).map_err(|e| e.to_string())
+}
+
+/// Поставить подложку `<метка>-backdrop` под запомненный прямоугольник окна `<метка>`.
+fn place_glass(app: &AppHandle, label: &str) -> tauri::Result<()> {
+    let rect = GLASS
+        .lock()
+        .expect("glass lock")
+        .as_ref()
+        .and_then(|m| m.get(label).copied());
+    let (Some(rect), Some(owner), Some(backdrop)) = (
+        rect,
+        app.get_webview_window(label),
+        app.get_webview_window(&format!("{label}-backdrop")),
+    ) else {
+        return Ok(());
+    };
     #[cfg(windows)]
-    crate::dock::place_backdrop(
-        &window,
-        &backdrop,
-        (
-            x.round() as i32,
-            y.round() as i32,
-            w.round() as i32,
-            h.round() as i32,
-        ),
-    )
-    .map_err(|e| e.to_string())?;
+    crate::dock::place_backdrop(&owner, &backdrop, rect)?;
     #[cfg(not(windows))]
-    let _ = (backdrop, x, y, w, h);
+    let _ = (rect, owner, backdrop);
     Ok(())
 }
