@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { Dock } from "../dock/Dock";
-import { buildDock, clickApp } from "../dock/model";
-import { mockRunning } from "../dock/mockRunning";
+import { mockWindows } from "../dock/mockWindows";
+import { buildDock } from "../dock/model";
 import { defaultConfig } from "../shared/config";
 import { SystemTail } from "../system/SystemTail";
 import { mockSystem } from "../system/mockSystem";
@@ -21,9 +21,8 @@ export function SpikeRoot({ role, variant }: SpikeInfo) {
 }
 
 function SpikeDock() {
-  const [running, setRunning] = useState(mockRunning);
   const [system, setSystem] = useState(() => mockSystem(false));
-  const dock = buildDock(defaultConfig.dock.pinned, running);
+  const dock = buildDock(defaultConfig.dock.pinned, mockWindows);
 
   // Каждый кадр сверяем прямоугольник таблетки и отдаём его в Rust, если он изменился.
   useEffect(() => {
@@ -60,7 +59,7 @@ function SpikeDock() {
     <Dock
       pinned={dock.pinned}
       transient={dock.transient}
-      onClickApp={(entry) => setRunning((r) => clickApp(r, entry.id, entry.title))}
+      onClickApp={() => {}}
       tail={<SystemTail state={system} onChange={setSystem} />}
     />
   );

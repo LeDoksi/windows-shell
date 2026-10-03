@@ -1,3 +1,5 @@
+import { useSystemIcon } from "../shared/useSystemIcon";
+
 const palette = [
   ["#4C9BF5", "#2F6FD6"],
   ["#B07CF0", "#7A4FD0"],
@@ -13,8 +15,19 @@ function hash(text: string) {
   return Math.abs(h);
 }
 
-/** Заглушка иконки приложения до извлечения настоящих иконок (этап 3). */
-export function AppGlyph({ id, title }: { id: string; title: string }) {
+/** Иконка приложения из Windows; пока её нет (или браузерный режим) — плашка с буквой. */
+export function AppGlyph({
+  id,
+  title,
+  target = "",
+}: {
+  id: string;
+  title: string;
+  target?: string;
+}) {
+  const src = useSystemIcon("app", target);
+  if (src)
+    return <img className="ws-app-glyph ws-app-glyph--system" src={src} alt="" draggable={false} />;
   const [from, to] = palette[hash(id) % palette.length];
   return (
     <span

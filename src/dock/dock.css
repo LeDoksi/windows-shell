@@ -109,3 +109,15 @@
     animation: none;
   }
 }
+
+img.ws-app-glyph--system {
+  object-fit: contain;
+  border-radius: 0;
+  box-shadow: none;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
+}
+
+.ws-dock__item[data-missing] .ws-app-glyph {
+  opacity: 0.4;
+  filter: grayscale(1);
+}

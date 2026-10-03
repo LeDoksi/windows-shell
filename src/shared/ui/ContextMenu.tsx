@@ -23,9 +23,19 @@ type Props = {
   items: MenuEntry[];
   onClose: () => void;
   label?: string;
+  /** `above` — `y` у нижнего края меню, `x` — его центр (меню над иконкой дока). */
+  placement?: "below" | "above";
 };
 
-export function ContextMenu({ open, x, y, items, onClose, label = "Меню" }: Props) {
+export function ContextMenu({
+  open,
+  x,
+  y,
+  items,
+  onClose,
+  label = "Меню",
+  placement = "below",
+}: Props) {
   const ref = useRef<HTMLDivElement>(null);
   useDismiss(ref, open, onClose);
 
@@ -59,7 +69,11 @@ export function ContextMenu({ open, x, y, items, onClose, label = "Меню" }: 
       role="menu"
       aria-label={label}
       className="ws-menu"
-      style={{ left: x, top: y }}
+      style={
+        placement === "above"
+          ? { left: x, bottom: window.innerHeight - y, transform: "translateX(-50%)" }
+          : { left: x, top: y }
+      }
       onKeyDown={(e: React.KeyboardEvent) => {
         if (e.key === "ArrowDown" || e.key === "ArrowUp") {
           e.preventDefault();
@@ -72,7 +86,8 @@ export function ContextMenu({ open, x, y, items, onClose, label = "Меню" }: 
         const own = actionIndex[i];
         return (
           <button
-            key={item.label}
+            // Индекс, а не подпись: у двух окон бывает одинаковый заголовок.
+            key={i}
             type="button"
             role="menuitem"
             tabIndex={own === active ? 0 : -1}

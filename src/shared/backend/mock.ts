@@ -1,6 +1,7 @@
+import { mockWindows } from "../../dock/mockWindows";
 import { defaultConfig } from "../config/defaults";
 import { validateConfig } from "../config/validate";
-import type { Backend, CommandName, Commands, EventName, Events } from "./types";
+import type { Backend, CommandName, Commands, EventName, Events, WindowInfo } from "./types";
 
 type Handlers = { [C in CommandName]: (args: Commands[C]["args"]) => Commands[C]["result"] };
 
@@ -13,6 +14,24 @@ export function createMockBackend(): Backend {
     listeners.get(event)?.forEach((l) => l(payload));
 
   let config = structuredClone(defaultConfig);
+
+  // Окна программ: клики дока меняют их, как это сделала бы Windows.
+  let windows = structuredClone(mockWindows);
+  let clock = Math.max(...windows.map((w) => Math.max(w.seq, w.focused)));
+  const setWindows = (next: WindowInfo[]) => {
+    windows = next;
+    emit("windows_changed", structuredClone(windows));
+  };
+  const activate = (hwnd: number) => {
+    clock += 1;
+    setWindows(
+      windows.map((w) =>
+        w.hwnd === hwnd
+          ? { ...w, active: true, minimized: false, attention: false, focused: clock }
+          : { ...w, active: false },
+      ),
+    );
+  };
 
   const handlers: Handlers = {
     app_info: () => ({ version: "0.1.0", platform: "browser" }),
@@ -27,6 +46,27 @@ export function createMockBackend(): Backend {
     launch: ({ kind, target }) => {
       if (kind === "url") window.open(target, "_blank", "noopener");
       else console.info(`[mock] открыть ${kind}: ${target}`);
+      if (kind !== "app") return;
+      // Приложение «открылось»: новое окно с тем же AUMID, что у закреплённого.
+      clock += 1;
+      const title = config.dock.pinned.find((p) => p.target === target)?.title ?? target;
+      const hwnd = Math.max(0, ...windows.map((w) => w.hwnd)) + 1;
+      windows = [
+        ...windows,
+        {
+          hwnd,
+          title,
+          aumid: target,
+          exe: null,
+          appName: title,
+          minimized: false,
+          active: false,
+          attention: false,
+          seq: clock,
+          focused: 0,
+        },
+      ];
+      activate(hwnd);
     },
     reveal: ({ target }) => console.info(`[mock] показать в Проводнике: ${target}`),
     paths_exist: ({ paths }) => paths.map(() => true),
@@ -41,6 +81,14 @@ export function createMockBackend(): Backend {
       { name: "Telegram", id: "TelegramDesktop" },
     ],
     glass_rect: () => {},
+    windows_list: () => structuredClone(windows),
+    window_activate: ({ hwnd }) => activate(hwnd),
+    window_minimize: ({ hwnd }) =>
+      setWindows(
+        windows.map((w) => (w.hwnd === hwnd ? { ...w, minimized: true, active: false } : w)),
+      ),
+    window_close: ({ hwnd }) => setWindows(windows.filter((w) => w.hwnd !== hwnd)),
+    app_targets: ({ targets }) => targets.map(() => ({ exists: true, exe: null })),
   };
 
   return {

@@ -1,3 +1,5 @@
+#[cfg(not(feature = "spike"))]
+mod apps;
 #[cfg(all(windows, not(feature = "spike")))]
 mod bars;
 // Спайки держат конфиг только в памяти: файл им не нужен.
@@ -63,6 +65,7 @@ pub fn run() {
             #[cfg(windows)]
             bars::start(app.handle());
             tray::create(app.handle())?;
+            apps::start(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -75,7 +78,12 @@ pub fn run() {
             icons::item_icon,
             pick::pick_paths,
             pick::installed_apps,
-            shell::glass_rect
+            shell::glass_rect,
+            apps::windows_list,
+            apps::window_activate,
+            apps::window_minimize,
+            apps::window_close,
+            apps::app_targets
         ]);
 
     #[cfg(all(windows, feature = "spike"))]

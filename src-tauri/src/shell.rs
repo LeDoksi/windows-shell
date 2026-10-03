@@ -22,6 +22,7 @@ pub const CATEGORY: &str = "category";
 pub const DOCK: &str = "dock";
 pub const DOCK_BACKDROP: &str = "dock-backdrop";
 pub const LAUNCHER_BACKDROP: &str = "launcher-backdrop";
+pub const DOCK_MENU: &str = "dock-menu";
 pub const FLYOUT: &str = "flyout";
 pub const SEARCH: &str = "search";
 
@@ -32,6 +33,8 @@ const CATEGORY_SIZE: (f64, f64) = (680.0, 620.0);
 const CATEGORY_TOP: f64 = 66.0;
 const SEARCH_SIZE: (f64, f64) = (640.0, 440.0);
 const FLYOUT_SIZE: (f64, f64) = (380.0, 560.0);
+/// Меню иконки дока подгоняет окно под себя (`fitWindowAbove`); это размер до первой подгонки.
+const DOCK_MENU_SIZE: (f64, f64) = (400.0, 600.0);
 /// Окно иконок дока выше таблетки: место под увеличение.
 const DOCK_SIZE: (f64, f64) = (1200.0, 190.0);
 
@@ -69,6 +72,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
 
     // Flyout ставит на место сам док: над кнопкой системного хвоста.
     let flyout = window(app, FLYOUT, FLYOUT_SIZE)?;
+    let dock_menu = window(app, DOCK_MENU, DOCK_MENU_SIZE)?;
 
     // Подложки стекла создаём раньше окон с содержимым: так они ниже в z-order.
     let launcher_backdrop = window(app, LAUNCHER_BACKDROP, (1.0, 1.0))?;
@@ -86,6 +90,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             &category,
             &search,
             &flyout,
+            &dock_menu,
             &launcher_backdrop,
             &backdrop,
             &dock,

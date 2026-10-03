@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Dock } from "../dock/Dock";
-import { buildDock, clickApp } from "../dock/model";
-import { mockRunning } from "../dock/mockRunning";
+import type { DockEntry } from "../dock/model";
+import { useDockApps } from "../dock/useDockApps";
 import { CategoryWindow } from "../launcher/CategoryWindow";
 import { ItemIcon } from "../launcher/ItemIcon";
 import { TopPanel } from "../launcher/TopPanel";
@@ -18,15 +18,17 @@ import { openFolder, openItem, removeItem, revealItem, useMissing } from "../lau
 import { matchesQuery } from "../launcher/search";
 import { backend, type EventName, type Events } from "../shared/backend";
 import { useConfig } from "../shared/config";
-import { Flyout, GlassSurface, SearchField, Tile } from "../shared/ui";
+import { ContextMenu, Flyout, GlassSurface, SearchField, Tile } from "../shared/ui";
 import { SystemFlyoutContent } from "../system/SystemFlyoutContent";
 import { SystemTail } from "../system/SystemTail";
 import { flyoutLabels, type FlyoutId } from "../system/flyoutIds";
 import { mockSystem } from "../system/mockSystem";
 import type { SystemState } from "../system/model";
 import {
+  fitWindowAbove,
   hideWindow,
   placeFlyoutOver,
+  screenTopCenter,
   showWindow,
   useCloseOnBlur,
   useFitWindowTop,
@@ -51,6 +53,8 @@ export function ShellWindow({ label }: { label: WindowLabel }) {
       return <CategoryPopup />;
     case "dock":
       return <DockWindow />;
+    case "dock-menu":
+      return <DockMenuWindow />;
     case "flyout":
       return <FlyoutWindow />;
     case "search":
@@ -204,8 +208,7 @@ function useGlassRect(selector: string) {
 }
 
 function DockWindow() {
-  const { config } = useConfig();
-  const [running, setRunning] = useState(mockRunning);
+  const apps = useDockApps();
   const [system, setSystem] = useState(() => mockSystem(false));
   const [flyout, setFlyout] = useState<FlyoutId | null>(null);
   useEvent("system_state", setSystem);
@@ -215,17 +218,23 @@ function DockWindow() {
   );
   useGlassRect(".ws-dock__pill");
 
-  if (!config) return null;
-  const dock = buildDock(config.dock.pinned, running);
+  if (!apps.ready) return null;
+  // Меню приложения — своё окно над иконкой: в окне дока ему не хватит высоты.
+  const openMenu = (entry: DockEntry, icon: HTMLElement) =>
+    void screenTopCenter(icon, 6).then(({ x, y }) =>
+      backend.emit("dock_menu_open", { id: entry.id, x, y }),
+    );
   // Изменения в хвосте (колесо громкости) — всем окнам, в том числе открытому flyout.
   const change = (update: (s: SystemState) => SystemState) =>
     void backend.emit("system_state", update(system));
 
   return (
     <Dock
-      pinned={dock.pinned}
-      transient={dock.transient}
-      onClickApp={(entry) => setRunning((r) => clickApp(r, entry.id, entry.title))}
+      pinned={apps.pinned}
+      transient={apps.transient}
+      onClickApp={(entry, icon) => apps.click(entry) === "menu" && openMenu(entry, icon)}
+      onMenu={openMenu}
+      onLaunch={apps.launch}
       tail={
         <SystemTail
           state={system}
@@ -241,6 +250,56 @@ function DockWindow() {
           }}
         />
       }
+    />
+  );
+}
+
+/** Поле вокруг меню в его окне: под тень. */
+const MENU_MARGIN = 12;
+
+/** Меню иконки дока: окна приложения, новое окно, закрепить или убрать, закрыть. */
+function DockMenuWindow() {
+  const apps = useDockApps();
+  // `n` — каждое открытие заново подгоняет окно, даже для того же приложения.
+  const [open, setOpen] = useState<(Events["dock_menu_open"] & { n: number }) | null>(null);
+  useEvent(
+    "dock_menu_open",
+    useCallback(
+      (e: Events["dock_menu_open"]) => setOpen((o) => ({ ...e, n: (o?.n ?? 0) + 1 })),
+      [],
+    ),
+  );
+  const close = useCallback(() => {
+    setOpen(null);
+    void hideWindow("dock-menu");
+    void backend.emit("dock_menu_closed", null);
+  }, []);
+  useCloseOnBlur(open !== null, close);
+
+  const entry = open ? apps.find(open.id) : undefined;
+  // Приложение пропало из дока (закрыли последнее окно) — прячем и окно меню.
+  const gone = open !== null && !entry;
+  useEffect(() => {
+    if (gone) void hideWindow("dock-menu");
+  }, [gone]);
+  useEffect(() => {
+    if (!open) return;
+    const menu = document.querySelector(".ws-menu");
+    if (!menu) return;
+    void fitWindowAbove(menu, MENU_MARGIN, open.x, open.y).then(() => showWindow("dock-menu"));
+    // Только при открытии: пока меню открыто, окно не прыгает.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open?.n]);
+
+  return (
+    <ContextMenu
+      key={open?.n}
+      open={Boolean(entry)}
+      x={MENU_MARGIN}
+      y={MENU_MARGIN}
+      label={entry?.title}
+      items={entry ? apps.menu(entry) : []}
+      onClose={close}
     />
   );
 }
