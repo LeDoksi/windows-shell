@@ -3,18 +3,23 @@
 //! полоса выезжает, если курсор у края дольше 150 мс, и уезжает через 400 мс после ухода.
 //! Закреплённая полоса видна всегда и резервирует место через AppBar, чтобы развёрнутые окна
 //! её не перекрывали. Над полноэкранными приложениями полосы прячутся всегда.
+//! Монитор — из конфига (`bars.monitor`, WSH-17); нет такого — основной. Мониторы опрашиваем
+//! дважды в секунду: подключение, разрешение, масштаб и панель задач ловятся без подписок.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Listener, Manager};
-use windows_sys::Win32::Foundation::{HWND, POINT, RECT};
+use tauri::{AppHandle, Emitter, Listener, Manager};
+use windows_sys::core::BOOL;
+use windows_sys::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
 use windows_sys::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
-    MONITOR_DEFAULTTOPRIMARY,
+    EnumDisplayMonitors, GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, HDC, HMONITOR,
+    MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTOPRIMARY,
 };
 use windows_sys::Win32::UI::HiDpi::{
-    SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+    GetDpiForMonitor, SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+    MDT_EFFECTIVE_DPI,
 };
 use windows_sys::Win32::UI::Shell::{
     SHAppBarMessage, SHQueryUserNotificationState, ABE_BOTTOM, ABE_TOP, ABM_NEW, ABM_QUERYPOS,
@@ -44,11 +49,17 @@ const FULLSCREEN_EVERY: u32 = 15;
 static PINNED: [AtomicBool; 2] = [AtomicBool::new(false), AtomicBool::new(false)];
 /// Закрепление поменялось — пересчитать AppBar.
 static APPBAR_DIRTY: AtomicBool = AtomicBool::new(true);
+/// Выбранный монитор (имя устройства, `\\.\DISPLAY2`); `None` — основной.
+static MONITOR: Mutex<Option<String>> = Mutex::new(None);
+/// Выбор монитора поменялся — пересчитать раскладку, не дожидаясь опроса.
+static LAYOUT_DIRTY: AtomicBool = AtomicBool::new(true);
 
-fn set_pinned(bars: &Bars) {
+fn apply(bars: &Bars) {
     PINNED[0].store(bars.launcher_pinned, Ordering::Relaxed);
     PINNED[1].store(bars.dock_pinned, Ordering::Relaxed);
     APPBAR_DIRTY.store(true, Ordering::Relaxed);
+    *MONITOR.lock().expect("monitor lock") = bars.monitor.clone();
+    LAYOUT_DIRTY.store(true, Ordering::Relaxed);
 }
 
 fn ease_out(t: f64) -> f64 {
@@ -133,12 +144,70 @@ fn rect_of(h: HWND) -> RECT {
     r
 }
 
-fn primary_monitor() -> (RECT, RECT) {
-    let mon = unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) };
-    let mut info: MONITORINFO = unsafe { std::mem::zeroed() };
-    info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-    unsafe { GetMonitorInfoW(mon, &mut info) };
-    (info.rcMonitor, info.rcWork)
+/// Монитор в физических пикселях.
+#[derive(Clone)]
+pub struct Layout {
+    pub name: String,
+    pub monitor: RECT,
+    pub work: RECT,
+    pub scale: f64,
+}
+
+/// Тот же монитор с тем же размером и масштабом. Рабочую область не сравниваем: она меняется
+/// от наших же AppBar и от панели задач, а переставлять окна из-за этого не нужно.
+impl PartialEq for Layout {
+    fn eq(&self, o: &Self) -> bool {
+        let key = |l: &Layout| {
+            let m = l.monitor;
+            ([m.left, m.top, m.right, m.bottom], l.scale)
+        };
+        self.name == o.name && key(self) == key(o)
+    }
+}
+
+fn monitor_layout(mon: HMONITOR) -> Layout {
+    let mut info: MONITORINFOEXW = unsafe { std::mem::zeroed() };
+    info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+    let (mut dx, mut dy) = (96, 96);
+    unsafe {
+        GetMonitorInfoW(mon, &mut info as *mut _ as *mut MONITORINFO);
+        GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
+    }
+    let n = info.szDevice.iter().position(|&c| c == 0).unwrap_or(0);
+    Layout {
+        name: String::from_utf16_lossy(&info.szDevice[..n]),
+        monitor: info.monitorInfo.rcMonitor,
+        work: info.monitorInfo.rcWork,
+        scale: dx as f64 / 96.0,
+    }
+}
+
+/// Все мониторы; основной — первый.
+pub fn monitors() -> Vec<Layout> {
+    unsafe extern "system" fn push(m: HMONITOR, _: HDC, _: *mut RECT, out: LPARAM) -> BOOL {
+        (*(out as *mut Vec<HMONITOR>)).push(m);
+        1
+    }
+    let mut all: Vec<HMONITOR> = Vec::new();
+    unsafe {
+        EnumDisplayMonitors(
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            Some(push),
+            &mut all as *mut _ as LPARAM,
+        )
+    };
+    let primary = unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) };
+    all.sort_by_key(|&m| m != primary);
+    all.into_iter().map(monitor_layout).collect()
+}
+
+/// Выбранный монитор, если он подключён, иначе основной (первый).
+pub fn pick(all: &[Layout], choice: Option<&str>) -> Option<Layout> {
+    choice
+        .and_then(|c| all.iter().find(|l| l.name == c))
+        .or(all.first())
+        .cloned()
 }
 
 fn is_ours(h: HWND) -> bool {
@@ -237,7 +306,7 @@ pub fn shutdown(app: &AppHandle) {
 }
 
 pub fn start(app: &AppHandle) {
-    set_pinned(
+    apply(
         &app.state::<ConfigStore>()
             .0
             .lock()
@@ -246,7 +315,7 @@ pub fn start(app: &AppHandle) {
     );
     app.listen_any("config_changed", |event| {
         if let Ok(config) = serde_json::from_str::<Config>(event.payload()) {
-            set_pinned(&config.bars);
+            apply(&config.bars);
         }
     });
     let hwnd_of = |label: &str| {
@@ -278,24 +347,45 @@ pub fn start(app: &AppHandle) {
             eprintln!("[bars] no window {}", bar.label);
         }
     }
-    let scale = app
-        .primary_monitor()
-        .ok()
-        .flatten()
-        .map_or(1.0, |m| m.scale_factor());
     let owned = SendBars(bars);
+    let app = app.clone();
 
     std::thread::spawn(move || {
         let mut bars = owned.into_inner();
         unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
         let start = Instant::now();
-        let (mut monitor, mut work) = primary_monitor();
+        let mut all = Vec::new();
+        let mut lay: Option<Layout> = None;
         let mut full = false;
         let mut tick = 0u32;
         loop {
-            if tick % LAYOUT_EVERY == 0 {
-                (monitor, work) = primary_monitor();
+            if LAYOUT_DIRTY.swap(false, Ordering::Relaxed) || tick % LAYOUT_EVERY == 0 {
+                let now = monitors();
+                if now != all {
+                    all = now;
+                    // Меню трея перечисляет мониторы — пусть перестроится.
+                    let _ = app.emit("monitors_changed", ());
+                }
+                let choice = MONITOR.lock().expect("monitor lock").clone();
+                let new = pick(&all, choice.as_deref());
+                if new != lay {
+                    if let Some(new) = &new {
+                        relayout(&app, &bars, lay.as_ref(), new);
+                    }
+                }
+                lay = new;
             }
+            let Some(Layout {
+                monitor,
+                work,
+                scale,
+                ..
+            }) = lay
+            else {
+                tick = tick.wrapping_add(1);
+                std::thread::sleep(TICK);
+                continue;
+            };
             if tick % FULLSCREEN_EVERY == 0 {
                 full = fullscreen();
             }
@@ -378,6 +468,46 @@ pub fn start(app: &AppHandle) {
             std::thread::sleep(TICK);
         }
     });
+}
+
+/// Поменялись монитор или его масштаб. Windows шлёт `WM_DPICHANGED` только окну, которое
+/// переезжает с монитора на монитор, а спрятанная полоса — за краем, ни на каком мониторе
+/// (спайк WSH-6, подвох 1; проверено: без этого панель осталась в масштабе 175 % на 100 %).
+/// Поэтому полосы сначала выставляем на старом мониторе, потом на новом, — Tauri пересчитает
+/// размер. Дальше поток опроса снова спрячет их, если надо.
+fn relayout(app: &AppHandle, bars: &[(Bar, [HWND; 2])], from: Option<&Layout>, lay: &Layout) {
+    eprintln!("[bars] monitor {} scale {}", lay.name, lay.scale);
+    if let Some(from) = from {
+        place_shown(bars, from);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    place_shown(bars, lay);
+    std::thread::sleep(Duration::from_millis(100));
+    APPBAR_DIRTY.store(true, Ordering::Relaxed);
+    let m = lay.monitor;
+    shell::place_popovers(
+        app,
+        (m.left, m.top, m.right - m.left, m.bottom - m.top),
+        lay.scale,
+    );
+    crate::dock::reactivate_backdrops();
+}
+
+/// Полосы — в показанное место у краёв рабочей области монитора.
+fn place_shown(bars: &[(Bar, [HWND; 2])], lay: &Layout) {
+    for (bar, _) in bars {
+        if bar.owner.is_null() {
+            continue;
+        }
+        let r = rect_of(bar.owner);
+        let (w, h) = (r.right - r.left, r.bottom - r.top);
+        let x = lay.work.left + (lay.work.right - lay.work.left - w) / 2;
+        let y = match bar.edge {
+            Edge::Top => lay.work.top,
+            Edge::Bottom => lay.work.bottom - h,
+        };
+        move_bar(bar, (x, y));
+    }
 }
 
 /// Хэндлы окон из главного потока в поток опроса.
@@ -498,5 +628,37 @@ mod tests {
             at(600, &mut a, pinned),
             "после полноэкранного — снова видна"
         );
+    }
+
+    fn mon(name: &str) -> Layout {
+        Layout {
+            name: name.into(),
+            monitor: RECT {
+                left: 0,
+                top: 0,
+                right: 1,
+                bottom: 1,
+            },
+            work: RECT {
+                left: 0,
+                top: 0,
+                right: 1,
+                bottom: 1,
+            },
+            scale: 1.0,
+        }
+    }
+
+    #[test]
+    fn picks_chosen_monitor_or_falls_back_to_primary() {
+        let all = [mon("primary"), mon("second")];
+        assert_eq!(pick(&all, Some("second")).unwrap().name, "second");
+        assert_eq!(pick(&all, None).unwrap().name, "primary");
+        assert_eq!(
+            pick(&all, Some("unplugged")).unwrap().name,
+            "primary",
+            "отключён — основной"
+        );
+        assert!(pick(&[], Some("second")).is_none());
     }
 }

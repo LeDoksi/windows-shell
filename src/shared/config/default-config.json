@@ -179,6 +179,7 @@
   },
   "bars": {
     "launcherPinned": false,
-    "dockPinned": false
+    "dockPinned": false,
+    "monitor": null
   }
 }

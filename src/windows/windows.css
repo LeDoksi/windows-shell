@@ -9,6 +9,13 @@
   overflow: hidden;
 }
 
+/* Окно панели подгоняется под ширину панели (useFitWindowTop): ширина панели не должна
+   зависеть от окна, иначе после смены масштаба узкое окно обрезает панель навсегда. */
+:root[data-window="launcher"] .ws-top-panel {
+  width: max-content;
+  max-width: none;
+}
+
 /* Окно категории уже стоит под панелью: карточка с краю окна. */
 :root[data-window="category"] .ws-category {
   top: 8px;

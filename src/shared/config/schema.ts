@@ -36,6 +36,9 @@ export type Config = {
   categories: Category[];
   dock: { pinned: DockPin[] };
   appearance: { glass: GlassMode };
-  /** Закреплённая полоса видна всегда и резервирует место; иначе — автоскрытие. */
-  bars: { launcherPinned: boolean; dockPinned: boolean };
+  /**
+   * Закреплённая полоса видна всегда и резервирует место; иначе — автоскрытие.
+   * `monitor` — имя устройства Windows (`\\.\DISPLAY2`); `null` или не подключён — основной.
+   */
+  bars: { launcherPinned: boolean; dockPinned: boolean; monitor: string | null };
 };

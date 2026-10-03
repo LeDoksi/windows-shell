@@ -77,6 +77,9 @@ pub struct Appearance {
 pub struct Bars {
     pub launcher_pinned: bool,
     pub dock_pinned: bool,
+    /// Монитор полос — имя устройства Windows (`\\.\DISPLAY2`); `None` или не подключён — основной.
+    #[serde(default)]
+    pub monitor: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
