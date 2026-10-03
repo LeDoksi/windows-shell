@@ -321,8 +321,16 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
             m.scale_factor()
         );
     }
-    if std::env::var("WS_TASKBAR").as_deref() == Ok("hide") {
+    let hide_taskbar = std::env::var("WS_TASKBAR").as_deref() == Ok("hide");
+    let tray = std::env::var("WS_TRAY").is_ok();
+    if hide_taskbar || tray {
+        crate::spike_taskbar::guard(tray);
+    }
+    if hide_taskbar {
         crate::spike_taskbar::hide();
+    }
+    if tray {
+        crate::spike_tray::start();
     }
     if std::env::var("WS_AUTOHIDE").is_ok() {
         crate::spike_autohide::start();
