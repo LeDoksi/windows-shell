@@ -1,4 +1,4 @@
-import type { Config } from "../config/schema";
+import type { Config, ItemKind } from "../config/schema";
 import type { FlyoutId } from "../../system/flyoutIds";
 import type { SystemState } from "../../system/model";
 
@@ -12,6 +12,12 @@ export interface Commands {
    * Прямоугольник «стеклянного» элемента окна (таблетка дока, верхняя панель) в физических
    * пикселях окна: под ним встаёт подложка с Acrylic.
    */
+  /** Открыть объект плитки, как двойной клик в Проводнике. Ошибка — текстом. */
+  launch: { args: { kind: ItemKind; target: string }; result: void };
+  /** Открыть папку объекта в Проводнике и выделить его. */
+  reveal: { args: { target: string }; result: void };
+  /** Есть ли эти пути на диске — по одному ответу на путь. */
+  paths_exist: { args: { paths: string[] }; result: boolean[] };
   glass_rect: { args: { x: number; y: number; w: number; h: number }; result: void };
 }
 

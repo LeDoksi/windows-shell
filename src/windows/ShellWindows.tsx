@@ -6,6 +6,7 @@ import { mockRunning } from "../dock/mockRunning";
 import { CategoryWindow } from "../launcher/CategoryWindow";
 import { ItemIcon } from "../launcher/ItemIcon";
 import { TopPanel } from "../launcher/TopPanel";
+import { openFolder, openItem, removeItem, revealItem, useMissing } from "../launcher/items";
 import { matchesQuery } from "../launcher/search";
 import { backend, type EventName, type Events } from "../shared/backend";
 import { useConfig } from "../shared/config";
@@ -62,7 +63,7 @@ function useEvent<E extends EventName>(event: E, handler: (payload: Events[E]) =
   }, [event, handler]);
 }
 
-// Запуск объектов появится на этапе 3; пока клики по плиткам ничего не делают.
+// «＋» и управление категориями — следующие задачи этапа 3.
 const noop = () => {};
 
 function LauncherWindow() {
@@ -106,28 +107,29 @@ function CategoryPopup() {
     void backend.emit("category_closed", null);
   }, []);
   useCloseOnBlur(open !== null, close);
+  // Неудачный запуск — перепроверить диск: плитка могла пропасть, пока окно было открыто.
+  const [failed, setFailed] = useState(0);
 
   const category = config?.categories.find((c) => c.id === open?.id);
+  const missing = useMissing(category?.items ?? [], `${open?.n}-${failed}`);
   if (!open || !category) return null;
+  // Открыли — окно категории уходит, фокус достаётся запущенной программе.
+  const run = (action: Promise<void>) =>
+    action.then(close, (e: unknown) => {
+      console.error(e);
+      setFailed((n) => n + 1);
+    });
   return (
     <CategoryWindow
       key={`${category.id}-${open.n}`}
       category={category}
+      missing={missing}
       onClose={close}
-      onOpenItem={noop}
-      onRevealItem={noop}
-      onOpenFolder={noop}
+      onOpenItem={(item) => void run(openItem(item))}
+      onRevealItem={(item) => void run(revealItem(item))}
+      onOpenFolder={(path) => void run(openFolder(path))}
       onAdd={noop}
-      onRemoveItem={(item) =>
-        update((c) => ({
-          ...c,
-          categories: c.categories.map((cat) =>
-            cat.id === category.id
-              ? { ...cat, items: cat.items.filter((i) => i.id !== item.id) }
-              : cat,
-          ),
-        }))
-      }
+      onRemoveItem={(item) => update((c) => removeItem(c, category.id, item.id))}
     />
   );
 }
@@ -280,7 +282,7 @@ function SearchWindow() {
             icon={<ItemIcon item={item} color={c.color} />}
             title={item.title}
             meta={c.name}
-            onClick={noop}
+            onClick={() => void openItem(item).then(() => hideWindow("search"), console.error)}
           />
         ))}
         {query && results.length === 0 && (

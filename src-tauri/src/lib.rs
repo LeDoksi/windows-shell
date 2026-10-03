@@ -1,9 +1,13 @@
 #[cfg(all(windows, not(feature = "spike")))]
 mod bars;
+// Спайки держат конфиг только в памяти: файл им не нужен.
+#[cfg_attr(feature = "spike", allow(dead_code))]
 mod config;
 // Продакшн-окна; сборка спайков (`--features spike`) поднимает вместо них свои.
 #[cfg(all(windows, not(feature = "spike")))]
 mod dock;
+#[cfg(not(feature = "spike"))]
+mod launch;
 #[cfg(not(feature = "spike"))]
 mod shell;
 #[cfg(all(windows, feature = "spike"))]
@@ -41,11 +45,15 @@ pub fn run() {
         return;
     }
 
-    let builder = tauri::Builder::default().manage(config::ConfigStore::default());
+    let builder = tauri::Builder::default();
 
     #[cfg(not(all(windows, feature = "spike")))]
     let builder = builder
         .setup(|app| {
+            use tauri::Manager;
+            // Раньше окон: они сразу спрашивают конфиг.
+            let dir = app.path().app_config_dir()?;
+            app.manage(config::ConfigStore::load(&dir));
             shell::create(app.handle())?;
             #[cfg(windows)]
             bars::start(app.handle());
@@ -56,11 +64,15 @@ pub fn run() {
             app_info,
             config::config_get,
             config::config_set,
+            launch::launch,
+            launch::reveal,
+            launch::paths_exist,
             shell::glass_rect
         ]);
 
     #[cfg(all(windows, feature = "spike"))]
     let builder = builder
+        .manage(config::ConfigStore::in_memory())
         .setup(|app| Ok(spike::setup(app.handle())?))
         .invoke_handler(tauri::generate_handler![
             app_info,

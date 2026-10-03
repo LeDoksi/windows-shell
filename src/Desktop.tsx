@@ -4,6 +4,7 @@ import { buildDock, clickApp } from "./dock/model";
 import { mockRunning } from "./dock/mockRunning";
 import { CategoryWindow } from "./launcher/CategoryWindow";
 import { TopPanel } from "./launcher/TopPanel";
+import { openFolder, openItem, removeItem, revealItem } from "./launcher/items";
 import { useConfig } from "./shared/config";
 import { SystemTail } from "./system/SystemTail";
 import { mockSystem } from "./system/mockSystem";
@@ -20,7 +21,7 @@ export function Desktop() {
     mockSystem(new URLSearchParams(window.location.search).has("laptop")),
   );
 
-  // Запуск объектов появится на этапе 3; пока клики ничего не делают.
+  // «＋» — следующая задача этапа 3.
   const noop = () => {};
 
   if (!config) return null;
@@ -40,20 +41,11 @@ export function Desktop() {
           key={openCategory.id}
           category={openCategory}
           onClose={() => setOpenCategoryId(null)}
-          onOpenItem={noop}
-          onRevealItem={noop}
-          onOpenFolder={noop}
+          onOpenItem={(item) => void openItem(item)}
+          onRevealItem={(item) => void revealItem(item)}
+          onOpenFolder={(path) => void openFolder(path)}
           onAdd={noop}
-          onRemoveItem={(item) =>
-            update((c) => ({
-              ...c,
-              categories: c.categories.map((category) =>
-                category.id === openCategory.id
-                  ? { ...category, items: category.items.filter((i) => i.id !== item.id) }
-                  : category,
-              ),
-            }))
-          }
+          onRemoveItem={(item) => update((c) => removeItem(c, openCategory.id, item.id))}
         />
       )}
       <Dock

@@ -12,6 +12,7 @@ import {
   type MenuEntry,
 } from "../shared/ui";
 import { ItemIcon } from "./ItemIcon";
+import { canReveal } from "./items";
 import { matchesQuery } from "./search";
 
 type Props = {
@@ -23,6 +24,8 @@ type Props = {
   onRemoveItem: (item: LauncherItem) => void;
   onAdd: () => void;
   onOpenFolder: (path: string) => void;
+  /** Id плиток, чьих файлов нет на диске: рисуются приглушёнными. */
+  missing?: ReadonlySet<string>;
 };
 
 export function CategoryWindow({
@@ -33,6 +36,7 @@ export function CategoryWindow({
   onRemoveItem,
   onAdd,
   onOpenFolder,
+  missing,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
@@ -47,7 +51,7 @@ export function CategoryWindow({
         { label: "Открыть", shortcut: "Enter", onSelect: () => onOpenItem(menu.item) },
         {
           label: "Открыть расположение",
-          disabled: menu.item.kind === "url",
+          disabled: !canReveal(menu.item) || missing?.has(menu.item.id),
           onSelect: () => onRevealItem(menu.item),
         },
         { kind: "separator" },
@@ -89,6 +93,7 @@ export function CategoryWindow({
             title={item.title}
             meta={item.meta ?? ""}
             selected={menu?.item.id === item.id}
+            missing={missing?.has(item.id)}
             onClick={() => onOpenItem(item)}
             onContextMenu={(e) => {
               e.preventDefault();

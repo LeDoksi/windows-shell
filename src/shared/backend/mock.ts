@@ -23,6 +23,13 @@ export function createMockBackend(): Backend {
       config = structuredClone(next);
       emit("config_changed", structuredClone(config));
     },
+    // В браузере открыть можно только ссылку; остальное — запись в консоль.
+    launch: ({ kind, target }) => {
+      if (kind === "url") window.open(target, "_blank", "noopener");
+      else console.info(`[mock] открыть ${kind}: ${target}`);
+    },
+    reveal: ({ target }) => console.info(`[mock] показать в Проводнике: ${target}`),
+    paths_exist: ({ paths }) => paths.map(() => true),
     glass_rect: () => {},
   };
 
