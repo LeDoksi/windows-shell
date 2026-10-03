@@ -34,10 +34,20 @@ function SpikeDock() {
       if (pill) {
         const r = pill.getBoundingClientRect();
         const radius = parseFloat(getComputedStyle(pill).borderTopLeftRadius) || 0;
-        const key = `${r.x},${r.y},${r.width},${r.height}`;
+        // DPI в ключе: при переезде на другой монитор CSS-размеры те же, а физические — нет.
+        const key = `${r.x},${r.y},${r.width},${r.height},${devicePixelRatio}`;
         if (key !== last) {
           last = key;
-          void invoke("spike_pill", { x: r.x, y: r.y, w: r.width, h: r.height, radius });
+          // Физические пиксели считает сам WebView2: его devicePixelRatio, а не scale_factor окна
+          // (на мониторе 175 % они расходятся — проверено).
+          const d = devicePixelRatio;
+          void invoke("spike_pill", {
+            x: r.x * d,
+            y: r.y * d,
+            w: r.width * d,
+            h: r.height * d,
+            radius: radius * d,
+          });
         }
       }
       frame = requestAnimationFrame(tick);

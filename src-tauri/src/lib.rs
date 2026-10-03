@@ -1,6 +1,8 @@
 mod config;
 #[cfg(all(windows, feature = "spike"))]
 mod spike;
+#[cfg(all(windows, feature = "spike"))]
+mod spike_autohide;
 
 use serde::Serialize;
 

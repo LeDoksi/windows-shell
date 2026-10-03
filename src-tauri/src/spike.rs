@@ -9,7 +9,7 @@
 //!
 //! `WS_NOBG=1` — без контрастного тестового фона, `WS_NORAISE=1` — без возврата наверх по хуку.
 
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicIsize, Ordering};
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
@@ -23,20 +23,42 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
     EVENT_SYSTEM_FOREGROUND, GWL_EXSTYLE, HWND_TOPMOST, MA_NOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, WINEVENT_OUTOFCONTEXT, WM_MOUSEACTIVATE,
-    WM_NCACTIVATE, WS_EX_NOACTIVATE,
+    SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, WINEVENT_OUTOFCONTEXT, WM_DISPLAYCHANGE,
+    WM_DPICHANGED, WM_MOUSEACTIVATE, WM_NCACTIVATE, WM_SETTINGCHANGE, WS_EX_NOACTIVATE,
 };
 
 /// Окна дока снизу вверх: подложка (может не быть), иконки.
 static DOCK: [AtomicIsize; 2] = [AtomicIsize::new(0), AtomicIsize::new(0)];
 /// Последнее чужое активное окно: ему возвращаем фокус после клика по доку.
 static PREV_FG: AtomicIsize = AtomicIsize::new(0);
+/// Таблетка в физических пикселях относительно окна иконок: x, y, ширина.
+static PILL: [AtomicI32; 3] = [AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0)];
+
+pub(crate) fn dock_hwnds() -> [HWND; 2] {
+    [0, 1].map(|i| DOCK[i].load(Ordering::Relaxed) as HWND)
+}
+
+/// Смещение и ширина таблетки внутри окна иконок.
+pub(crate) fn pill_offset() -> (i32, i32) {
+    (
+        PILL[0].load(Ordering::Relaxed),
+        PILL[2].load(Ordering::Relaxed),
+    )
+}
+
+/// Левый верхний угол таблетки (и подложки) внутри окна иконок.
+pub(crate) fn pill_origin() -> (i32, i32) {
+    (
+        PILL[0].load(Ordering::Relaxed),
+        PILL[1].load(Ordering::Relaxed),
+    )
+}
 
 const ICONS: &str = "spike-icons";
 const BACKDROP: &str = "spike-backdrop";
 /// Окно иконок выше таблетки: место под увеличение.
-const ICONS_W: f64 = 1200.0;
-const ICONS_H: f64 = 190.0;
+pub(crate) const ICONS_W: f64 = 1200.0;
+pub(crate) const ICONS_H: f64 = 190.0;
 /// Тонировка подложки поверх размытия (RGBA).
 const TINT: (u8, u8, u8, u8) = (14, 30, 43, 90);
 
@@ -69,6 +91,13 @@ unsafe extern "system" fn no_mouse_activate(
 ) -> LRESULT {
     if msg == WM_MOUSEACTIVATE {
         return MA_NOACTIVATE as LRESULT;
+    }
+    if matches!(msg, WM_DISPLAYCHANGE | WM_DPICHANGED | WM_SETTINGCHANGE) {
+        // Сначала Tauri применяет свой размер под новый DPI, потом мы раскладываем поверх (проверено).
+        let r = DefSubclassProc(hwnd, msg, wparam, lparam);
+        eprintln!("[spike] display message {msg:#x}");
+        crate::spike_autohide::RELAYOUT.store(true, Ordering::Relaxed);
+        return r;
     }
     DefSubclassProc(hwnd, msg, wparam, lparam)
 }
@@ -144,7 +173,7 @@ fn builder<'a>(
     role: &str,
     v: &str,
 ) -> WebviewWindowBuilder<'a, tauri::Wry, AppHandle> {
-    WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
+    let b = WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
         .initialization_script(format!(
             "window.__WS_SPIKE__ = {{ role: {role:?}, variant: {v:?} }};"
         ))
@@ -154,7 +183,22 @@ fn builder<'a>(
         .resizable(false)
         .skip_taskbar(true)
         .always_on_top(true)
-        .focused(false)
+        .focused(false);
+    // `WS_CREATE_AT=x,y` (физические пиксели): создать окно сразу на мониторе с этой точкой.
+    // Проверяем, нужен ли WebView2 «родной» монитор с момента создания.
+    match create_at(app) {
+        Some((x, y)) => b.position(x, y),
+        None => b,
+    }
+}
+
+fn create_at(app: &AppHandle) -> Option<(f64, f64)> {
+    let v = std::env::var("WS_CREATE_AT").ok()?;
+    let (x, y) = v.split_once(',')?;
+    let (x, y): (f64, f64) = (x.trim().parse().ok()?, y.trim().parse().ok()?);
+    let m = app.monitor_from_point(x, y).ok()??;
+    let s = m.scale_factor();
+    Some((x / s, y / s))
 }
 
 pub fn setup(app: &AppHandle) -> tauri::Result<()> {
@@ -202,8 +246,10 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     // Клик по доку не должен забирать фокус (и гасить Acrylic у подложки).
     no_activate(&icons);
     DOCK[1].store(hwnd(&icons) as isize, Ordering::Relaxed);
-    icons.set_size(PhysicalSize::new(w as u32, h as u32))?;
-    icons.set_position(PhysicalPosition::new(x, y))?;
+    if create_at(app).is_none() {
+        icons.set_size(PhysicalSize::new(w as u32, h as u32))?;
+        icons.set_position(PhysicalPosition::new(x, y))?;
+    }
     if v == "b" {
         window_vibrancy::apply_acrylic(&icons, Some(TINT)).expect("acrylic");
     }
@@ -211,6 +257,21 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
         b.show()?;
     }
     icons.show()?;
+    // `WS_MOVE_TAURI=x,y` — переезд на монитор с этой точкой средствами Tauri (из главного потока).
+    if let Some((mx, my)) = std::env::var("WS_MOVE_TAURI")
+        .ok()
+        .and_then(|v| {
+            v.split_once(',')
+                .map(|(a, b)| (a.trim().parse::<i32>(), b.trim().parse::<i32>()))
+        })
+        .and_then(|(a, b)| Some((a.ok()?, b.ok()?)))
+    {
+        let icons = icons.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let _ = icons.set_position(PhysicalPosition::new(mx, my));
+        });
+    }
     if let Some(b) = &backdrop {
         // Регион DWM-подложку не обрезает (проверено), скругление — только штатное, 8 px.
         let round = DWMWCP_ROUND;
@@ -249,6 +310,20 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
         )
     };
 
+    for m in app.available_monitors()? {
+        eprintln!(
+            "[spike] monitor {:?}: {:?} {:?}, work {:?}, scale {}",
+            m.name(),
+            m.position(),
+            m.size(),
+            m.work_area(),
+            m.scale_factor()
+        );
+    }
+    if std::env::var("WS_AUTOHIDE").is_ok() {
+        crate::spike_autohide::start();
+    }
+
     if let Some(main) = app.get_webview_window("main") {
         main.close()?;
     }
@@ -267,7 +342,7 @@ unsafe extern "system" fn always_active(
     DefSubclassProc(hwnd, msg, wparam, lparam)
 }
 
-/// Фронт сообщает прямоугольник таблетки в CSS-пикселях окна иконок, каждый кадр, когда он меняется.
+/// Фронт сообщает прямоугольник таблетки в физических пикселях окна иконок, каждый кадр, когда он меняется.
 #[tauri::command]
 pub fn spike_pill(
     app: AppHandle,
@@ -278,7 +353,8 @@ pub fn spike_pill(
     radius: f64,
 ) -> Result<(), String> {
     let icons = app.get_webview_window(ICONS).ok_or("no icons window")?;
-    let s = icons.scale_factor().map_err(|e| e.to_string())?;
+    // Фронт уже прислал физические пиксели.
+    let s = 1.0;
     let (px, py, pw, ph, pr) = (
         (x * s).round() as i32,
         (y * s).round() as i32,
@@ -286,6 +362,9 @@ pub fn spike_pill(
         (h * s).round() as i32,
         (radius * 2.0 * s).round() as i32,
     );
+    for (slot, v) in PILL.iter().zip([px, py, pw]) {
+        slot.store(v, Ordering::Relaxed);
+    }
     // ponytail: регион без сглаживания — это и есть то, что спайк проверяет глазами.
     unsafe {
         match app.get_webview_window(BACKDROP) {
