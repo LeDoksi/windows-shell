@@ -3,6 +3,8 @@ mod config;
 mod spike;
 #[cfg(all(windows, feature = "spike"))]
 mod spike_autohide;
+#[cfg(all(windows, feature = "spike"))]
+mod spike_taskbar;
 
 use serde::Serialize;
 
@@ -22,6 +24,12 @@ fn app_info() -> AppInfo {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Спайк WSH-43: режимы сторожа и возврата панели задач — без запуска окон.
+    #[cfg(all(windows, feature = "spike"))]
+    if spike_taskbar::cli() {
+        return;
+    }
+
     let builder = tauri::Builder::default().manage(config::ConfigStore::default());
 
     #[cfg(not(all(windows, feature = "spike")))]
@@ -41,9 +49,20 @@ pub fn run() {
             spike::spike_pill
         ]);
 
+    #[cfg(not(all(windows, feature = "spike")))]
     builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+
+    #[cfg(all(windows, feature = "spike"))]
+    builder
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_, event| {
+            if let tauri::RunEvent::Exit = event {
+                spike_taskbar::restore();
+            }
+        });
 }
 
 #[cfg(test)]
