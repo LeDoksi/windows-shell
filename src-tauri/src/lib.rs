@@ -1,4 +1,9 @@
 mod config;
+// Продакшн-окна; сборка спайков (`--features spike`) поднимает вместо них свои.
+#[cfg(all(windows, not(feature = "spike")))]
+mod dock;
+#[cfg(not(feature = "spike"))]
+mod shell;
 #[cfg(all(windows, feature = "spike"))]
 mod spike;
 #[cfg(all(windows, feature = "spike"))]
@@ -35,11 +40,14 @@ pub fn run() {
     let builder = tauri::Builder::default().manage(config::ConfigStore::default());
 
     #[cfg(not(all(windows, feature = "spike")))]
-    let builder = builder.invoke_handler(tauri::generate_handler![
-        app_info,
-        config::config_get,
-        config::config_set
-    ]);
+    let builder = builder
+        .setup(|app| Ok(shell::create(app.handle())?))
+        .invoke_handler(tauri::generate_handler![
+            app_info,
+            config::config_get,
+            config::config_set,
+            shell::dock_pill
+        ]);
 
     #[cfg(all(windows, feature = "spike"))]
     let builder = builder

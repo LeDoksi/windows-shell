@@ -35,6 +35,8 @@
 | `search` | центр экрана, по хоткею, получает фокус |
 | `settings` | обычное окно |
 
+Реализация (WSH-14): окна создаёт Rust при старте (`src-tauri/src/shell.rs`), фронт рисует часть интерфейса по метке окна (`src/windows/ShellWindows.tsx`), окна общаются событиями (`category_open`, `flyout_open`, `system_state` …) через `backend.emit`. Все окна — `WS_EX_TOOLWINDOW` (не в Alt+Tab). Док — два окна по итогам спайков (`src-tauri/src/dock.rs`): подложка с Acrylic и окно иконок без активации, возврат фокуса и подъём над topmost-окнами. Прозрачная часть окна WebView2 перехватывает клики, поэтому окно панели подгоняется под ширину самой панели; поповеры закрываются, когда их окно теряет фокус. Браузерный режим (`pnpm dev:web`) по-прежнему рисует всё на одной странице.
+
 ### Стекло (главный риск)
 
 - CSS `backdrop-filter` внутри прозрачного WebView2 размывает только содержимое самой страницы, **не рабочий стол и не окна под ней**. Для «настоящего» glass нужен DWM backdrop: `DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE, DWMSBT_TRANSIENTWINDOW)` (Acrylic, Win11 22H2+) или крейт `window-vibrancy`.

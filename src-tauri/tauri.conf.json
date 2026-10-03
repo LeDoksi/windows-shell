@@ -10,14 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Windows Shell",
-        "width": 960,
-        "height": 600
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }

@@ -7,9 +7,7 @@ type Handlers = { [C in CommandName]: (args: Commands[C]["args"]) => Commands[C]
 type Listener = (payload: unknown) => void;
 
 /** Мок для браузерного режима и тестов. `emit` имитирует событие от Rust. */
-export function createMockBackend(): Backend & {
-  emit<E extends EventName>(event: E, payload: Events[E]): void;
-} {
+export function createMockBackend(): Backend {
   const listeners = new Map<string, Set<Listener>>();
   const emit = <E extends EventName>(event: E, payload: Events[E]) =>
     listeners.get(event)?.forEach((l) => l(payload));
@@ -25,6 +23,7 @@ export function createMockBackend(): Backend & {
       config = structuredClone(next);
       emit("config_changed", structuredClone(config));
     },
+    dock_pill: () => {},
   };
 
   return {
@@ -37,6 +36,7 @@ export function createMockBackend(): Backend & {
       listeners.set(event, set);
       return () => set.delete(handler as Listener);
     },
-    emit,
+    // Слушатели вызываются синхронно: тестам и браузерному режиму так проще.
+    emit: async (event, payload) => emit(event, payload),
   };
 }

@@ -1,4 +1,6 @@
 import type { Config } from "../config/schema";
+import type { FlyoutId } from "../../system/flyoutIds";
+import type { SystemState } from "../../system/model";
 
 /** Что фронт может спросить у Rust. Ключ — имя команды `#[tauri::command]`. */
 export interface Commands {
@@ -6,14 +8,25 @@ export interface Commands {
   config_get: { args: Record<string, never>; result: Config };
   /** Заменяет конфиг целиком; Rust проверяет его и рассылает `config_changed`. */
   config_set: { args: { config: Config }; result: void };
+  /** Прямоугольник таблетки дока в физических пикселях окна дока: под ней встаёт подложка. */
+  dock_pill: { args: { x: number; y: number; w: number; h: number }; result: void };
 }
 
 /**
- * Что Rust присылает фронту. Ключ — имя события.
+ * События: от Rust и между окнами оболочки. Ключ — имя события.
  * Заполняется по мере появления живых данных: окна, аудио, трей.
  */
 export interface Events {
   config_changed: Config;
+  /** Панель открывает окно категории. */
+  category_open: { id: string };
+  /** Окно категории закрылось (Esc, клик мимо, ушёл фокус). */
+  category_closed: null;
+  /** Док открывает flyout системного хвоста и передаёт текущее состояние. */
+  flyout_open: { id: FlyoutId; state: SystemState };
+  flyout_closed: null;
+  /** Flyout поменял состояние (громкость, Wi-Fi) — док подхватывает. */
+  system_state: SystemState;
 }
 
 export interface AppInfo {
@@ -39,4 +52,6 @@ export interface Backend {
       : [args: Commands[C]["args"]]
   ): Promise<Commands[C]["result"]>;
   on<E extends EventName>(event: E, handler: (payload: Events[E]) => void): Promise<Unlisten>;
+  /** Событие всем окнам (и себе). */
+  emit<E extends EventName>(event: E, payload: Events[E]): Promise<void>;
 }
