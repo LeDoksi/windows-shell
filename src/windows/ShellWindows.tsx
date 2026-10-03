@@ -273,7 +273,9 @@ function SearchWindow() {
             onClick={noop}
           />
         ))}
-        {query && results.length === 0 && <p className="ws-search-window__empty">Ничего не нашлось</p>}
+        {query && results.length === 0 && (
+          <p className="ws-search-window__empty">Ничего не нашлось</p>
+        )}
       </div>
     </GlassSurface>
   );
