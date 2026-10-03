@@ -92,6 +92,7 @@ unsafe extern "system" fn no_mouse_activate(
     if msg == WM_MOUSEACTIVATE {
         return MA_NOACTIVATE as LRESULT;
     }
+    crate::spike_taskbar::on_message(msg);
     if matches!(msg, WM_DISPLAYCHANGE | WM_DPICHANGED | WM_SETTINGCHANGE) {
         // Сначала Tauri применяет свой размер под новый DPI, потом мы раскладываем поверх (проверено).
         let r = DefSubclassProc(hwnd, msg, wparam, lparam);
@@ -319,6 +320,9 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
             m.work_area(),
             m.scale_factor()
         );
+    }
+    if std::env::var("WS_TASKBAR").as_deref() == Ok("hide") {
+        crate::spike_taskbar::hide();
     }
     if std::env::var("WS_AUTOHIDE").is_ok() {
         crate::spike_autohide::start();
