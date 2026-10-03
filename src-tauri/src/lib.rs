@@ -12,6 +12,8 @@ mod spike_autohide;
 mod spike_taskbar;
 #[cfg(all(windows, feature = "spike"))]
 mod spike_tray;
+#[cfg(not(feature = "spike"))]
+mod tray;
 
 use serde::Serialize;
 
@@ -41,7 +43,11 @@ pub fn run() {
 
     #[cfg(not(all(windows, feature = "spike")))]
     let builder = builder
-        .setup(|app| Ok(shell::create(app.handle())?))
+        .setup(|app| {
+            shell::create(app.handle())?;
+            tray::create(app.handle())?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             app_info,
             config::config_get,
