@@ -4,7 +4,8 @@ import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 /** Метки окон оболочки — те же, что в `src-tauri/src/shell.rs`. */
-export type WindowLabel = "launcher" | "category" | "dock" | "dock-backdrop" | "flyout" | "search";
+export type WindowLabel =
+  "launcher" | "launcher-backdrop" | "category" | "dock" | "dock-backdrop" | "flyout" | "search";
 
 export async function showWindow(label: WindowLabel, focus = true) {
   const w = await WebviewWindow.getByLabel(label);

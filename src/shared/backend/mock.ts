@@ -23,7 +23,7 @@ export function createMockBackend(): Backend {
       config = structuredClone(next);
       emit("config_changed", structuredClone(config));
     },
-    dock_pill: () => {},
+    glass_rect: () => {},
   };
 
   return {

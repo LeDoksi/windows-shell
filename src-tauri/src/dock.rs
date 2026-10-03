@@ -1,6 +1,9 @@
-//! Док — два окна: снизу подложка с Acrylic по размеру таблетки, сверху прозрачное окно иконок.
-//! Всё Win32 здесь — решения спайков WSH-4 (стекло) и WSH-5 (без активации, topmost),
+//! Win32 для окон оболочки — решения спайков WSH-4 (стекло) и WSH-5 (без активации, topmost),
 //! подробности в `docs/ARCHITECTURE.md`.
+//!
+//! Стекло (режим «Стекло»): под таблеткой дока и под верхней панелью лежит своё окно-подложка
+//! с DWM Acrylic ровно по размеру элемента. Окно с содержимым прозрачное и может быть больше
+//! (иконки дока растут вверх). В режиме «Тонировка» подложки спрятаны.
 
 use std::sync::atomic::{AtomicIsize, Ordering};
 use std::time::Duration;
@@ -24,6 +27,8 @@ const TINT: (u8, u8, u8, u8) = (14, 30, 43, 90);
 
 /// Окна дока снизу вверх: подложка, иконки.
 static DOCK: [AtomicIsize; 2] = [AtomicIsize::new(0), AtomicIsize::new(0)];
+/// Подложка верхней панели.
+static LAUNCHER_BACKDROP: AtomicIsize = AtomicIsize::new(0);
 /// Последнее чужое активное окно: ему возвращаем фокус после клика по доку.
 static PREV_FG: AtomicIsize = AtomicIsize::new(0);
 
@@ -77,10 +82,19 @@ unsafe extern "system" fn always_active(
     DefSubclassProc(hwnd, msg, wparam, lparam)
 }
 
-fn reactivate_backdrop() {
-    let b = DOCK[0].load(Ordering::Relaxed);
-    if b != 0 {
-        unsafe { SendMessageW(b as HWND, WM_NCACTIVATE, 1, 0) };
+fn backdrops() -> [isize; 2] {
+    [
+        DOCK[0].load(Ordering::Relaxed),
+        LAUNCHER_BACKDROP.load(Ordering::Relaxed),
+    ]
+}
+
+/// Потеря активности (клик по доку, смена режима) гасит Acrylic — включаем обратно.
+pub fn reactivate_backdrops() {
+    for b in backdrops() {
+        if b != 0 {
+            unsafe { SendMessageW(b as HWND, WM_NCACTIVATE, 1, 0) };
+        }
     }
 }
 
@@ -126,10 +140,9 @@ unsafe extern "system" fn on_foreground(
         if prev != 0 {
             SetForegroundWindow(prev as HWND);
         }
-        // Потеря активности гасит Acrylic у подложки — включаем обратно, когда фокус ушёл.
         std::thread::spawn(|| {
             std::thread::sleep(Duration::from_millis(50));
-            reactivate_backdrop();
+            reactivate_backdrops();
         });
         return;
     }
@@ -148,26 +161,42 @@ unsafe extern "system" fn on_foreground(
     });
 }
 
-/// Настроить окна дока. Вызывается один раз из главного потока после создания окон.
-pub fn setup(backdrop: &WebviewWindow, icons: &WebviewWindow) {
-    if let Err(e) = window_vibrancy::apply_acrylic(backdrop, Some(TINT)) {
-        eprintln!("[dock] acrylic unavailable: {e}");
+/// Окно-подложка: Acrylic, скругление DWM (8 px), без активации, всегда «активное» для DWM.
+fn setup_backdrop(w: &WebviewWindow) -> HWND {
+    if let Err(e) = window_vibrancy::apply_acrylic(w, Some(TINT)) {
+        eprintln!("[glass] acrylic unavailable: {e}");
     }
-    let (b, i) = (hwnd(backdrop), hwnd(icons));
-    // Иконки не «владеемые» подложкой: иначе краткая активация иконок гасит Acrylic насовсем.
-    no_activate(b);
-    no_activate(i);
-    DOCK[0].store(b as isize, Ordering::Relaxed);
-    DOCK[1].store(i as isize, Ordering::Relaxed);
+    let h = hwnd(w);
+    no_activate(h);
     let round = DWMWCP_ROUND;
     unsafe {
         DwmSetWindowAttribute(
-            b,
+            h,
             DWMWA_WINDOW_CORNER_PREFERENCE as u32,
             &round as *const _ as *const _,
             std::mem::size_of_val(&round) as u32,
         );
-        SetWindowSubclass(b, Some(always_active), 1, 0);
+        SetWindowSubclass(h, Some(always_active), 1, 0);
+    }
+    h
+}
+
+/// Настроить окна. Вызывается один раз из главного потока после их создания.
+pub fn setup(
+    dock_backdrop: &WebviewWindow,
+    icons: &WebviewWindow,
+    launcher_backdrop: &WebviewWindow,
+) {
+    DOCK[0].store(setup_backdrop(dock_backdrop) as isize, Ordering::Relaxed);
+    LAUNCHER_BACKDROP.store(
+        setup_backdrop(launcher_backdrop) as isize,
+        Ordering::Relaxed,
+    );
+    // Иконки не «владеемые» подложкой: иначе краткая активация иконок гасит Acrylic насовсем.
+    let i = hwnd(icons);
+    no_activate(i);
+    DOCK[1].store(i as isize, Ordering::Relaxed);
+    unsafe {
         SetWinEventHook(
             EVENT_SYSTEM_FOREGROUND,
             EVENT_SYSTEM_FOREGROUND,
@@ -178,21 +207,21 @@ pub fn setup(backdrop: &WebviewWindow, icons: &WebviewWindow) {
             WINEVENT_OUTOFCONTEXT,
         );
     }
-    reactivate_backdrop();
+    reactivate_backdrops();
     raise();
 }
 
-/// Фронт окна иконок сообщает прямоугольник таблетки в физических пикселях окна
-/// (`devicePixelRatio` самого WebView2, см. спайк WSH-6) — подложка встаёт ровно под неё.
-pub fn place_backdrop(icons: &WebviewWindow, x: i32, y: i32, w: i32, h: i32) -> tauri::Result<()> {
-    let b = DOCK[0].load(Ordering::Relaxed);
-    if b == 0 {
-        return Ok(());
-    }
-    let origin = icons.outer_position()?;
+/// Поставить подложку `backdrop` под прямоугольник элемента окна `owner`
+/// (физические пиксели внутри окна — `devicePixelRatio` самого WebView2, см. спайк WSH-6).
+pub fn place_backdrop(
+    owner: &WebviewWindow,
+    backdrop: &WebviewWindow,
+    (x, y, w, h): (i32, i32, i32, i32),
+) -> tauri::Result<()> {
+    let origin = owner.outer_position()?;
     unsafe {
         SetWindowPos(
-            b as HWND,
+            hwnd(backdrop),
             std::ptr::null_mut(),
             origin.x + x,
             origin.y + y,

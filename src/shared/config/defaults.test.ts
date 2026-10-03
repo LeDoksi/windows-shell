@@ -18,6 +18,14 @@ describe("validateConfig", () => {
     expect(validateConfig(broken)).toMatch(/повторяется id item/);
   });
 
+  it("defaults to glass and accepts only the two glass modes", () => {
+    expect(defaultConfig.appearance.glass).toBe("acrylic");
+    const tint = { ...defaultConfig, appearance: { glass: "tint" as const } };
+    expect(validateConfig(tint)).toBeNull();
+    const broken = { ...defaultConfig, appearance: { glass: "auto" as "tint" } };
+    expect(validateConfig(broken)).toMatch(/режим стекла/);
+  });
+
   it("rejects unknown schema version", () => {
     expect(validateConfig({ ...defaultConfig, schemaVersion: 2 as 1 })).toMatch(/версия/);
   });

@@ -3,13 +3,16 @@
 //! Фронт выбирает, что рисовать, по метке окна (`src/windows/`).
 
 use tauri::{
-    AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Listener, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
+
+use crate::config::{Config, ConfigStore, GlassMode};
 
 pub const LAUNCHER: &str = "launcher";
 pub const CATEGORY: &str = "category";
 pub const DOCK: &str = "dock";
 pub const DOCK_BACKDROP: &str = "dock-backdrop";
+pub const LAUNCHER_BACKDROP: &str = "launcher-backdrop";
 pub const FLYOUT: &str = "flyout";
 pub const SEARCH: &str = "search";
 
@@ -66,6 +69,8 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     // Flyout ставит на место сам док: над кнопкой системного хвоста.
     let flyout = window(app, FLYOUT, FLYOUT_SIZE)?;
 
+    // Подложки стекла создаём раньше окон с содержимым: так они ниже в z-order.
+    let launcher_backdrop = window(app, LAUNCHER_BACKDROP, (1.0, 1.0))?;
     let backdrop = window(app, DOCK_BACKDROP, (1.0, 1.0))?;
     let dock = window(app, DOCK, DOCK_SIZE)?;
     dock.set_position(PhysicalPosition::new(
@@ -75,32 +80,87 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
 
     #[cfg(windows)]
     {
-        for w in [&launcher, &category, &search, &flyout, &backdrop, &dock] {
+        for w in [
+            &launcher,
+            &category,
+            &search,
+            &flyout,
+            &launcher_backdrop,
+            &backdrop,
+            &dock,
+        ] {
             crate::dock::tool_window(w);
         }
-        crate::dock::setup(&backdrop, &dock);
+        crate::dock::setup(&backdrop, &dock, &launcher_backdrop);
     }
 
     launcher.show()?;
-    backdrop.show()?;
     dock.show()?;
+    let glass = app
+        .state::<ConfigStore>()
+        .0
+        .lock()
+        .expect("config lock")
+        .appearance
+        .glass;
+    apply_glass(app, glass)?;
+    // Режим меняется на лету: конфиг поменяли — показываем или прячем подложки.
+    let handle = app.clone();
+    app.listen_any("config_changed", move |event| {
+        if let Ok(config) = serde_json::from_str::<Config>(event.payload()) {
+            if let Err(e) = apply_glass(&handle, config.appearance.glass) {
+                eprintln!("[glass] {e}");
+            }
+        }
+    });
     Ok(())
 }
 
-/// Окно иконок дока сообщает прямоугольник таблетки (физические пиксели внутри окна).
+/// «Стекло» — подложки с Acrylic видны; «Тонировка» — спрятаны, фон даёт CSS.
+fn apply_glass(app: &AppHandle, mode: GlassMode) -> tauri::Result<()> {
+    for label in [LAUNCHER_BACKDROP, DOCK_BACKDROP] {
+        let Some(w) = app.get_webview_window(label) else {
+            continue;
+        };
+        match mode {
+            GlassMode::Acrylic => w.show()?,
+            GlassMode::Tint => w.hide()?,
+        }
+    }
+    #[cfg(windows)]
+    if mode == GlassMode::Acrylic {
+        crate::dock::reactivate_backdrops();
+    }
+    Ok(())
+}
+
+/// Окно сообщает прямоугольник своего «стеклянного» элемента (таблетка дока, верхняя панель)
+/// в физических пикселях внутри окна — под ним встаёт подложка `<метка>-backdrop`.
 #[tauri::command]
-pub fn dock_pill(app: AppHandle, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
-    let icons = app.get_webview_window(DOCK).ok_or("no dock window")?;
+pub fn glass_rect(
+    app: AppHandle,
+    window: WebviewWindow,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Result<(), String> {
+    let backdrop = app
+        .get_webview_window(&format!("{}-backdrop", window.label()))
+        .ok_or("no backdrop for this window")?;
     #[cfg(windows)]
     crate::dock::place_backdrop(
-        &icons,
-        x.round() as i32,
-        y.round() as i32,
-        w.round() as i32,
-        h.round() as i32,
+        &window,
+        &backdrop,
+        (
+            x.round() as i32,
+            y.round() as i32,
+            w.round() as i32,
+            h.round() as i32,
+        ),
     )
     .map_err(|e| e.to_string())?;
     #[cfg(not(windows))]
-    let _ = (icons, x, y, w, h);
+    let _ = (backdrop, x, y, w, h);
     Ok(())
 }

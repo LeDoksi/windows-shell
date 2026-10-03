@@ -1,6 +1,7 @@
 import type { Config } from "./schema";
 
 const kinds = new Set(["app", "file", "folder", "url"]);
+const glassModes = new Set(["acrylic", "tint"]);
 
 /** Те же проверки, что `Config::validate` в Rust. Возвращает текст ошибки или null. */
 export function validateConfig(config: Config): string | null {
@@ -24,6 +25,9 @@ export function validateConfig(config: Config): string | null {
   for (const pin of config.dock.pinned) {
     const error = unique("pin", pin.id);
     if (error) return error;
+  }
+  if (!glassModes.has(config.appearance?.glass)) {
+    return `неизвестный режим стекла «${config.appearance?.glass}»`;
   }
   return null;
 }
