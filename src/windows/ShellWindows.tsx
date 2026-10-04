@@ -15,10 +15,11 @@ import {
   renameCategory,
 } from "../launcher/categories";
 import { openFolder, openItem, removeItem, revealItem, useMissing } from "../launcher/items";
+import { dropPaths, moveItem } from "../launcher/reorder";
 import { matchesQuery } from "../launcher/search";
 import { backend, type EventName, type Events } from "../shared/backend";
 import { useConfig } from "../shared/config";
-import { ContextMenu, Flyout, GlassSurface, SearchField, Tile } from "../shared/ui";
+import { ContextMenu, Flyout, GlassSurface, SearchField, Tile, useFileDrop } from "../shared/ui";
 import { SystemFlyoutContent } from "../system/SystemFlyoutContent";
 import { SystemTail } from "../system/SystemTail";
 import { flyoutLabels, type FlyoutId } from "../system/flyoutIds";
@@ -29,6 +30,7 @@ import { SETTINGS_FLYOUT, panelFlyoutLabel } from "../widgets/panelFlyoutIds";
 import { WidgetZone } from "../widgets/WidgetZone";
 import {
   fitWindowAbove,
+  fromScreen,
   hideWindow,
   screenTopCenter,
   showWindow,
@@ -96,6 +98,72 @@ function LauncherWindow() {
   );
   useFitWindowTop(".ws-top-panel", 16, 80);
   useGlassRect(".ws-top-panel");
+
+  /** Категория под плиткой из окна категории или под файлами из Проводника. */
+  const [dragOver, setDragOver] = useState<string | null>(null);
+  // Ответы `fromScreen` могут прийти не по порядку: учитываем только последнее событие.
+  const tileSeq = useRef(0);
+  useEvent(
+    "tile_drag",
+    useCallback(
+      (e: Events["tile_drag"]) => {
+        const seq = ++tileSeq.current;
+        void fromScreen(e.x, e.y).then(({ x, y }) => {
+          if (seq !== tileSeq.current) return;
+          const id = categoryAt(x, y);
+          const target = id !== e.categoryId ? id : null;
+          if (e.phase === "move") return setDragOver(target);
+          setDragOver(null);
+          if (e.phase === "drop" && target) {
+            void update((c) => moveItem(c, e.categoryId, e.itemId, target)).catch(console.error);
+          }
+        });
+      },
+      [update],
+    ),
+  );
+
+  // Файлы из Проводника: задержались над категорией — открываем её, отпустили — добавляем.
+  const spring = useRef<{ id: string; timer: number } | null>(null);
+  const stopSpring = () => {
+    if (spring.current) clearTimeout(spring.current.timer);
+    spring.current = null;
+  };
+  useEffect(() => stopSpring, []);
+  const addDropped = async (id: string, paths: string[]) => {
+    const dirs = await backend.call("paths_are_dirs", { paths });
+    await update((c) => dropPaths(c, id, paths, dirs));
+  };
+  useFileDrop((e) => {
+    if (e.type === "leave") {
+      stopSpring();
+      return setDragOver(null);
+    }
+    const id = categoryAt(e.x, e.y);
+    if (e.type === "over") {
+      setDragOver(id);
+      if (spring.current?.id === id) return;
+      stopSpring();
+      if (id && id !== openId) {
+        spring.current = {
+          id,
+          timer: window.setTimeout(() => {
+            spring.current = null;
+            setOpenId(id);
+            // Без фокуса: Проводник ещё держит перетаскивание.
+            void backend
+              .emit("category_open", { id, byDrag: true })
+              .then(() => showWindow("category", false));
+          }, SPRING_DELAY),
+        };
+      }
+      return;
+    }
+    stopSpring();
+    setDragOver(null);
+    if (id && e.paths.length) addDropped(id, e.paths).catch(console.error);
+  });
+
   if (!config) return null;
   // Flyout виджета или настроек — своё окно под панелью, правым краем по кнопке.
   const toggleFlyout = async (id: string, anchor: HTMLElement) => {
@@ -116,6 +184,7 @@ function LauncherWindow() {
       onSettings={(a) => void toggleFlyout(SETTINGS_FLYOUT, a)}
       categories={config.categories}
       openCategoryId={openId}
+      dragOverId={dragOver}
       onOpenCategory={(id) => {
         setOpenId(id);
         if (id) {
@@ -136,19 +205,52 @@ function LauncherWindow() {
   );
 }
 
+/** Сколько держать файлы над категорией на панели, чтобы она открылась. */
+const SPRING_DELAY = 600;
+/** Через сколько закрыть окно, открытое перетаскиванием, если файлы увели и не бросили. */
+const LEAVE_DELAY = 700;
+
+/**
+ * Категория на панели под точкой окна панели (CSS-пиксели): по горизонтали — пилюля под
+ * курсором, по вертикали — любая высота окна панели, чтобы не целиться в узкую пилюлю.
+ */
+function categoryAt(x: number, y: number): string | null {
+  if (y < 0 || y > window.innerHeight) return null;
+  for (const pill of document.querySelectorAll<HTMLElement>("[data-category-id]")) {
+    const r = pill.getBoundingClientRect();
+    if (x >= r.left && x <= r.right) return pill.dataset.categoryId ?? null;
+  }
+  return null;
+}
+
 function CategoryPopup() {
   const { config, update } = useConfig();
   // `n` пересоздаёт окно при каждом открытии: сброс поиска и автофокус.
-  const [open, setOpen] = useState<{ id: string; edit: boolean; n: number } | null>(null);
+  // `byDrag` — открыли, пока над панелью держат файлы из Проводника: окно без фокуса.
+  const [open, setOpen] = useState<{
+    id: string;
+    edit: boolean;
+    byDrag: boolean;
+    n: number;
+  } | null>(null);
   useEvent(
     "category_open",
     useCallback(
-      ({ id, edit }: Events["category_open"]) =>
-        setOpen((o) => ({ id, edit: edit ?? false, n: (o?.n ?? 0) + 1 })),
+      ({ id, edit, byDrag }: Events["category_open"]) =>
+        setOpen((o) => ({
+          id,
+          edit: edit ?? false,
+          byDrag: byDrag ?? false,
+          n: (o?.n ?? 0) + 1,
+        })),
       [],
     ),
   );
+  /** Файлы увели из окна, открытого перетаскиванием, и не бросили — окно закрывается. */
+  const leaveTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => clearTimeout(leaveTimer.current), []);
   const close = useCallback(() => {
+    clearTimeout(leaveTimer.current);
     setOpen(null);
     void hideWindow("category");
     void backend.emit("category_closed", null);
@@ -202,6 +304,27 @@ function CategoryPopup() {
         }
       }}
       onRemoveItem={(item) => update((c) => removeItem(c, category.id, item.id))}
+      onMoveItem={(itemId, to) => update((c) => moveItem(c, category.id, itemId, category.id, to))}
+      onDragOut={(phase, item, p) =>
+        void toScreen(p.x, p.y).then(({ x, y }) =>
+          backend.emit("tile_drag", { phase, categoryId: category.id, itemId: item.id, x, y }),
+        )
+      }
+      onFileDrag={(over) => {
+        clearTimeout(leaveTimer.current);
+        if (!over && open.byDrag) leaveTimer.current = window.setTimeout(close, LEAVE_DELAY);
+      }}
+      onDropPaths={(paths, to) => {
+        void backend
+          .call("paths_are_dirs", { paths })
+          .then((dirs) => update((c) => dropPaths(c, category.id, paths, dirs, to)))
+          .catch(console.error);
+        // Бросили — теперь окно обычное: с фокусом, закроется кликом мимо.
+        if (open.byDrag) {
+          setOpen({ ...open, byDrag: false });
+          void showWindow("category");
+        }
+      }}
     />
   );
 }
@@ -278,6 +401,9 @@ function DockWindow() {
       onClickApp={(entry, icon) => apps.click(entry) === "menu" && openMenu(entry, icon)}
       onMenu={openMenu}
       onLaunch={apps.launch}
+      onMovePin={apps.reorder.move}
+      onPinAt={apps.reorder.pin}
+      onDropPrograms={apps.reorder.pinPaths}
       tail={
         <SystemTail
           state={system}

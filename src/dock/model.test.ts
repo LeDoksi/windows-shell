@@ -2,7 +2,16 @@ import { describe, expect, it } from "vitest";
 import type { WindowInfo } from "../shared/backend";
 import { defaultConfig } from "../shared/config";
 import { appMenu } from "./menu";
-import { buildDock, clickAction, launchTarget, pinApp, unpinApp, type DockEntry } from "./model";
+import {
+  buildDock,
+  clickAction,
+  launchTarget,
+  movePin,
+  pinApp,
+  programsFrom,
+  unpinApp,
+  type DockEntry,
+} from "./model";
 
 const win = (hwnd: number, app: Partial<WindowInfo> = {}): WindowInfo => ({
   hwnd,
@@ -133,11 +142,37 @@ describe("pin and unpin", () => {
   it("adds a pin with a unique id and removes it", () => {
     const app = { ...entry([win(1)]), title: "Figma", pinned: false };
     let config = pinApp(defaultConfig, app, "C:\\Figma.exe");
-    config = pinApp(config, app, "C:\\Figma.exe");
+    config = pinApp(config, app, "D:\\Figma.exe");
     const added = config.dock.pinned.slice(-2);
     expect(added.map((p) => p.id)).toEqual(["app-figma", "app-figma-2"]);
     expect(added[0]).toMatchObject({ title: "Figma", target: "C:\\Figma.exe" });
     expect(unpinApp(config, "app-figma").dock.pinned.map((p) => p.id)).not.toContain("app-figma");
+  });
+
+  it("does not pin the same target twice", () => {
+    const config = pinApp(defaultConfig, { title: "Figma" }, "C:\\Figma.exe");
+    expect(pinApp(config, { title: "Figma" }, "c:\\figma.EXE")).toBe(config);
+  });
+
+  it("pins at a place and reorders pins", () => {
+    const config = pinApp(defaultConfig, { title: "Figma" }, "C:\\Figma.exe", 1);
+    const ids = config.dock.pinned.map((p) => p.id);
+    expect(ids[1]).toBe("app-figma");
+    const moved = movePin(config, "app-figma", 0).dock.pinned.map((p) => p.id);
+    expect(moved).toEqual(["app-figma", ids[0], ...ids.slice(2)]);
+    expect(movePin(config, "nope", 0)).toBe(config);
+    expect(movePin(config, "app-figma", 1)).toBe(config);
+  });
+});
+
+describe("programsFrom", () => {
+  it("keeps programs and shortcuts, named without extension", () => {
+    expect(
+      programsFrom(["C:\\Apps\\Figma.exe", "D:\\Фото", "C:\\Desktop\\Steam.lnk", "a.txt"]),
+    ).toEqual([
+      { title: "Figma", target: "C:\\Apps\\Figma.exe" },
+      { title: "Steam", target: "C:\\Desktop\\Steam.lnk" },
+    ]);
   });
 });
 

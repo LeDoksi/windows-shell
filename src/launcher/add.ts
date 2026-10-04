@@ -69,8 +69,18 @@ function slug(title: string) {
   );
 }
 
-/** Добавить плитки в конец категории, выдав каждой свободный id. */
-export function addItems(config: Config, categoryId: string, items: NewItem[]): Config {
+function insertAt<T>(list: T[], added: T[], index = list.length): T[] {
+  const at = Math.max(0, Math.min(index, list.length));
+  return [...list.slice(0, at), ...added, ...list.slice(at)];
+}
+
+/** Добавить плитки на место `index` категории (без него — в конец), выдав каждой свободный id. */
+export function addItems(
+  config: Config,
+  categoryId: string,
+  items: NewItem[],
+  index?: number,
+): Config {
   const taken = new Set(config.categories.flatMap((c) => c.items.map((i) => i.id)));
   const withIds = items.map((item) => {
     const base = slug(item.title);
@@ -83,7 +93,7 @@ export function addItems(config: Config, categoryId: string, items: NewItem[]): 
     ...config,
     categories: config.categories.map((category) =>
       category.id === categoryId
-        ? { ...category, items: [...category.items, ...withIds] }
+        ? { ...category, items: insertAt(category.items, withIds, index) }
         : category,
     ),
   };

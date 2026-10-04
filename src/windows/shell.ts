@@ -140,3 +140,10 @@ export async function fitWindowAbove(el: Element, margin: number, x: number, y: 
   await win.setSize(new PhysicalSize(w, h));
   await win.setPosition(new PhysicalPosition(Math.round(x - w / 2), y - h));
 }
+
+/** Точка экрана (физические пиксели) в CSS-пикселях этого окна. */
+export async function fromScreen(x: number, y: number) {
+  const dpr = window.devicePixelRatio;
+  const origin = await getCurrentWindow().outerPosition();
+  return { x: (x - origin.x) / dpr, y: (y - origin.y) / dpr };
+}

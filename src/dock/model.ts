@@ -1,5 +1,6 @@
 import type { AppTarget, WindowInfo } from "../shared/backend";
 import type { Config, DockPin } from "../shared/config";
+import { moveIndex } from "../shared/ui/dragSlots";
 
 export type DockAppState = "idle" | "running" | "active" | "attention";
 
@@ -131,19 +132,51 @@ export function clickAction(entry: DockEntry): DockAction {
   return { kind: "minimize", hwnd: active.hwnd };
 }
 
-/** Закрепить незакреплённое приложение в конце закреплённых. */
-export function pinApp(config: Config, entry: DockEntry, target: string): Config {
-  const ids = new Set(config.dock.pinned.map((p) => p.id));
-  const base = `app-${entry.title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-")}`.replace(
-    /-+$/,
-    "",
-  );
+/**
+ * Закрепить приложение на место `index` среди закреплённых (без него — в конец).
+ * Уже закреплённое тем же `target` второй раз не добавляем.
+ */
+export function pinApp(
+  config: Config,
+  app: { title: string },
+  target: string,
+  index?: number,
+): Config {
+  const pinned = config.dock.pinned;
+  if (pinned.some((p) => norm(p.target) === norm(target))) return config;
+  const ids = new Set(pinned.map((p) => p.id));
+  const base = `app-${app.title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-")}`.replace(/-+$/, "");
   let id = base;
   for (let n = 2; ids.has(id); n++) id = `${base}-${n}`;
+  const at = Math.max(0, Math.min(index ?? pinned.length, pinned.length));
+  const pin = { id, title: app.title, target };
   return {
     ...config,
-    dock: { ...config.dock, pinned: [...config.dock.pinned, { id, title: entry.title, target }] },
+    dock: { ...config.dock, pinned: [...pinned.slice(0, at), pin, ...pinned.slice(at)] },
   };
+}
+
+/** Переставить закреплённое приложение на место `index`. */
+export function movePin(config: Config, id: string, index: number): Config {
+  const from = config.dock.pinned.findIndex((p) => p.id === id);
+  if (from < 0 || from === index) return config;
+  return {
+    ...config,
+    dock: { ...config.dock, pinned: moveIndex(config.dock.pinned, from, index) },
+  };
+}
+
+/** Что из Проводника можно закрепить в доке: программы и ярлыки (док — только приложения). */
+const programs = /\.(exe|lnk|appref-ms)$/i;
+
+/** Программы из перетащенных путей — названием без расширения. */
+export function programsFrom(paths: string[]): { title: string; target: string }[] {
+  return paths
+    .filter((p) => programs.test(p))
+    .map((target) => ({
+      title: (target.split(/[\\/]/).pop() ?? target).replace(programs, ""),
+      target,
+    }));
 }
 
 /** Убрать из дока. Само приложение не трогаем. */

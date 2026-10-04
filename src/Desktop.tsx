@@ -3,6 +3,7 @@ import { Dock } from "./dock/Dock";
 import type { DockEntry } from "./dock/model";
 import { useDockApps } from "./dock/useDockApps";
 import { CategoryWindow } from "./launcher/CategoryWindow";
+import { moveItem } from "./launcher/reorder";
 import { TopPanel } from "./launcher/TopPanel";
 import { addItems } from "./launcher/add";
 import {
@@ -99,6 +100,9 @@ export function Desktop() {
           onAddItems={(items) => update((c) => addItems(c, openCategory.id, items))}
           onPickPaths={(folders) => backend.call("pick_paths", { folders })}
           onRemoveItem={(item) => update((c) => removeItem(c, openCategory.id, item.id))}
+          onMoveItem={(itemId, to) =>
+            update((c) => moveItem(c, openCategory.id, itemId, openCategory.id, to))
+          }
         />
       )}
       <Dock
@@ -107,6 +111,8 @@ export function Desktop() {
         onClickApp={(entry, icon) => apps.click(entry) === "menu" && openMenu(entry, icon)}
         onMenu={openMenu}
         onLaunch={apps.launch}
+        onMovePin={apps.reorder.move}
+        onPinAt={apps.reorder.pin}
         tail={<SystemTail state={system} onChange={setSystem} />}
       />
       <Flyout

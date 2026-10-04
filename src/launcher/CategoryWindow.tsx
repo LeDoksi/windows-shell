@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Category, LauncherItem } from "../shared/config";
 import {
   AddTile,
@@ -9,8 +10,13 @@ import {
   SearchField,
   Tile,
   useDismiss,
+  useFileDrop,
+  usePointerDrag,
+  type DragPoint,
   type MenuEntry,
 } from "../shared/ui";
+import { cx } from "../shared/ui/cx";
+import { insertionIndex, moveIndex, nearestSlot, slotOf, type Slot } from "../shared/ui/dragSlots";
 import { AppPicker, LinkForm } from "./AddPanels";
 import { itemFromPath, type NewItem } from "./add";
 import { categoryColors } from "./categories";
@@ -41,6 +47,28 @@ type Props = {
   onMove: (delta: -1 | 1) => void;
   /** Убирает категорию из конфига вместе с плитками; файлы на диске остаются. */
   onDelete: () => void;
+  /** Плитку перетащили на место `index` в этой категории. */
+  onMoveItem?: (itemId: string, index: number) => void;
+  /**
+   * Плитку тащат выше окна (к верхней панели): `move` — курсор там, `drop` — отпустили там,
+   * `leave` — вернули в окно или отменили. Точка — в CSS-пикселях окна.
+   */
+  onDragOut?: (phase: "move" | "drop" | "leave", item: LauncherItem, p: DragPoint) => void;
+  /** Из Проводника бросили файлы на место `index`. */
+  onDropPaths?: (paths: string[], index: number) => void;
+  /** Файлы из Проводника над окном (`true`) или ушли (`false`). */
+  onFileDrag?: (over: boolean) => void;
+};
+
+/** Плитку тащат: где она была, где встанет и где курсор (для призрака под курсором). */
+type TileDrag = {
+  item: LauncherItem;
+  from: number;
+  to: number;
+  outside: boolean;
+  p: DragPoint;
+  /** Курсор относительно угла плитки и её размер. */
+  grab: { x: number; y: number; w: number; h: number };
 };
 
 export function CategoryWindow({
@@ -60,6 +88,10 @@ export function CategoryWindow({
   onRecolor,
   onMove,
   onDelete,
+  onMoveItem,
+  onDragOut,
+  onDropPaths,
+  onFileDrag,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
@@ -94,7 +126,83 @@ export function CategoryWindow({
     { label: "Ссылку…", onSelect: () => setPanel("link") },
   ];
 
-  const items = category.items.filter((item) => matchesQuery(item, query));
+  const grid = useRef<HTMLDivElement>(null);
+  /** Места плиток в начале перетаскивания: пока плитки переставляются, они не меняются. */
+  const slots = useRef<Slot[]>([]);
+  const snapshot = () =>
+    (slots.current = [...(grid.current?.querySelectorAll("[data-tile]") ?? [])].map(slotOf));
+  const [drag, setDragState] = useState<TileDrag | null>(null);
+  const dragRef = useRef(drag);
+  const setDrag = (d: TileDrag | null) => {
+    dragRef.current = d;
+    setDragState(d);
+  };
+  // Пока идёт поиск, порядок плиток не тот, что в категории, — переставлять нечего.
+  const startDrag = usePointerDrag<LauncherItem>(
+    {
+      onStart: (item, p, el) => {
+        const from = category.items.findIndex((i) => i.id === item.id);
+        const r = el.getBoundingClientRect();
+        snapshot();
+        setMenu(null);
+        setDrag({
+          item,
+          from,
+          to: from,
+          outside: false,
+          p,
+          grab: { x: p.x - r.left, y: p.y - r.top, w: r.width, h: r.height },
+        });
+      },
+      onMove: (p) => {
+        const d = dragRef.current;
+        if (!d) return;
+        // Выше окна — к панели категорий: туда плитку уносит панель.
+        const outside = p.y < 0;
+        if (outside) onDragOut?.("move", d.item, p);
+        else if (d.outside) onDragOut?.("leave", d.item, p);
+        const to = outside ? d.from : nearestSlot(slots.current, p.x, p.y);
+        setDrag({ ...d, p, outside, to });
+      },
+      onEnd: (p) => {
+        const d = dragRef.current;
+        setDrag(null);
+        if (!d) return;
+        if (d.outside) onDragOut?.(p ? "drop" : "leave", d.item, p ?? d.p);
+        else if (p && d.to !== d.from) onMoveItem?.(d.item.id, d.to);
+      },
+    },
+    !query && panel === null && !editing,
+  );
+
+  /** Куда встанут файлы из Проводника; `null` — их над окном нет. */
+  const [fileIndex, setFileIndex] = useState<number | null>(null);
+  useFileDrop((e) => {
+    if (panel !== null || editing) return;
+    if (e.type === "leave") {
+      setFileIndex(null);
+      onFileDrag?.(false);
+      return;
+    }
+    if (fileIndex === null) {
+      snapshot();
+      onFileDrag?.(true);
+    }
+    const index = query ? category.items.length : insertionIndex(slots.current, e.x, e.y);
+    if (e.type === "over") return setFileIndex(index);
+    setFileIndex(null);
+    if (e.paths.length) onDropPaths?.(e.paths, index);
+  });
+
+  const dropSpot = (
+    <div key="drop-spot" className="ws-tile ws-tile--drop" aria-hidden="true">
+      <Icon name="plus" />
+      <span className="ws-tile__meta">Сюда</span>
+    </div>
+  );
+
+  const filtered = category.items.filter((item) => matchesQuery(item, query));
+  const items = drag && !drag.outside ? moveIndex(filtered, drag.from, drag.to) : filtered;
 
   const menuItems: MenuEntry[] = menu
     ? [
@@ -215,10 +323,19 @@ export function CategoryWindow({
       )}
       {panel === "link" && <LinkForm onAdd={add} onCancel={() => setPanel(null)} />}
 
-      <div className="ws-category__grid" hidden={panel !== null}>
-        {items.map((item) => (
+      <div
+        ref={grid}
+        className="ws-category__grid"
+        hidden={panel !== null}
+        data-file-over={fileIndex !== null || undefined}
+      >
+        {items.flatMap((item, i) => [
+          ...(i === fileIndex ? [dropSpot] : []),
           <Tile
             key={item.id}
+            data-tile
+            className={cx(drag?.item.id === item.id && "ws-tile--dragging")}
+            onPointerDown={startDrag(item)}
             icon={<ItemIcon item={item} color={category.color} />}
             title={item.title}
             meta={item.meta ?? ""}
@@ -229,8 +346,9 @@ export function CategoryWindow({
               e.preventDefault();
               setMenu({ item, x: e.clientX, y: e.clientY });
             }}
-          />
-        ))}
+          />,
+        ])}
+        {fileIndex !== null && fileIndex >= items.length && dropSpot}
         {!query && <AddTile onClick={openAddMenu} />}
         {query && items.length === 0 && <p className="ws-category__empty">Ничего не нашлось</p>}
       </div>
@@ -268,6 +386,29 @@ export function CategoryWindow({
         label="Добавить"
         onClose={() => setAddMenu(null)}
       />
+      {/* Призрак под курсором — порталом: у стеклянных предков ломается position: fixed. */}
+      {drag &&
+        !drag.outside &&
+        createPortal(
+          <div
+            className="ws-tile-ghost"
+            style={{
+              left: drag.p.x - drag.grab.x,
+              top: drag.p.y - drag.grab.y,
+              width: drag.grab.w,
+              height: drag.grab.h,
+            }}
+            aria-hidden="true"
+          >
+            <Tile
+              tabIndex={-1}
+              icon={<ItemIcon item={drag.item} color={category.color} />}
+              title={drag.item.title}
+              meta={drag.item.meta ?? ""}
+            />
+          </div>,
+          document.body,
+        )}
     </GlassSurface>
   );
 }
