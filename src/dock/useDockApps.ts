@@ -2,7 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { backend, type AppTarget, type WindowInfo } from "../shared/backend";
 import { useConfig } from "../shared/config";
 import { appMenu } from "./menu";
-import { buildDock, clickAction, launchTarget, pinApp, unpinApp, type DockEntry } from "./model";
+import {
+  buildDock,
+  clickAction,
+  launchTarget,
+  movePin,
+  pinApp,
+  programsFrom,
+  unpinApp,
+  type DockEntry,
+} from "./model";
 
 const report = (e: unknown) => console.error(e);
 
@@ -99,10 +108,27 @@ export function useDockApps() {
     [launch, update],
   );
 
+  /** Перетаскивание: переставить закреплённое, закрепить запущенное или программы из Проводника. */
+  const reorder = useMemo(
+    () => ({
+      move: (entry: DockEntry, index: number) =>
+        void update((c) => movePin(c, entry.id, index)).catch(report),
+      pin: (entry: DockEntry, index: number) =>
+        void pinTarget(entry)
+          .then((target) => update((c) => pinApp(c, entry, target, index)))
+          .catch(report),
+      pinPaths: (paths: string[], index: number) =>
+        void update((c) =>
+          programsFrom(paths).reduce((next, app, i) => pinApp(next, app, app.target, index + i), c),
+        ).catch(report),
+    }),
+    [update],
+  );
+
   const find = useCallback(
     (id: string) => [...dock.pinned, ...dock.transient].find((e) => e.id === id),
     [dock],
   );
 
-  return { ready: config !== null, ...dock, click, launch, menu, find };
+  return { ready: config !== null, ...dock, click, launch, menu, find, reorder };
 }

@@ -103,6 +103,16 @@ pub async fn paths_exist(paths: Vec<String>) -> Vec<bool> {
     .unwrap_or_default()
 }
 
+/// Папка ли каждый путь: перетащенное из Проводника становится плиткой-папкой или файлом.
+#[tauri::command]
+pub async fn paths_are_dirs(paths: Vec<String>) -> Vec<bool> {
+    tauri::async_runtime::spawn_blocking(move || {
+        paths.iter().map(|p| Path::new(p.trim()).is_dir()).collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
 #[cfg(windows)]
 mod os {
     use std::os::windows::ffi::OsStrExt;
@@ -216,6 +226,21 @@ mod os {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dropped_paths_are_told_apart() {
+        let dir = std::env::temp_dir();
+        let file = dir.join("windows-shell-drop-test.txt");
+        std::fs::write(&file, "x").unwrap();
+        let paths = vec![
+            dir.to_string_lossy().into_owned(),
+            file.to_string_lossy().into_owned(),
+            "Z:\\nope".into(),
+        ];
+        let dirs = tauri::async_runtime::block_on(paths_are_dirs(paths));
+        std::fs::remove_file(&file).unwrap();
+        assert_eq!(dirs, [true, false, false]);
+    }
 
     #[test]
     fn uwp_apps_open_through_apps_folder() {

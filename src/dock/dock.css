@@ -121,3 +121,27 @@ img.ws-app-glyph--system {
   opacity: 0.4;
   filter: grayscale(1);
 }
+
+/* ---------- Перетаскивание ---------- */
+.ws-dock__item {
+  touch-action: none;
+}
+
+.ws-dock__item[data-dragging] {
+  opacity: 0.3;
+}
+
+/* Сюда встанет программа из Проводника. */
+.ws-dock__drop {
+  flex: none;
+  border: 1.5px dashed var(--ws-accent-stroke);
+  border-radius: 24%;
+  background: var(--ws-accent-fill);
+}
+
+.ws-dock__ghost {
+  position: fixed;
+  z-index: 100;
+  pointer-events: none;
+  transform: scale(1.08);
+}

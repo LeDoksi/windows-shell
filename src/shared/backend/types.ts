@@ -18,6 +18,8 @@ export interface Commands {
   reveal: { args: { target: string }; result: void };
   /** Есть ли эти пути на диске — по одному ответу на путь. */
   paths_exist: { args: { paths: string[] }; result: boolean[] };
+  /** Папка ли каждый путь (перетащенное из Проводника). */
+  paths_are_dirs: { args: { paths: string[] }; result: boolean[] };
   /** Иконка объекта из Windows как `data:`-URL (PNG 256 px); `null` — рисуем заглушку. */
   item_icon: { args: { kind: ItemKind; target: string }; result: string | null };
   /** Системный диалог «Открыть» поверх окна; пустой ответ — пользователь передумал. */
@@ -141,7 +143,7 @@ export interface AppTarget {
 export interface Events {
   config_changed: Config;
   /** Панель открывает окно категории; `edit` — сразу в режиме правки (новая категория). */
-  category_open: { id: string; edit?: boolean };
+  category_open: { id: string; edit?: boolean; byDrag?: boolean };
   /** Окно категории закрылось (Esc, клик мимо, ушёл фокус). */
   category_closed: null;
   /**
@@ -170,6 +172,17 @@ export interface Events {
    */
   panel_flyout_open: { id: string; right: number; top: number };
   panel_flyout_closed: null;
+  /**
+   * Плитку из окна категории тащат над верхней панелью: панель подсвечивает категорию под
+   * курсором, на `drop` переносит туда плитку. `x`, `y` — курсор, физические пиксели экрана.
+   */
+  tile_drag: {
+    phase: "move" | "drop" | "leave";
+    categoryId: string;
+    itemId: string;
+    x: number;
+    y: number;
+  };
 }
 
 export interface AppInfo {

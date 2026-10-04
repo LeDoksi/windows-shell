@@ -71,6 +71,8 @@ export function createMockBackend(): Backend {
     },
     reveal: ({ target }) => console.info(`[mock] показать в Проводнике: ${target}`),
     paths_exist: ({ paths }) => paths.map(() => true),
+    // Без точки в последней части пути — папка.
+    paths_are_dirs: ({ paths }) => paths.map((p) => !/\.[^\\/.]+$/.test(p)),
     item_icon: () => null,
     pick_paths: ({ folders }) => [
       folders ? "C:\\Users\\Demo\\Музыка" : "C:\\Users\\Demo\\Заметки.txt",

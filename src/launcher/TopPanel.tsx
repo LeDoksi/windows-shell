@@ -16,6 +16,8 @@ type Props = {
   /** Компактные виджеты слота `launcher` (`WidgetZone`). */
   widgets?: ReactNode;
   hidden?: boolean;
+  /** Категория под перетаскиваемой плиткой или файлами: подсвечена. */
+  dragOverId?: string | null;
 };
 
 export function TopPanel({
@@ -28,6 +30,7 @@ export function TopPanel({
   settingsOpen,
   widgets,
   hidden,
+  dragOverId,
 }: Props) {
   return (
     <GlassSurface
@@ -46,6 +49,8 @@ export function TopPanel({
             label={category.name}
             color={category.color}
             selected={category.id === openCategoryId}
+            dragOver={category.id === dragOverId}
+            data-category-id={category.id}
             onClick={() => onOpenCategory(category.id === openCategoryId ? null : category.id)}
           />
         ))}

@@ -14,3 +14,5 @@ export { AddTile, Tile } from "./Tile";
 export { Toggle } from "./Toggle";
 export { Tooltip } from "./Tooltip";
 export { useDismiss } from "./useDismiss";
+export { useFileDrop, type FileDrag } from "./useFileDrop";
+export { usePointerDrag, type DragPoint } from "./usePointerDrag";
