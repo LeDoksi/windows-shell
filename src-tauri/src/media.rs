@@ -78,6 +78,17 @@ impl WidgetService for Service {
 /// Обложки больше этого не читаем: в событие идёт всё целиком.
 pub const MAX_COVER: u64 = 2 * 1024 * 1024;
 
+/// Тип обложки для `data:`-URL. Windows отдаёт список через запятую
+/// (`image/jpeg,image/jpe,image/jpg`) — с ним картинка не показывается; берём первый.
+pub fn image_kind(content_type: &str) -> String {
+    let first = content_type.split(',').next().unwrap_or_default().trim();
+    if first.starts_with("image/") {
+        first.to_string()
+    } else {
+        "image/png".into()
+    }
+}
+
 #[cfg(windows)]
 mod os {
     use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -93,7 +104,7 @@ mod os {
     };
     use windows::Storage::Streams::{DataReader, IRandomAccessStreamReference};
 
-    use super::{Media, MediaAction, LAST, MAX_COVER};
+    use super::{image_kind, Media, MediaAction, LAST, MAX_COVER};
     use crate::audio::Mta;
 
     fn err(e: windows::core::Error) -> String {
@@ -129,12 +140,12 @@ mod os {
         reader.LoadAsync(size as u32)?.join()?;
         let mut bytes = vec![0u8; size as usize];
         reader.ReadBytes(&mut bytes)?;
-        let kind = stream
-            .ContentType()
-            .map(|t| t.to_string())
-            .ok()
-            .filter(|t| t.starts_with("image/"))
-            .unwrap_or_else(|| "image/png".into());
+        let kind = image_kind(
+            &stream
+                .ContentType()
+                .map(|t| t.to_string())
+                .unwrap_or_default(),
+        );
         let data = base64::engine::general_purpose::STANDARD.encode(bytes);
         Ok(Some(format!("data:{kind};base64,{data}")))
     }
@@ -273,5 +284,18 @@ mod os {
 
     pub fn control(_: MediaAction) -> Result<(), String> {
         Err("медиа есть только в Windows".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cover_type_takes_first_image_type() {
+        assert_eq!(image_kind("image/jpeg,image/jpe,image/jpg"), "image/jpeg");
+        assert_eq!(image_kind(" image/png "), "image/png");
+        assert_eq!(image_kind(""), "image/png");
+        assert_eq!(image_kind("application/octet-stream"), "image/png");
     }
 }

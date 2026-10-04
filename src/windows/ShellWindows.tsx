@@ -427,7 +427,7 @@ function PanelFlyoutWindow() {
       anchor="launcher"
       className="ws-panel-flyout"
     >
-      {open && <PanelFlyoutContent id={open.id} />}
+      {open && <PanelFlyoutContent id={open.id} close={close} />}
     </Flyout>
   );
 }

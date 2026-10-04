@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AudioState } from "../../shared/backend";
 import {
   activeProfile,
+  profileDeviceName,
   profileFromState,
   shortDeviceName,
   volumeIcon,
@@ -41,6 +42,12 @@ describe("audio settings", () => {
     expect(shortDeviceName("Наушники (Sony WH-1000XM5)")).toBe("Наушники");
     expect(shortDeviceName("(HDMI)")).toBe("(HDMI)");
     expect(shortDeviceName("Speakers")).toBe("Speakers");
+  });
+
+  it("keeps the full name when short names collide", () => {
+    const all = ["Динамики (Realtek)", "Динамики (G733)", "Mi TV (NVIDIA)"];
+    expect(profileDeviceName("Динамики (G733)", all)).toBe("Динамики (G733)");
+    expect(profileDeviceName("Mi TV (NVIDIA)", all)).toBe("Mi TV");
   });
 
   it("makes a profile from the current device and finds the active one", () => {

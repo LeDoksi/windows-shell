@@ -47,6 +47,12 @@ export function shortDeviceName(name: string): string {
   return short || name;
 }
 
+/** Короткое имя, а если оно у нескольких устройств («Динамики (Realtek)», «Динамики (G733)») — полное. */
+export function profileDeviceName(name: string, all: string[]): string {
+  const short = shortDeviceName(name);
+  return all.filter((n) => shortDeviceName(n) === short).length > 1 ? name : short;
+}
+
 /** Новый профиль из того, что сейчас: устройство вывода по умолчанию и его громкость. */
 export function profileFromState(state: AudioState, existing: AudioProfile[]): AudioProfile | null {
   const { defaultId, devices, volume } = state.output;
@@ -56,7 +62,10 @@ export function profileFromState(state: AudioState, existing: AudioProfile[]): A
   while (existing.some((p) => p.id === `profile-${n}`)) n += 1;
   return {
     id: `profile-${n}`,
-    name: `${shortDeviceName(device.name)} ${volume}%`,
+    name: `${profileDeviceName(
+      device.name,
+      devices.map((d) => d.name),
+    )} ${volume}%`,
     deviceId: device.id,
     volume,
     hotkey: null,

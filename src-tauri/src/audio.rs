@@ -534,6 +534,11 @@ mod os {
             } else {
                 crate::apps::process_exe(pid)
             };
+            // Процесс уже закрылся, а Windows ещё держит его сессию: в списке была бы
+            // безымянная «Приложение» на 100 %.
+            if !system && exe.is_none() {
+                continue;
+            }
             out.push((session_key(exe.as_deref(), system, pid), c2));
         }
         Ok(out)
