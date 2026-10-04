@@ -119,7 +119,13 @@ export function Desktop() {
           panelFlyout ? { position: "fixed", right: panelFlyout.right, top: panelFlyout.top } : {}
         }
       >
-        {panelFlyout && <PanelFlyoutContent key={panelFlyout.id} id={panelFlyout.id} />}
+        {panelFlyout && (
+          <PanelFlyoutContent
+            key={panelFlyout.id}
+            id={panelFlyout.id}
+            close={() => setPanelFlyout(null)}
+          />
+        )}
       </Flyout>
       <ContextMenu
         open={Boolean(menuEntry)}

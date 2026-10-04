@@ -11,6 +11,8 @@ export type WidgetSlot = "launcher" | "dock-tail";
 export type WidgetProps<S> = {
   settings: S;
   updateSettings: (change: (settings: S) => S) => void;
+  /** Закрыть свой flyout (есть только у flyout): например, когда показывать стало нечего. */
+  close?: () => void;
 };
 
 export type CompactProps<S> = WidgetProps<S> & {
