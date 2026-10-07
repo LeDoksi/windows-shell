@@ -42,7 +42,9 @@ async function dropPaths(data: DataTransfer): Promise<string[]> {
   const off = await backend.on("files_dropped", (e) => e.id === id && answer(e.paths));
   const timer = setTimeout(() => answer([]), 3000);
   try {
-    webview.postMessageWithAdditionalObjects({ wshDrop: id }, objects);
+    // Строкой, не объектом: обработчик IPC Tauri (wry) падает на объекте, и тогда WebView2
+    // не передаёт сообщение дальше, в `file_drop.rs`.
+    webview.postMessageWithAdditionalObjects(JSON.stringify({ wshDrop: id }), objects);
     return await answered;
   } finally {
     clearTimeout(timer);

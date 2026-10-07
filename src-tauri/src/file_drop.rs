@@ -17,7 +17,7 @@ pub struct FilesDropped {
     pub paths: Vec<String>,
 }
 
-/// Номер бросания из сообщения страницы `{"wshDrop": id}`; чужие сообщения — `None`.
+/// Номер бросания из строки страницы `{"wshDrop": id}`; чужие сообщения — `None`.
 pub fn drop_id(json: &str) -> Option<u64> {
     serde_json::from_str::<serde_json::Value>(json)
         .ok()?
@@ -72,8 +72,9 @@ mod os {
 
     /// Пути из сообщения страницы: `File` (файл) или `FileSystemHandle` (файл или папка).
     unsafe fn files(args: &ICoreWebView2WebMessageReceivedEventArgs) -> Option<FilesDropped> {
+        // Страница шлёт JSON строкой (см. `useFileDrop.ts`).
         let mut json = PWSTR::null();
-        args.WebMessageAsJson(&mut json).ok()?;
+        args.TryGetWebMessageAsString(&mut json).ok()?;
         let id = drop_id(&take_pwstr(json))?;
         let objects = args
             .cast::<ICoreWebView2WebMessageReceivedEventArgs2>()
