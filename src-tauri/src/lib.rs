@@ -88,6 +88,7 @@ pub fn run() {
             launch::reveal,
             launch::paths_exist,
             launch::paths_are_dirs,
+            launch::keep_shortcuts,
             icons::item_icon,
             pick::pick_paths,
             pick::installed_apps,
