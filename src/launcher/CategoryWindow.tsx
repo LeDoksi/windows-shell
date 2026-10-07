@@ -197,6 +197,8 @@ export function CategoryWindow({
     if (e.type === "over") return setFileIndex(index);
     setFileIndex(null);
     if (e.paths.length) onDropPaths?.(e.paths, index);
+    // Бросили, но ничего не пришло: как будто файлы унесли — окно, открытое наведением, закроется.
+    else onFileDrag?.(false);
   });
 
   const dropSpot = (

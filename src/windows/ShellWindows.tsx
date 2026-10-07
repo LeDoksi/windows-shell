@@ -319,11 +319,9 @@ function CategoryPopup() {
           .call("paths_are_dirs", { paths })
           .then((dirs) => update((c) => dropPaths(c, category.id, paths, dirs, to)))
           .catch(console.error);
-        // Бросили — теперь окно обычное: с фокусом, закроется кликом мимо.
-        if (open.byDrag) {
-          setOpen({ ...open, byDrag: false });
-          void showWindow("category");
-        }
+        // Бросили — окно обычное, с фокусом (его держал Проводник): закроется кликом мимо.
+        if (open.byDrag) setOpen({ ...open, byDrag: false });
+        void showWindow("category");
       }}
     />
   );

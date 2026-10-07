@@ -18,22 +18,14 @@ type WebView2 = {
 const isFileDrag = (e: DragEvent) => e.dataTransfer?.types.includes("Files") ?? false;
 
 /**
- * Пути брошенного: папки и файлы — как `FileSystemHandle` (у папки тоже есть путь), а если их
- * не дали — как `File`. Rust отвечает событием `files_dropped` с тем же `id` (`file_drop.rs`).
+ * Пути брошенного: файлы (и папки) уходят в Rust как `File` — у него WebView2 отдаёт путь на
+ * диске. `FileSystemHandle` здесь приходит в Rust пустым (тест WSH-E7). Rust отвечает событием
+ * `files_dropped` с тем же `id` (`file_drop.rs`).
  */
 async function dropPaths(data: DataTransfer): Promise<string[]> {
   const webview = (window as { chrome?: { webview?: WebView2 } }).chrome?.webview;
   if (!webview?.postMessageWithAdditionalObjects) return [];
-  // Ручки берём сразу, в обработчике `drop`: после него DataTransfer пустеет.
-  const items = [...data.items].filter((i) => i.kind === "file");
-  const handles = items.map((i) =>
-    "getAsFileSystemHandle" in i
-      ? (i as { getAsFileSystemHandle: () => Promise<unknown> }).getAsFileSystemHandle()
-      : Promise.resolve(null),
-  );
-  const files = [...data.files];
-  const resolved = await Promise.all(handles.map((h) => h.catch(() => null)));
-  const objects = resolved.every(Boolean) && resolved.length ? resolved : files;
+  const objects = [...data.files];
   if (!objects.length) return [];
   const id = Math.floor(Math.random() * 2 ** 48);
   let answer: (paths: string[]) => void = () => {};
