@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { backend, type AppTarget, type WindowInfo } from "../shared/backend";
-import { useConfig } from "../shared/config";
+import { useConfig, type DockPin } from "../shared/config";
 import { appMenu } from "./menu";
 import {
   buildDock,
@@ -9,6 +9,7 @@ import {
   movePin,
   pinApp,
   programsFrom,
+  repairPins,
   unpinApp,
   type DockEntry,
 } from "./model";
@@ -58,12 +59,53 @@ async function pinTarget(entry: DockEntry) {
   return launchTarget(w);
 }
 
+/**
+ * Закреп, которого нет в системе (неверный AUMID, как у Steam `Valve.Steam.Client`), чиним
+ * по «Пуску»: там ровно одно приложение с тем же названием — закреп переходит на него (WSH-53).
+ * Один раз за жизнь окна на закреп: не нашли — остаётся «Не найдено».
+ */
+function useRepairPins(
+  enabled: boolean,
+  pins: DockPin[],
+  targets: ReadonlyMap<string, AppTarget>,
+  update: ReturnType<typeof useConfig>["update"],
+) {
+  const tried = useRef(new Set<string>());
+  useEffect(() => {
+    if (!enabled) return;
+    const broken = pins.filter(
+      (p) => targets.get(p.target)?.exists === false && !tried.current.has(p.target),
+    );
+    if (!broken.length) return;
+    broken.forEach((p) => tried.current.add(p.target));
+    void backend
+      .call("installed_apps", {})
+      .then((apps) => {
+        const fixes = repairPins(broken, apps);
+        if (fixes.size) {
+          return update((c) => ({
+            ...c,
+            dock: {
+              ...c.dock,
+              pinned: c.dock.pinned.map((p) => {
+                const target = fixes.get(p.id);
+                return target ? { ...p, target } : p;
+              }),
+            },
+          }));
+        }
+      })
+      .catch(report);
+  }, [enabled, pins, targets, update]);
+}
+
 /** Док из конфига и живых окон, плюс что делать по клику и в меню. */
-export function useDockApps() {
+export function useDockApps({ repair = false }: { repair?: boolean } = {}) {
   const { config, update } = useConfig();
   const windows = useWindows();
   const pins = useMemo(() => config?.dock.pinned ?? [], [config]);
   const targets = useTargets(pins.map((p) => p.target));
+  useRepairPins(repair, pins, targets, update);
   const dock = useMemo(() => buildDock(pins, windows, targets), [pins, windows, targets]);
 
   const launch = useCallback(

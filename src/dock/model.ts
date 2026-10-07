@@ -189,3 +189,16 @@ export function unpinApp(config: Config, id: string): Config {
     dock: { ...config.dock, pinned: config.dock.pinned.filter((p) => p.id !== id) },
   };
 }
+
+/**
+ * Новые цели для закрепов, которых нет в системе: приложение «Пуска» с тем же названием,
+ * если оно такое одно. `id` закрепа → AUMID из «Пуска».
+ */
+export function repairPins(broken: DockPin[], apps: { name: string; id: string }[]) {
+  const fixes = new Map<string, string>();
+  for (const pin of broken) {
+    const same = apps.filter((a) => norm(a.name) === norm(pin.title));
+    if (same.length === 1 && norm(same[0].id) !== norm(pin.target)) fixes.set(pin.id, same[0].id);
+  }
+  return fixes;
+}

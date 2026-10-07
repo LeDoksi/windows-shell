@@ -9,6 +9,7 @@ import {
   movePin,
   pinApp,
   programsFrom,
+  repairPins,
   unpinApp,
   type DockEntry,
 } from "./model";
@@ -201,5 +202,24 @@ describe("appMenu", () => {
       "Закрыть все окна (2)",
     ]);
     expect(labels({ ...entry([]), pinned: false })).toEqual(["Открыть", "Закрепить в доке"]);
+  });
+});
+
+describe("repairPins", () => {
+  const apps = [
+    { name: "Steam", id: "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\Steam\\Steam.exe" },
+    { name: "Notes", id: "a" },
+    { name: "Notes", id: "b" },
+  ];
+  it("moves a broken pin to the only Start app with the same name", () => {
+    const fixes = repairPins(
+      [
+        { id: "steam", title: "steam", target: "Valve.Steam.Client" },
+        { id: "notes", title: "Notes", target: "x" },
+        { id: "gone", title: "Gone", target: "y" },
+      ],
+      apps,
+    );
+    expect([...fixes]).toEqual([["steam", apps[0].id]]);
   });
 });

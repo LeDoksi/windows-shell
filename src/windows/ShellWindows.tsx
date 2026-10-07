@@ -38,6 +38,7 @@ import {
   useAnchoredWindow,
   useCloseOnBlur,
   useFitWindowTop,
+  useOpenAtPress,
   type Anchor,
   type WindowLabel,
 } from "./shell";
@@ -98,6 +99,9 @@ function LauncherWindow() {
   );
   useFitWindowTop(".ws-top-panel", 16, 80);
   useGlassRect(".ws-top-panel");
+  const wasOpen = useOpenAtPress(
+    openId ? `category:${openId}` : flyout ? `flyout:${flyout}` : null,
+  );
 
   /** Категория под плиткой из окна категории или под файлами из Проводника. */
   const [dragOver, setDragOver] = useState<string | null>(null);
@@ -168,7 +172,7 @@ function LauncherWindow() {
   if (!config) return null;
   // Flyout виджета или настроек — своё окно под панелью, правым краем по кнопке.
   const toggleFlyout = async (id: string, anchor: HTMLElement) => {
-    if (flyout === id) {
+    if (wasOpen(`flyout:${id}`) || flyout === id) {
       setFlyout(null);
       return hideWindow("panel-flyout");
     }
@@ -186,7 +190,9 @@ function LauncherWindow() {
       categories={config.categories}
       openCategoryId={openId}
       dragOverId={dragOver}
-      onOpenCategory={(id) => {
+      onOpenCategory={(clicked) => {
+        // Нажали на пилюлю открытой категории — только закрыть, даже если окно уже закрылось само.
+        const id = clicked && wasOpen(`category:${clicked}`) ? null : clicked;
         setOpenId(id);
         if (id) {
           void backend.emit("category_open", { id }).then(() => showWindow("category"));
@@ -375,22 +381,44 @@ function useGlassRect(selector: string) {
 }
 
 function DockWindow() {
-  const apps = useDockApps();
+  // Чинит закрепы только окно дока: окно меню видит те же закрепы и писало бы конфиг дважды.
+  const apps = useDockApps({ repair: true });
   const [system, setSystem] = useState(() => mockSystem(false));
   const [flyout, setFlyout] = useState<FlyoutId | null>(null);
+  /** Чьё меню открыто над доком. */
+  const [menuId, setMenuId] = useState<string | null>(null);
   useEvent("system_state", setSystem);
   useEvent(
     "flyout_closed",
     useCallback(() => setFlyout(null), []),
   );
+  useEvent(
+    "dock_menu_closed",
+    useCallback(() => setMenuId(null), []),
+  );
   useGlassRect(".ws-dock__pill");
+  const wasOpen = useOpenAtPress(flyout ? `flyout:${flyout}` : menuId ? `menu:${menuId}` : null);
 
   if (!apps.ready) return null;
   // Меню приложения — своё окно над иконкой: в окне дока ему не хватит высоты.
-  const openMenu = (entry: DockEntry, icon: HTMLElement) =>
+  const openMenu = (entry: DockEntry, icon: HTMLElement) => {
+    setMenuId(entry.id);
     void screenTopCenter(icon, 6).then(({ x, y }) =>
       backend.emit("dock_menu_open", { id: entry.id, x, y }),
     );
+  };
+  const closeMenu = () => {
+    setMenuId(null);
+    void hideWindow("dock-menu");
+    void backend.emit("dock_menu_closed", null);
+  };
+  // Клик по иконке с несколькими окнами открывает меню; повторный клик — закрывает.
+  const clickApp = (entry: DockEntry, icon: HTMLElement) => {
+    const pressedOpen = wasOpen(`menu:${entry.id}`);
+    if (apps.click(entry) !== "menu") return;
+    if (pressedOpen || menuId === entry.id) closeMenu();
+    else openMenu(entry, icon);
+  };
   // Изменения в хвосте (колесо громкости) — всем окнам, в том числе открытому flyout.
   const change = (update: (s: SystemState) => SystemState) =>
     void backend.emit("system_state", update(system));
@@ -399,7 +427,7 @@ function DockWindow() {
     <Dock
       pinned={apps.pinned}
       transient={apps.transient}
-      onClickApp={(entry, icon) => apps.click(entry) === "menu" && openMenu(entry, icon)}
+      onClickApp={clickApp}
       onMenu={openMenu}
       onLaunch={apps.launch}
       onMovePin={apps.reorder.move}
@@ -410,7 +438,8 @@ function DockWindow() {
           state={system}
           onChange={change}
           flyoutOpen={flyout}
-          onFlyout={(id, pill) => {
+          onFlyout={(clicked, pill) => {
+            const id = clicked && wasOpen(`flyout:${clicked}`) ? null : clicked;
             setFlyout(id);
             if (!id) return void hideWindow("flyout");
             // Карточка — правым краем по таблетке, на 10 px выше неё; окно ставит себя само.

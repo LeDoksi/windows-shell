@@ -45,6 +45,7 @@ export function usePointerDrag<T>(handlers: DragHandlers<T>, enabled = true) {
           dragging = true;
           try {
             el.setPointerCapture(id);
+            el.addEventListener("lostpointercapture", lost);
           } catch {
             // Элемент уже убрали — тогда события придут окну и так.
           }
@@ -70,6 +71,11 @@ export function usePointerDrag<T>(handlers: DragHandlers<T>, enabled = true) {
       const cancel = (ev: PointerEvent) => {
         if (ev.pointerId === id) finish(null);
       };
+      // Захват курсора забрали (окно спрятали, система): отпускания уже не будет — отменяем,
+      // иначе перетаскивание висит до следующего клика (WSH-55).
+      const lost = (ev: PointerEvent) => {
+        if (ev.pointerId === id) finish(null);
+      };
       const key = (ev: KeyboardEvent) => {
         if (ev.key !== "Escape" || !dragging) return;
         // Esc отменяет перетаскивание, а не закрывает окно категории.
@@ -82,6 +88,7 @@ export function usePointerDrag<T>(handlers: DragHandlers<T>, enabled = true) {
         window.removeEventListener("pointerup", up);
         window.removeEventListener("pointercancel", cancel);
         window.removeEventListener("keydown", key, { capture: true });
+        el.removeEventListener("lostpointercapture", lost);
         if (el.hasPointerCapture?.(id)) el.releasePointerCapture(id);
       };
       stop.current = cleanup;

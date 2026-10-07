@@ -16,10 +16,11 @@ use windows_sys::Win32::Graphics::Dwm::{
 use windows_sys::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, GetWindowThreadProcessId, SendMessageW, SetForegroundWindow,
-    SetWindowLongPtrW, SetWindowPos, EVENT_SYSTEM_FOREGROUND, GWL_EXSTYLE, HWND_TOPMOST,
-    MA_NOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
-    WINEVENT_OUTOFCONTEXT, WM_MOUSEACTIVATE, WM_NCACTIVATE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    FindWindowW, GetWindowLongPtrW, GetWindowThreadProcessId, IsWindowVisible, SendMessageW,
+    SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, EVENT_SYSTEM_FOREGROUND, GWL_EXSTYLE,
+    HWND_TOPMOST, MA_NOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+    SWP_NOZORDER, WINEVENT_OUTOFCONTEXT, WM_MOUSEACTIVATE, WM_NCACTIVATE, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW,
 };
 
 /// Тонировка подложки поверх размытия (RGBA).
@@ -27,6 +28,9 @@ const TINT: (u8, u8, u8, u8) = (14, 30, 43, 90);
 
 /// Окна дока снизу вверх: подложка, иконки.
 static DOCK: [AtomicIsize; 2] = [AtomicIsize::new(0), AtomicIsize::new(0)];
+/// Поповеры дока (меню иконки, flyout хвоста): они заходят на прозрачный верх окна дока,
+/// поэтому после подъёма дока их поднимаем ещё выше — иначе низ меню не нажимается (WSH-51).
+static POPUPS: [AtomicIsize; 2] = [AtomicIsize::new(0), AtomicIsize::new(0)];
 /// Подложка верхней панели.
 static LAUNCHER_BACKDROP: AtomicIsize = AtomicIsize::new(0);
 /// Последнее чужое активное окно: ему возвращаем фокус после клика по доку.
@@ -131,6 +135,37 @@ fn raise() {
             };
         }
     }
+    for slot in &POPUPS {
+        let h = slot.load(Ordering::Relaxed);
+        if h != 0 && unsafe { IsWindowVisible(h as HWND) } != 0 {
+            lift(h as HWND);
+        }
+    }
+    lift_drag_image();
+}
+
+fn lift(h: HWND) {
+    unsafe {
+        SetWindowPos(
+            h,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+        )
+    };
+}
+
+/// Картинка файла, который несут из Проводника, — окно `SysDragImage` (тоже topmost).
+/// Выехавший док не должен её закрывать (WSH-52).
+pub fn lift_drag_image() {
+    let class: Vec<u16> = "SysDragImage\0".encode_utf16().collect();
+    let h = unsafe { FindWindowW(class.as_ptr(), std::ptr::null()) };
+    if !h.is_null() && unsafe { IsWindowVisible(h) } != 0 {
+        lift(h);
+    }
 }
 
 fn is_ours(h: HWND) -> bool {
@@ -201,7 +236,11 @@ pub fn setup(
     dock_backdrop: &WebviewWindow,
     icons: &WebviewWindow,
     launcher_backdrop: &WebviewWindow,
+    popups: [&WebviewWindow; 2],
 ) {
+    for (slot, w) in POPUPS.iter().zip(popups) {
+        slot.store(hwnd(w) as isize, Ordering::Relaxed);
+    }
     DOCK[0].store(setup_backdrop(dock_backdrop) as isize, Ordering::Relaxed);
     LAUNCHER_BACKDROP.store(
         setup_backdrop(launcher_backdrop) as isize,

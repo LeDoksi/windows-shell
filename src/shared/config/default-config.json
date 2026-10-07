@@ -160,7 +160,7 @@
       {
         "id": "steam",
         "title": "Steam",
-        "target": "Valve.Steam.Client"
+        "target": "C:\\Program Files (x86)\\Steam\\steam.exe"
       },
       {
         "id": "spotify",
