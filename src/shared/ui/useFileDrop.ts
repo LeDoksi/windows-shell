@@ -36,16 +36,18 @@ async function dropPaths(data: DataTransfer): Promise<string[]> {
   const objects = resolved.every(Boolean) && resolved.length ? resolved : files;
   if (!objects.length) return [];
   const id = Math.floor(Math.random() * 2 ** 48);
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => finish([]), 3000);
-    const off = backend.on("files_dropped", (e) => e.id === id && finish(e.paths));
-    function finish(paths: string[]) {
-      clearTimeout(timer);
-      void off.then((f) => f());
-      resolve(paths);
-    }
-    webview.postMessageWithAdditionalObjects!({ wshDrop: id }, objects);
-  });
+  let answer: (paths: string[]) => void = () => {};
+  const answered = new Promise<string[]>((resolve) => (answer = resolve));
+  // Подписываемся до отправки: Rust отвечает быстрее, чем регистрируется слушатель.
+  const off = await backend.on("files_dropped", (e) => e.id === id && answer(e.paths));
+  const timer = setTimeout(() => answer([]), 3000);
+  try {
+    webview.postMessageWithAdditionalObjects({ wshDrop: id }, objects);
+    return await answered;
+  } finally {
+    clearTimeout(timer);
+    off();
+  }
 }
 
 /**
