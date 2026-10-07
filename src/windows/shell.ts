@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { LogicalSize, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -36,6 +36,37 @@ export function useCloseOnBlur(open: boolean, onClose: () => void) {
       off.then((f) => f());
     };
   }, [open, onClose]);
+}
+
+/**
+ * Повторный клик по кнопке открытого поповера должен его закрыть. Поповер — отдельное окно:
+ * нажатие на кнопку забирает у него фокус, он закрывается сам, и клик открыл бы его снова
+ * (WSH-56). Поэтому запоминаем, что было открыто в момент нажатия. `wasOpen(id)` — этот
+ * поповер был открыт, когда кнопку нажали: клик только закрывает.
+ */
+export function useOpenAtPress<T>(open: T | null) {
+  const current = useRef(open);
+  useEffect(() => {
+    current.current = open;
+  }, [open]);
+  const atPress = useRef<T | null>(null);
+  useEffect(() => {
+    const down = () => {
+      atPress.current = current.current;
+    };
+    // Клавиатура (Enter, пробел на кнопке) — так же, как нажатие мышью.
+    window.addEventListener("pointerdown", down, true);
+    window.addEventListener("keydown", down, true);
+    return () => {
+      window.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("keydown", down, true);
+    };
+  }, []);
+  return useCallback((id: T) => {
+    const was = atPress.current === id;
+    atPress.current = null;
+    return was;
+  }, []);
 }
 
 /** Куда ставить карточку поповера: её правый край и верх или низ, физические пиксели экрана. */
@@ -95,6 +126,9 @@ export function useAnchoredWindow(selector: string, margin: number, anchor: Anch
  * Прозрачная часть окна перехватывает клики — поэтому окно панели не шире самой панели.
  */
 export function useFitWindowTop(selector: string, margin: number, height: number) {
+  // Последняя подгонка: перерисовка панели (любое изменение конфига) не двигает окно заново —
+  // иначе панель мигала при каждой перестановке в доке (WSH-54).
+  const last = useRef("");
   useEffect(() => {
     const el = document.querySelector(selector);
     if (!el) return;
@@ -104,6 +138,9 @@ export function useFitWindowTop(selector: string, margin: number, height: number
       const monitor = await currentMonitor();
       if (!monitor) return;
       const { position, size } = monitor.workArea;
+      const key = `${width},${height},${position.x},${position.y},${size.width},${monitor.scaleFactor}`;
+      if (key === last.current) return;
+      last.current = key;
       await win.setSize(new LogicalSize(width, height));
       const physical = Math.round(width * monitor.scaleFactor);
       await win.setPosition(

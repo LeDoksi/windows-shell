@@ -70,3 +70,15 @@
 [data-window="dock-menu"] .ws-menu {
   width: max-content;
 }
+
+/* Поповеры — отдельные окна без подложки с Acrylic: backdrop-filter в прозрачном окне не
+   размывает то, что под ним, и сквозь полупрозрачную карточку читался чужой текст (WSH-57).
+   Здесь карточки почти непрозрачные. */
+:root[data-window="flyout"],
+:root[data-window="panel-flyout"],
+:root[data-window="dock-menu"],
+:root[data-window="category"],
+:root[data-window="search"] {
+  --ws-surface: rgba(14, 30, 43, 0.94);
+  --ws-surface-strong: rgba(11, 24, 35, 0.96);
+}

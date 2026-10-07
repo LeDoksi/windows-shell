@@ -55,12 +55,20 @@ static MONITOR: Mutex<Option<String>> = Mutex::new(None);
 /// Выбор монитора поменялся — пересчитать раскладку, не дожидаясь опроса.
 static LAYOUT_DIRTY: AtomicBool = AtomicBool::new(true);
 
+/// Только то, что поменялось: конфиг рассылается на каждое изменение (перестановка в доке),
+/// а лишний пересчёт AppBar заставляет Windows двигать все развёрнутые окна (WSH-54).
 fn apply(bars: &Bars) {
-    PINNED[0].store(bars.launcher_pinned, Ordering::Relaxed);
-    PINNED[1].store(bars.dock_pinned, Ordering::Relaxed);
-    APPBAR_DIRTY.store(true, Ordering::Relaxed);
-    *MONITOR.lock().expect("monitor lock") = bars.monitor.clone();
-    LAYOUT_DIRTY.store(true, Ordering::Relaxed);
+    let pinned = [bars.launcher_pinned, bars.dock_pinned];
+    for (slot, value) in PINNED.iter().zip(pinned) {
+        if slot.swap(value, Ordering::Relaxed) != value {
+            APPBAR_DIRTY.store(true, Ordering::Relaxed);
+        }
+    }
+    let mut monitor = MONITOR.lock().expect("monitor lock");
+    if *monitor != bars.monitor {
+        *monitor = bars.monitor.clone();
+        LAYOUT_DIRTY.store(true, Ordering::Relaxed);
+    }
 }
 
 fn ease_out(t: f64) -> f64 {
@@ -137,6 +145,9 @@ struct Bar {
     state: Autohide,
     /// Прямоугольник, зарезервированный AppBar (если полоса закреплена).
     appbar: Option<RECT>,
+    /// Кнопку зажали над полосой и ещё не отпустили (тащат иконку дока): полоса не уезжает,
+    /// даже если курсор ушёл с неё (WSH-55).
+    held: bool,
 }
 
 fn rect_of(h: HWND) -> RECT {
@@ -331,6 +342,7 @@ pub fn start(app: &AppHandle) {
         backdrop: hwnd_of(backdrop),
         state: Autohide::default(),
         appbar: None,
+        held: false,
     };
     // Поповеры держат свою полосу показанной: категория, поиск и flyout виджетов — панель,
     // flyout и меню — док.
@@ -360,6 +372,7 @@ pub fn start(app: &AppHandle) {
         let mut lay: Option<Layout> = None;
         let mut full = false;
         let mut tick = 0u32;
+        let mut was_dragging = false;
         loop {
             if LAYOUT_DIRTY.swap(false, Ordering::Relaxed) || tick % LAYOUT_EVERY == 0 {
                 let now = monitors();
@@ -397,6 +410,8 @@ pub fn start(app: &AppHandle) {
             let now = start.elapsed().as_millis() as u64;
             // Старший бит — кнопка зажата сейчас.
             let dragging = unsafe { GetAsyncKeyState(VK_LBUTTON as i32) } < 0;
+            let pressed = dragging && !was_dragging;
+            was_dragging = dragging;
             let dirty = APPBAR_DIRTY.swap(false, Ordering::Relaxed);
 
             for (i, (bar, popover)) in bars.iter_mut().enumerate() {
@@ -450,6 +465,15 @@ pub fn start(app: &AppHandle) {
                         Edge::Top => p.y <= monitor.top + 1,
                         Edge::Bottom => p.y >= monitor.bottom - 2,
                     } || over && dragging;
+                if pressed {
+                    bar.held = over;
+                } else if !dragging {
+                    bar.held = false;
+                }
+                // Несут файл над полосой (кнопку зажали не на ней): её картинка — поверх дока.
+                if over && dragging && !bar.held {
+                    crate::dock::lift_drag_image();
+                }
                 let popover_open = popover
                     .iter()
                     .any(|&h| !h.is_null() && unsafe { IsWindowVisible(h) } != 0);
@@ -457,7 +481,7 @@ pub fn start(app: &AppHandle) {
                     now,
                     Input {
                         at_edge,
-                        engaged: over || popover_open,
+                        engaged: over || popover_open || bar.held,
                         pinned,
                         fullscreen: full,
                     },

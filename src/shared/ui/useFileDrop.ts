@@ -15,6 +15,31 @@ type WebView2 = {
   postMessageWithAdditionalObjects?: (message: unknown, objects: unknown[]) => void;
 };
 
+/**
+ * Сообщение с файлами видит и обработчик IPC Tauri: он ждёт в нём вызов команды, не находит
+ * поля `cmd` и пишет в консоль окна ошибку разбора (через `console.error`). Отдельно от Tauri
+ * сообщение не отправить, поэтому сразу после своей отправки эту одну строку не печатаем (WSH-58).
+ */
+let quietUntil = 0;
+let quietInstalled = false;
+function quietTauriParseError() {
+  quietUntil = Date.now() + 2000;
+  if (quietInstalled) return;
+  quietInstalled = true;
+  const original = console.error.bind(console);
+  console.error = (...args: unknown[]) => {
+    const [first] = args;
+    if (
+      Date.now() < quietUntil &&
+      typeof first === "string" &&
+      first.startsWith("missing field `cmd`")
+    ) {
+      return;
+    }
+    original(...args);
+  };
+}
+
 const isFileDrag = (e: DragEvent) => e.dataTransfer?.types.includes("Files") ?? false;
 
 /**
@@ -36,6 +61,7 @@ async function dropPaths(data: DataTransfer): Promise<string[]> {
   try {
     // Строкой, не объектом: обработчик IPC Tauri (wry) падает на объекте, и тогда WebView2
     // не передаёт сообщение дальше, в `file_drop.rs`.
+    quietTauriParseError();
     webview.postMessageWithAdditionalObjects(JSON.stringify({ wshDrop: id }), objects);
     return await answered;
   } finally {

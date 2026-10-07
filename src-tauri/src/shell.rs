@@ -106,7 +106,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         ] {
             crate::dock::tool_window(w);
         }
-        crate::dock::setup(&backdrop, &dock, &launcher_backdrop);
+        crate::dock::setup(&backdrop, &dock, &launcher_backdrop, [&dock_menu, &flyout]);
     }
 
     // Окно сдвинулось (подгонка под ширину панели, позже автоскрытие) — подложка за ним.
@@ -129,11 +129,17 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         .appearance
         .glass;
     apply_glass(app, glass)?;
-    // Режим меняется на лету: конфиг поменяли — показываем или прячем подложки.
+    // Режим меняется на лету: конфиг поменяли — показываем или прячем подложки. Только при
+    // смене режима: показ подложки поднимает окна, и каждая перестановка в доке мигала (WSH-54).
     let handle = app.clone();
+    let last = Mutex::new(glass);
     app.listen_any("config_changed", move |event| {
         if let Ok(config) = serde_json::from_str::<Config>(event.payload()) {
-            if let Err(e) = apply_glass(&handle, config.appearance.glass) {
+            let mode = config.appearance.glass;
+            if std::mem::replace(&mut *last.lock().expect("glass lock"), mode) == mode {
+                return;
+            }
+            if let Err(e) = apply_glass(&handle, mode) {
                 eprintln!("[glass] {e}");
             }
         }
