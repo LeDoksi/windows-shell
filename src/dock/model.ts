@@ -166,8 +166,11 @@ export function movePin(config: Config, id: string, index: number): Config {
   };
 }
 
-/** Что из Проводника можно закрепить в доке: программы и ярлыки (док — только приложения). */
-const programs = /\.(exe|lnk|appref-ms)$/i;
+/**
+ * Что из Проводника можно закрепить в доке: программы и ярлыки, в том числе интернет-ярлыки
+ * `.url` — так Steam кладёт игры на рабочий стол (док — только приложения).
+ */
+const programs = /\.(exe|lnk|url|appref-ms)$/i;
 
 /** Программы из перетащенных путей — названием без расширения. */
 export function programsFrom(paths: string[]): { title: string; target: string }[] {
