@@ -21,6 +21,10 @@ describe("itemFromPath", () => {
       meta: "Файл XLSX",
     });
     expect(itemFromPath("D:\\README", false).meta).toBe("Файл");
+    expect(itemFromPath("C:\\Desktop\\Stardew Valley.url", false)).toMatchObject({
+      kind: "app",
+      title: "Stardew Valley",
+    });
   });
 });
 

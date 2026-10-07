@@ -6,7 +6,8 @@ export type NewItem = Omit<LauncherItem, "id">;
 /** Приложение из «Пуска» (ответ `installed_apps`). */
 export type InstalledApp = { name: string; id: string };
 
-const programs = new Set(["exe", "lnk", "appref-ms", "bat", "cmd"]);
+/** `url` — интернет-ярлык: игры Steam и Epic кладут на рабочий стол именно такие. */
+const programs = new Set(["exe", "lnk", "url", "appref-ms", "bat", "cmd"]);
 
 function lastSegment(path: string) {
   return (

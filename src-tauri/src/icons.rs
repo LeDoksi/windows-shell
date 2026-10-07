@@ -71,6 +71,33 @@ pub fn bgra_to_rgba(mut pixels: Vec<u8>) -> Vec<u8> {
     pixels
 }
 
+/// Маленькая иконка (`.ico` ярлыка игры Steam — 32 px), которую Проводник поставил в центр
+/// большого холста: вырезаем квадрат вокруг неё, чтобы плитка показала её во весь размер.
+/// Иконки, занимающие больше половины холста, не трогаем — их поля задуманы автором.
+pub fn trim_padding(width: u32, height: u32, rgba: Vec<u8>) -> (u32, u32, Vec<u8>) {
+    let (w, h) = (width as usize, height as usize);
+    let opaque = |x: usize, y: usize| rgba[(y * w + x) * 4 + 3] != 0;
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+    for y in 0..h {
+        for x in 0..w {
+            if opaque(x, y) {
+                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
+            }
+        }
+    }
+    let side = (x1.saturating_sub(x0)).max(y1.saturating_sub(y0));
+    if side == 0 || side * 2 > w.min(h) {
+        return (width, height, rgba);
+    }
+    let left = ((x0 + x1) / 2).saturating_sub(side / 2).min(w - side);
+    let top = ((y0 + y1) / 2).saturating_sub(side / 2).min(h - side);
+    let mut out = Vec::with_capacity(side * side * 4);
+    for y in top..top + side {
+        out.extend_from_slice(&rgba[(y * w + left) * 4..(y * w + left + side) * 4]);
+    }
+    (side as u32, side as u32, out)
+}
+
 pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     let mut encoder = png::Encoder::new(&mut out, width, height);
@@ -221,7 +248,8 @@ mod os {
             if lines == 0 || w == 0 {
                 return Err("пустая картинка".into());
             }
-            encode_png(w, h, &bgra_to_rgba(pixels))
+            let (w, h, rgba) = super::trim_padding(w, h, bgra_to_rgba(pixels));
+            encode_png(w, h, &rgba)
         }
     }
 }
@@ -261,6 +289,21 @@ mod tests {
         assert_eq!(rgba, vec![0, 0, 199, 128, 0, 0, 0, 0]);
         // Без альфа-канала — непрозрачно.
         assert_eq!(bgra_to_rgba(vec![1, 2, 3, 0]), vec![3, 2, 1, 255]);
+    }
+
+    #[test]
+    fn small_icon_in_big_canvas_is_trimmed() {
+        // Холст 8×8, непрозрачный квадрат 2×2 в (3,3): вырезается он один.
+        let mut rgba = vec![0u8; 8 * 8 * 4];
+        for (x, y) in [(3, 3), (4, 3), (3, 4), (4, 4)] {
+            rgba[(y * 8 + x) * 4 + 3] = 255;
+        }
+        let (w, h, out) = trim_padding(8, 8, rgba);
+        assert_eq!((w, h), (2, 2));
+        assert!(out.chunks_exact(4).all(|p| p[3] == 255));
+        // Иконка на большую часть холста остаётся как была.
+        let full = vec![255u8; 4 * 4 * 4];
+        assert_eq!(trim_padding(4, 4, full.clone()), (4, 4, full));
     }
 
     #[test]
