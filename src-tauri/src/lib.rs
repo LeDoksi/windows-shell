@@ -11,6 +11,8 @@ mod config;
 #[cfg(all(windows, not(feature = "spike")))]
 mod dock;
 #[cfg(not(feature = "spike"))]
+mod file_drop;
+#[cfg(not(feature = "spike"))]
 mod hotkeys;
 #[cfg(not(feature = "spike"))]
 mod icons;
@@ -86,6 +88,7 @@ pub fn run() {
             launch::reveal,
             launch::paths_exist,
             launch::paths_are_dirs,
+            launch::keep_shortcuts,
             icons::item_icon,
             pick::pick_paths,
             pick::installed_apps,

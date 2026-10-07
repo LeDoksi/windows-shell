@@ -134,12 +134,13 @@ export function Dock({
   });
 
   // Программы и ярлыки из Проводника закрепляются; остальное док не берёт (он только для программ).
+  // Пока файлы несут, их имён не видно: место показываем всем, а на `drop` берём только программы.
   useFileDrop((e) => {
-    if (e.type === "leave" || !programsFrom(e.paths).length) return setFileIndex(null);
+    if (e.type === "leave") return setFileIndex(null);
     const index = pinCenters(row.current).filter((c) => c < e.x).length;
     if (e.type === "over") return setFileIndex(index);
     setFileIndex(null);
-    onDropPrograms?.(e.paths, index);
+    if (programsFrom(e.paths).length) onDropPrograms?.(e.paths, index);
   });
 
   return (

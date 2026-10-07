@@ -73,6 +73,7 @@ export function createMockBackend(): Backend {
     paths_exist: ({ paths }) => paths.map(() => true),
     // Без точки в последней части пути — папка.
     paths_are_dirs: ({ paths }) => paths.map((p) => !/\.[^\\/.]+$/.test(p)),
+    keep_shortcuts: ({ paths }) => paths,
     item_icon: () => null,
     pick_paths: ({ folders }) => [
       folders ? "C:\\Users\\Demo\\Музыка" : "C:\\Users\\Demo\\Заметки.txt",

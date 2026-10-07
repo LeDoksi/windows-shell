@@ -20,6 +20,8 @@ export interface Commands {
   paths_exist: { args: { paths: string[] }; result: boolean[] };
   /** Папка ли каждый путь (перетащенное из Проводника). */
   paths_are_dirs: { args: { paths: string[] }; result: boolean[] };
+  /** Свои копии ярлыков `.lnk`/`.url` (оригинал можно удалить со стола); прочее — как есть. */
+  keep_shortcuts: { args: { paths: string[] }; result: string[] };
   /** Иконка объекта из Windows как `data:`-URL (PNG 256 px); `null` — рисуем заглушку. */
   item_icon: { args: { kind: ItemKind; target: string }; result: string | null };
   /** Системный диалог «Открыть» поверх окна; пустой ответ — пользователь передумал. */
@@ -176,6 +178,8 @@ export interface Events {
    * Плитку из окна категории тащат над верхней панелью: панель подсвечивает категорию под
    * курсором, на `drop` переносит туда плитку. `x`, `y` — курсор, физические пиксели экрана.
    */
+  /** Rust: пути файлов, брошенных из Проводника, для бросания `id` (`useFileDrop`). */
+  files_dropped: { id: number; paths: string[] };
   tile_drag: {
     phase: "move" | "drop" | "leave";
     categoryId: string;

@@ -28,10 +28,32 @@ pub fn source(kind: &ItemKind, target: &str) -> Option<String> {
         ItemKind::App if !is_path(target) && !target.is_empty() => {
             Some(format!("shell:AppsFolder\\{target}"))
         }
+        _ if target.to_lowercase().ends_with(".url") => fs::read(target)
+            .ok()
+            .and_then(|ini| url_icon_file(&String::from_utf8_lossy(&ini)))
+            .filter(|icon| Path::new(icon).exists())
+            .or_else(|| Path::new(target).exists().then(|| target.to_string())),
         _ if Path::new(target).exists() => Some(target.to_string()),
         _ => None,
     }
 }
+
+/// Своя иконка интернет-ярлыка (`.url`, так Steam делает ярлыки игр): строка `IconFile=`.
+/// Берём сам файл иконки, а не `.url`: Проводник рисует `.url` крошечной картинкой в рамке.
+fn url_icon_file(ini: &str) -> Option<String> {
+    ini.lines()
+        .find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            key.trim()
+                .eq_ignore_ascii_case("IconFile")
+                .then(|| value.trim())
+        })
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+}
+
+/// Меняется, когда иконки рисуются по-новому: старые PNG в кэше больше не подходят.
+const ICONS_VERSION: u32 = 2;
 
 /// Ключ кэша: источник плюс время изменения файла (у приложений из магазина его нет).
 pub fn cache_key(source: &str) -> String {
@@ -42,7 +64,10 @@ pub fn cache_key(source: &str) -> String {
         .map_or(0, |d| d.as_secs());
     format!(
         "{:016x}",
-        fnv1a(&format!("{}|{modified}", source.to_lowercase()))
+        fnv1a(&format!(
+            "{ICONS_VERSION}|{}|{modified}",
+            source.to_lowercase()
+        ))
     )
 }
 
@@ -53,15 +78,16 @@ fn fnv1a(text: &str) -> u64 {
     })
 }
 
-/// Пиксели Windows (BGRA, альфа умножена на цвет) — в обычный RGBA.
+/// Пиксели Windows (BGRA; у картинок Проводника альфа умножена на цвет — `premultiplied`,
+/// у самих иконок нет) — в обычный RGBA.
 /// У старых иконок без альфа-канала прозрачность нулевая везде: такие делаем непрозрачными.
-pub fn bgra_to_rgba(mut pixels: Vec<u8>) -> Vec<u8> {
+pub fn bgra_to_rgba(mut pixels: Vec<u8>, premultiplied: bool) -> Vec<u8> {
     let has_alpha = pixels.chunks_exact(4).any(|p| p[3] != 0);
     for p in pixels.chunks_exact_mut(4) {
         p.swap(0, 2);
         if !has_alpha {
             p[3] = 255;
-        } else if p[3] != 0 && p[3] != 255 {
+        } else if premultiplied && p[3] != 0 && p[3] != 255 {
             let a = u32::from(p[3]);
             for c in &mut p[..3] {
                 *c = ((u32::from(*c) * 255 + a / 2) / a).min(255) as u8;
@@ -69,6 +95,33 @@ pub fn bgra_to_rgba(mut pixels: Vec<u8>) -> Vec<u8> {
         }
     }
     pixels
+}
+
+/// Маленькая иконка (`.ico` ярлыка игры Steam — 32 px), которую Проводник поставил в центр
+/// большого холста: вырезаем квадрат вокруг неё, чтобы плитка показала её во весь размер.
+/// Иконки, занимающие больше половины холста, не трогаем — их поля задуманы автором.
+pub fn trim_padding(width: u32, height: u32, rgba: Vec<u8>) -> (u32, u32, Vec<u8>) {
+    let (w, h) = (width as usize, height as usize);
+    let opaque = |x: usize, y: usize| rgba[(y * w + x) * 4 + 3] != 0;
+    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
+    for y in 0..h {
+        for x in 0..w {
+            if opaque(x, y) {
+                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
+            }
+        }
+    }
+    let side = (x1.saturating_sub(x0)).max(y1.saturating_sub(y0));
+    if side == 0 || side * 2 > w.min(h) {
+        return (width, height, rgba);
+    }
+    let left = ((x0 + x1) / 2).saturating_sub(side / 2).min(w - side);
+    let top = ((y0 + y1) / 2).saturating_sub(side / 2).min(h - side);
+    let mut out = Vec::with_capacity(side * side * 4);
+    for y in top..top + side {
+        out.extend_from_slice(&rgba[(y * w + left) * 4..(y * w + left + side) * 4]);
+    }
+    (side as u32, side as u32, out)
 }
 
 pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
@@ -150,11 +203,13 @@ mod os {
     use windows::Win32::Foundation::SIZE;
     use windows::Win32::Graphics::Gdi::{
         CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, BITMAP, BITMAPINFO,
-        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
+        BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HGDIOBJ,
     };
     use windows::Win32::UI::Shell::{
-        IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
+        IShellItemImageFactory, SHCreateItemFromParsingName, SHDefExtractIconW,
+        SIIGBF_BIGGERSIZEOK, SIIGBF_ICONONLY,
     };
+    use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
 
     use super::{bgra_to_rgba, encode_png, SIZE};
     use crate::launch::Com;
@@ -162,8 +217,11 @@ mod os {
     /// «Данные ещё не готовы» (0x8000000A).
     const E_PENDING: HRESULT = HRESULT(0x8000_000A_u32 as i32);
 
-    /// Иконка объекта от Проводника — PNG. Для `.lnk` это иконка цели ярлыка.
+    /// Иконка объекта — PNG. Для `.lnk` это иконка цели ярлыка; файл `.ico` — сама иконка.
     pub fn render(source: &str) -> Result<Vec<u8>, String> {
+        if source.to_lowercase().ends_with(".ico") {
+            return unsafe { icon_file(source) };
+        }
         let _com = Com::init();
         let err = |e: windows::core::Error| e.message();
         unsafe {
@@ -185,44 +243,68 @@ mod os {
                     other => break other.map_err(err)?,
                 }
             };
-            let mut info = BITMAP::default();
-            GetObjectW(
-                HGDIOBJ(bitmap.0),
-                size_of::<BITMAP>() as i32,
-                Some(&mut info as *mut _ as *mut _),
-            );
-            let (w, h) = (info.bmWidth.max(0) as u32, info.bmHeight.unsigned_abs());
-            let mut header = BITMAPINFO {
-                bmiHeader: BITMAPINFOHEADER {
-                    biSize: size_of::<BITMAPINFOHEADER>() as u32,
-                    biWidth: w as i32,
-                    // Минус — строки сверху вниз, как в PNG.
-                    biHeight: -(h as i32),
-                    biPlanes: 1,
-                    biBitCount: 32,
-                    biCompression: BI_RGB.0,
-                    ..Default::default()
-                },
-                ..Default::default()
-            };
-            let mut pixels = vec![0u8; (w * h * 4) as usize];
-            let dc = CreateCompatibleDC(None);
-            let lines = GetDIBits(
-                dc,
-                bitmap,
-                0,
-                h,
-                Some(pixels.as_mut_ptr().cast()),
-                &mut header,
-                DIB_RGB_COLORS,
-            );
-            let _ = DeleteDC(dc);
+            let png = png_of(bitmap, true);
             let _ = DeleteObject(HGDIOBJ(bitmap.0));
-            if lines == 0 || w == 0 {
-                return Err("пустая картинка".into());
-            }
-            encode_png(w, h, &bgra_to_rgba(pixels))
+            png
         }
+    }
+
+    /// Файл `.ico` (иконки игр Steam): Проводник рисует его маленьким в рамке, поэтому берём
+    /// сам значок в 256 px — Windows выберет из файла лучший размер и растянет его.
+    unsafe fn icon_file(path: &str) -> Result<Vec<u8>, String> {
+        let mut icon = HICON::default();
+        SHDefExtractIconW(&HSTRING::from(path), 0, 0, Some(&mut icon), None, SIZE)
+            .ok()
+            .map_err(|e| e.message())?;
+        let mut info = ICONINFO::default();
+        let got = GetIconInfo(icon, &mut info);
+        let _ = DestroyIcon(icon);
+        got.map_err(|e| e.message())?;
+        let png = png_of(info.hbmColor, false);
+        let _ = DeleteObject(HGDIOBJ(info.hbmColor.0));
+        let _ = DeleteObject(HGDIOBJ(info.hbmMask.0));
+        png
+    }
+
+    /// Картинка Windows — PNG; маленькая иконка в большом холсте обрезается до себя.
+    unsafe fn png_of(bitmap: HBITMAP, premultiplied: bool) -> Result<Vec<u8>, String> {
+        let mut info = BITMAP::default();
+        GetObjectW(
+            HGDIOBJ(bitmap.0),
+            size_of::<BITMAP>() as i32,
+            Some(&mut info as *mut _ as *mut _),
+        );
+        let (w, h) = (info.bmWidth.max(0) as u32, info.bmHeight.unsigned_abs());
+        let mut header = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: w as i32,
+                // Минус — строки сверху вниз, как в PNG.
+                biHeight: -(h as i32),
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut pixels = vec![0u8; (w * h * 4) as usize];
+        let dc = CreateCompatibleDC(None);
+        let lines = GetDIBits(
+            dc,
+            bitmap,
+            0,
+            h,
+            Some(pixels.as_mut_ptr().cast()),
+            &mut header,
+            DIB_RGB_COLORS,
+        );
+        let _ = DeleteDC(dc);
+        if lines == 0 || w == 0 {
+            return Err("пустая картинка".into());
+        }
+        let (w, h, rgba) = super::trim_padding(w, h, bgra_to_rgba(pixels, premultiplied));
+        encode_png(w, h, &rgba)
     }
 }
 
@@ -248,6 +330,21 @@ mod tests {
     }
 
     #[test]
+    fn internet_shortcuts_point_to_their_icon_file() {
+        let ini = "[InternetShortcut]\r\nIDList=\r\nURL=steam://rungameid/413150\r\n\
+                   IconFile=C:\\Steam\\games\\sv.ico\r\nIconIndex=0\r\n";
+        assert_eq!(
+            url_icon_file(ini).as_deref(),
+            Some("C:\\Steam\\games\\sv.ico")
+        );
+        assert_eq!(
+            url_icon_file("[InternetShortcut]\nURL=https://ya.ru\n"),
+            None
+        );
+        assert_eq!(url_icon_file("IconFile=\n"), None);
+    }
+
+    #[test]
     fn cache_key_is_stable_and_case_insensitive() {
         assert_eq!(cache_key("C:\\A\\b.exe"), cache_key("c:\\a\\B.EXE"));
         assert_ne!(cache_key("C:\\a.exe"), cache_key("C:\\b.exe"));
@@ -257,10 +354,30 @@ mod tests {
     #[test]
     fn pixels_become_straight_rgba() {
         // Полупрозрачный синий (BGRA, умноженный на альфу) и прозрачный пиксель.
-        let rgba = bgra_to_rgba(vec![100, 0, 0, 128, 0, 0, 0, 0]);
+        let rgba = bgra_to_rgba(vec![100, 0, 0, 128, 0, 0, 0, 0], true);
         assert_eq!(rgba, vec![0, 0, 199, 128, 0, 0, 0, 0]);
         // Без альфа-канала — непрозрачно.
-        assert_eq!(bgra_to_rgba(vec![1, 2, 3, 0]), vec![3, 2, 1, 255]);
+        assert_eq!(bgra_to_rgba(vec![1, 2, 3, 0], true), vec![3, 2, 1, 255]);
+        // У иконки цвет уже не умножен на альфу.
+        assert_eq!(
+            bgra_to_rgba(vec![100, 0, 0, 128], false),
+            vec![0, 0, 100, 128]
+        );
+    }
+
+    #[test]
+    fn small_icon_in_big_canvas_is_trimmed() {
+        // Холст 8×8, непрозрачный квадрат 2×2 в (3,3): вырезается он один.
+        let mut rgba = vec![0u8; 8 * 8 * 4];
+        for (x, y) in [(3, 3), (4, 3), (3, 4), (4, 4)] {
+            rgba[(y * 8 + x) * 4 + 3] = 255;
+        }
+        let (w, h, out) = trim_padding(8, 8, rgba);
+        assert_eq!((w, h), (2, 2));
+        assert!(out.chunks_exact(4).all(|p| p[3] == 255));
+        // Иконка на большую часть холста остаётся как была.
+        let full = vec![255u8; 4 * 4 * 4];
+        assert_eq!(trim_padding(4, 4, full.clone()), (4, 4, full));
     }
 
     #[test]

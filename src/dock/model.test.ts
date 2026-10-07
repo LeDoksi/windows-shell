@@ -168,10 +168,17 @@ describe("pin and unpin", () => {
 describe("programsFrom", () => {
   it("keeps programs and shortcuts, named without extension", () => {
     expect(
-      programsFrom(["C:\\Apps\\Figma.exe", "D:\\Фото", "C:\\Desktop\\Steam.lnk", "a.txt"]),
+      programsFrom([
+        "C:\\Apps\\Figma.exe",
+        "D:\\Фото",
+        "C:\\Desktop\\Steam.lnk",
+        "a.txt",
+        "C:\\Desktop\\Stardew Valley.url",
+      ]),
     ).toEqual([
       { title: "Figma", target: "C:\\Apps\\Figma.exe" },
       { title: "Steam", target: "C:\\Desktop\\Steam.lnk" },
+      { title: "Stardew Valley", target: "C:\\Desktop\\Stardew Valley.url" },
     ]);
   });
 });

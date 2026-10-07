@@ -113,6 +113,61 @@ pub async fn paths_are_dirs(paths: Vec<String>) -> Vec<bool> {
     .unwrap_or_default()
 }
 
+/// Ярлык (`.lnk`, `.url`), брошенный на плитку или в док: храним свою копию в `dir`, чтобы
+/// оригинал можно было убрать с рабочего стола. Одинаковый ярлык второй раз не копируется.
+/// Остальное — путь как есть.
+pub fn keep_shortcut(dir: &Path, path: &str) -> std::io::Result<String> {
+    let source = Path::new(path.trim());
+    let ext = source
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if !matches!(ext.as_str(), "lnk" | "url") || source.starts_with(dir) || !source.is_file() {
+        return Ok(path.to_string());
+    }
+    let bytes = std::fs::read(source)?;
+    let stem = source.file_stem().unwrap_or_default().to_string_lossy();
+    std::fs::create_dir_all(dir)?;
+    for n in 1.. {
+        let name = match n {
+            1 => format!("{stem}.{ext}"),
+            n => format!("{stem} ({n}).{ext}"),
+        };
+        let copy = dir.join(name);
+        match std::fs::read(&copy) {
+            Ok(existing) if existing == bytes => return Ok(copy.to_string_lossy().into_owned()),
+            Ok(_) => continue,
+            Err(_) => {
+                std::fs::write(&copy, &bytes)?;
+                return Ok(copy.to_string_lossy().into_owned());
+            }
+        }
+    }
+    unreachable!()
+}
+
+/// Свои копии брошенных ярлыков (`keep_shortcut`); при ошибке — исходный путь.
+#[tauri::command]
+pub async fn keep_shortcuts(app: tauri::AppHandle, paths: Vec<String>) -> Vec<String> {
+    use tauri::Manager;
+    let Ok(dir) = app.path().app_data_dir().map(|d| d.join("shortcuts")) else {
+        return paths;
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        paths
+            .into_iter()
+            .map(|p| {
+                keep_shortcut(&dir, &p).unwrap_or_else(|e| {
+                    eprintln!("[launch] ярлык {p}: {e}");
+                    p
+                })
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
 #[cfg(windows)]
 mod os {
     use std::os::windows::ffi::OsStrExt;
@@ -240,6 +295,34 @@ mod tests {
         let dirs = tauri::async_runtime::block_on(paths_are_dirs(paths));
         std::fs::remove_file(&file).unwrap();
         assert_eq!(dirs, [true, false, false]);
+    }
+
+    #[test]
+    fn shortcuts_are_copied_once() {
+        let root = std::env::temp_dir().join(format!("wsh-keep-{}", std::process::id()));
+        let desk = root.join("desk");
+        let kept = root.join("kept");
+        std::fs::create_dir_all(&desk).unwrap();
+        let game = desk.join("Game.url");
+        std::fs::write(&game, "[InternetShortcut]\nURL=steam://rungameid/1\n").unwrap();
+        let game = game.to_string_lossy().into_owned();
+
+        let copy = keep_shortcut(&kept, &game).unwrap();
+        assert_eq!(Path::new(&copy), kept.join("Game.url"));
+        // Тот же ярлык ещё раз — та же копия; другой с тем же именем — рядом.
+        assert_eq!(keep_shortcut(&kept, &game).unwrap(), copy);
+        std::fs::write(&game, "[InternetShortcut]\nURL=steam://rungameid/2\n").unwrap();
+        assert_eq!(
+            Path::new(&keep_shortcut(&kept, &game).unwrap()),
+            kept.join("Game (2).url")
+        );
+        // Свою копию и не ярлыки не трогаем.
+        assert_eq!(keep_shortcut(&kept, &copy).unwrap(), copy);
+        let doc = desk.join("a.txt");
+        std::fs::write(&doc, "x").unwrap();
+        let doc = doc.to_string_lossy().into_owned();
+        assert_eq!(keep_shortcut(&kept, &doc).unwrap(), doc);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

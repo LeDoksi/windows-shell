@@ -117,10 +117,18 @@ export function useDockApps() {
         void pinTarget(entry)
           .then((target) => update((c) => pinApp(c, entry, target, index)))
           .catch(report),
-      pinPaths: (paths: string[], index: number) =>
-        void update((c) =>
-          programsFrom(paths).reduce((next, app, i) => pinApp(next, app, app.target, index + i), c),
-        ).catch(report),
+      pinPaths: (dropped: string[], index: number) =>
+        void backend
+          .call("keep_shortcuts", { paths: dropped })
+          .then((paths) =>
+            update((c) =>
+              programsFrom(paths).reduce(
+                (next, app, i) => pinApp(next, app, app.target, index + i),
+                c,
+              ),
+            ),
+          )
+          .catch(report),
     }),
     [update],
   );

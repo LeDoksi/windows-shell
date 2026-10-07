@@ -26,15 +26,6 @@ export function nearestSlot(slots: Slot[], x: number, y: number): number {
   return best;
 }
 
-/**
- * Куда вставить новое (файл из Проводника) в ряд или сетку в порядке чтения: перед первым
- * местом, которое курсор ещё не прошёл; после всех — `slots.length`.
- */
-export function insertionIndex(slots: Slot[], x: number, y: number): number {
-  const i = slots.findIndex((s) => y < s.top || (y < s.bottom && x < (s.left + s.right) / 2));
-  return i < 0 ? slots.length : i;
-}
-
 /** Список, где элемент `from` стоит на месте `to` (остальные сдвинуты). */
 export function moveIndex<T>(list: readonly T[], from: number, to: number): T[] {
   const next = [...list];

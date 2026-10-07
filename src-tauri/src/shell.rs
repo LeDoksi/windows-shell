@@ -54,7 +54,10 @@ fn window(app: &AppHandle, label: &str, (w, h): (f64, f64)) -> tauri::Result<Web
         .always_on_top(true)
         .focused(false)
         .visible(false)
+        // Файлы из Проводника принимает сам WebView2 (`file_drop`), а не обработчик Tauri.
+        .disable_drag_drop_handler()
         .build()
+        .inspect(crate::file_drop::attach)
 }
 
 /// Создать все окна на основном мониторе (на выбранный их переносит `bars`). Видимы сразу только

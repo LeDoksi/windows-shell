@@ -21,6 +21,7 @@ use windows_sys::Win32::UI::HiDpi::{
     GetDpiForMonitor, SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
     MDT_EFFECTIVE_DPI,
 };
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 use windows_sys::Win32::UI::Shell::{
     SHAppBarMessage, SHQueryUserNotificationState, ABE_BOTTOM, ABE_TOP, ABM_NEW, ABM_QUERYPOS,
     ABM_REMOVE, ABM_SETPOS, APPBARDATA,
@@ -394,6 +395,8 @@ pub fn start(app: &AppHandle) {
             let mut p = POINT { x: 0, y: 0 };
             unsafe { GetCursorPos(&mut p) };
             let now = start.elapsed().as_millis() as u64;
+            // Старший бит — кнопка зажата сейчас.
+            let dragging = unsafe { GetAsyncKeyState(VK_LBUTTON as i32) } < 0;
             let dirty = APPBAR_DIRTY.swap(false, Ordering::Relaxed);
 
             for (i, (bar, popover)) in bars.iter_mut().enumerate() {
@@ -435,16 +438,18 @@ pub fn start(app: &AppHandle) {
                 };
 
                 let in_x = p.x >= x && p.x < x + w;
-                let at_edge = in_x
-                    && match bar.edge {
-                        Edge::Top => p.y <= monitor.top + 1,
-                        Edge::Bottom => p.y >= monitor.bottom - 2,
-                    };
                 let over = in_x
                     && match bar.edge {
                         Edge::Top => p.y < base_y + h,
                         Edge::Bottom => p.y >= base_y,
                     };
+                // С зажатой кнопкой (несут файл из Проводника) спрятанная полоса выезжает,
+                // когда курсор там, где она стоит, а не только у самого края экрана.
+                let at_edge =
+                    in_x && match bar.edge {
+                        Edge::Top => p.y <= monitor.top + 1,
+                        Edge::Bottom => p.y >= monitor.bottom - 2,
+                    } || over && dragging;
                 let popover_open = popover
                     .iter()
                     .any(|&h| !h.is_null() && unsafe { IsWindowVisible(h) } != 0);

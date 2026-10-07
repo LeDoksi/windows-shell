@@ -130,7 +130,8 @@ function LauncherWindow() {
     spring.current = null;
   };
   useEffect(() => stopSpring, []);
-  const addDropped = async (id: string, paths: string[]) => {
+  const addDropped = async (id: string, dropped: string[]) => {
+    const paths = await backend.call("keep_shortcuts", { paths: dropped });
     const dirs = await backend.call("paths_are_dirs", { paths });
     await update((c) => dropPaths(c, id, paths, dirs));
   };
@@ -295,7 +296,8 @@ function CategoryPopup() {
       onPickPaths={async (folders) => {
         picking.current = true;
         try {
-          return await backend.call("pick_paths", { folders });
+          const paths = await backend.call("pick_paths", { folders });
+          return await backend.call("keep_shortcuts", { paths });
         } catch (e) {
           console.error(e);
           return [];
@@ -314,16 +316,15 @@ function CategoryPopup() {
         clearTimeout(leaveTimer.current);
         if (!over && open.byDrag) leaveTimer.current = window.setTimeout(close, LEAVE_DELAY);
       }}
-      onDropPaths={(paths, to) => {
-        void backend
-          .call("paths_are_dirs", { paths })
-          .then((dirs) => update((c) => dropPaths(c, category.id, paths, dirs, to)))
-          .catch(console.error);
-        // Бросили — теперь окно обычное: с фокусом, закроется кликом мимо.
-        if (open.byDrag) {
-          setOpen({ ...open, byDrag: false });
-          void showWindow("category");
-        }
+      onDropPaths={(dropped, to) => {
+        void (async () => {
+          const paths = await backend.call("keep_shortcuts", { paths: dropped });
+          const dirs = await backend.call("paths_are_dirs", { paths });
+          await update((c) => dropPaths(c, category.id, paths, dirs, to));
+        })().catch(console.error);
+        // Бросили — окно обычное, с фокусом (его держал Проводник): закроется кликом мимо.
+        if (open.byDrag) setOpen({ ...open, byDrag: false });
+        void showWindow("category");
       }}
     />
   );
