@@ -6,7 +6,7 @@ export type NewItem = Omit<LauncherItem, "id">;
 /** Приложение из «Пуска» (ответ `installed_apps`). */
 export type InstalledApp = { name: string; id: string };
 
-// `url` — интернет-ярлык: так Steam и другие лаунчеры делают ярлыки игр.
+/** `url` — интернет-ярлык: игры Steam и Epic кладут на рабочий стол именно такие. */
 const programs = new Set(["exe", "lnk", "url", "appref-ms", "bat", "cmd"]);
 
 function lastSegment(path: string) {
