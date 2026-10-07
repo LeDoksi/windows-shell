@@ -16,7 +16,7 @@ import {
   type MenuEntry,
 } from "../shared/ui";
 import { cx } from "../shared/ui/cx";
-import { insertionIndex, moveIndex, nearestSlot, slotOf, type Slot } from "../shared/ui/dragSlots";
+import { moveIndex, nearestSlot, slotOf, type Slot } from "../shared/ui/dragSlots";
 import { AppPicker, LinkForm } from "./AddPanels";
 import { itemFromPath, type NewItem } from "./add";
 import { categoryColors } from "./categories";
@@ -129,8 +129,12 @@ export function CategoryWindow({
   const grid = useRef<HTMLDivElement>(null);
   /** Места плиток в начале перетаскивания: пока плитки переставляются, они не меняются. */
   const slots = useRef<Slot[]>([]);
-  const snapshot = () =>
-    (slots.current = [...(grid.current?.querySelectorAll("[data-tile]") ?? [])].map(slotOf));
+  /** `withAdd` — и плитка «Добавить»: файлы из Проводника можно поставить и в конец. */
+  const snapshot = (withAdd = false) =>
+    (slots.current = [
+      ...(grid.current?.querySelectorAll(withAdd ? "[data-tile], .ws-tile--add" : "[data-tile]") ??
+        []),
+    ].map(slotOf));
   const [drag, setDragState] = useState<TileDrag | null>(null);
   const dragRef = useRef(drag);
   const setDrag = (d: TileDrag | null) => {
@@ -185,10 +189,11 @@ export function CategoryWindow({
       return;
     }
     if (fileIndex === null) {
-      snapshot();
+      snapshot(true);
       onFileDrag?.(true);
     }
-    const index = query ? category.items.length : insertionIndex(slots.current, e.x, e.y);
+    // Место под курсором, как при перестановке плиток; плитка на нём сдвигается дальше.
+    const index = query ? category.items.length : nearestSlot(slots.current, e.x, e.y);
     if (e.type === "over") return setFileIndex(index);
     setFileIndex(null);
     if (e.paths.length) onDropPaths?.(e.paths, index);

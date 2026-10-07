@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { insertionIndex, moveIndex, nearestSlot, type Slot } from "./dragSlots";
+import { moveIndex, nearestSlot, type Slot } from "./dragSlots";
 
 /** Сетка 3×2 из клеток 100×100. */
 const grid: Slot[] = [0, 1, 2, 3, 4].map((i) => {
@@ -15,17 +15,6 @@ describe("nearestSlot", () => {
     expect(nearestSlot(grid, 150, 190)).toBe(4);
     expect(nearestSlot(grid, 900, 900)).toBe(4);
     expect(nearestSlot([], 0, 0)).toBe(0);
-  });
-});
-
-describe("insertionIndex", () => {
-  it("inserts before the first cell the cursor has not passed", () => {
-    expect(insertionIndex(grid, 10, 50)).toBe(0);
-    expect(insertionIndex(grid, 70, 50)).toBe(1);
-    expect(insertionIndex(grid, 290, 50)).toBe(3);
-    expect(insertionIndex(grid, 120, 150)).toBe(4);
-    expect(insertionIndex(grid, 280, 150)).toBe(5);
-    expect(insertionIndex(grid, 10, 500)).toBe(5);
   });
 });
 
