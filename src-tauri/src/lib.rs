@@ -11,6 +11,8 @@ mod config;
 #[cfg(all(windows, not(feature = "spike")))]
 mod dock;
 #[cfg(not(feature = "spike"))]
+mod file_drop;
+#[cfg(not(feature = "spike"))]
 mod hotkeys;
 #[cfg(not(feature = "spike"))]
 mod icons;

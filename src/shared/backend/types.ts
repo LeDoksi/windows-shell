@@ -176,6 +176,8 @@ export interface Events {
    * Плитку из окна категории тащат над верхней панелью: панель подсвечивает категорию под
    * курсором, на `drop` переносит туда плитку. `x`, `y` — курсор, физические пиксели экрана.
    */
+  /** Rust: пути файлов, брошенных из Проводника, для бросания `id` (`useFileDrop`). */
+  files_dropped: { id: number; paths: string[] };
   tile_drag: {
     phase: "move" | "drop" | "leave";
     categoryId: string;

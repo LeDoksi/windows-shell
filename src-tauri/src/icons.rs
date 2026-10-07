@@ -28,9 +28,28 @@ pub fn source(kind: &ItemKind, target: &str) -> Option<String> {
         ItemKind::App if !is_path(target) && !target.is_empty() => {
             Some(format!("shell:AppsFolder\\{target}"))
         }
+        _ if target.to_lowercase().ends_with(".url") => fs::read(target)
+            .ok()
+            .and_then(|ini| url_icon_file(&String::from_utf8_lossy(&ini)))
+            .filter(|icon| Path::new(icon).exists())
+            .or_else(|| Path::new(target).exists().then(|| target.to_string())),
         _ if Path::new(target).exists() => Some(target.to_string()),
         _ => None,
     }
+}
+
+/// Своя иконка интернет-ярлыка (`.url`, так Steam делает ярлыки игр): строка `IconFile=`.
+/// Сам `.url` Проводник рисует крошечной картинкой в большой рамке, а файл иконки — как надо.
+fn url_icon_file(ini: &str) -> Option<String> {
+    ini.lines()
+        .find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            key.trim()
+                .eq_ignore_ascii_case("IconFile")
+                .then(|| value.trim())
+        })
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
 }
 
 /// Ключ кэша: источник плюс время изменения файла (у приложений из магазина его нет).
@@ -245,6 +264,21 @@ mod tests {
             Some("shell:AppsFolder\\MSTeams_8wekyb3d8bbwe!MSTeams")
         );
         assert_eq!(source(&ItemKind::File, "Z:\\нет\\такого.txt"), None);
+    }
+
+    #[test]
+    fn internet_shortcuts_point_to_their_icon_file() {
+        let ini = "[InternetShortcut]\r\nIDList=\r\nURL=steam://rungameid/413150\r\n\
+                   IconFile=C:\\Steam\\games\\sv.ico\r\nIconIndex=0\r\n";
+        assert_eq!(
+            url_icon_file(ini).as_deref(),
+            Some("C:\\Steam\\games\\sv.ico")
+        );
+        assert_eq!(
+            url_icon_file("[InternetShortcut]\nURL=https://ya.ru\n"),
+            None
+        );
+        assert_eq!(url_icon_file("IconFile=\n"), None);
     }
 
     #[test]

@@ -15,6 +15,11 @@ describe("itemFromPath", () => {
       kind: "app",
       title: "Steam",
     });
+    expect(itemFromPath("C:\\Users\\me\\Desktop\\Stardew Valley.url", false)).toMatchObject({
+      kind: "app",
+      title: "Stardew Valley",
+      meta: "Приложение",
+    });
     expect(itemFromPath("D:\\Work\\Plan.xlsx", false)).toMatchObject({
       kind: "file",
       title: "Plan.xlsx",

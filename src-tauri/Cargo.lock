@@ -4012,6 +4012,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-build",
+ "webview2-com",
  "window-vibrancy",
  "windows",
  "windows-core",
