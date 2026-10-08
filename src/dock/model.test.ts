@@ -223,3 +223,12 @@ describe("repairPins", () => {
     expect([...fixes]).toEqual([["steam", apps[0].id]]);
   });
 });
+
+describe("Explorer pin", () => {
+  it("owns explorer.exe windows that have no AUMID", () => {
+    const pins = [{ id: "explorer", title: "Проводник", target: "Microsoft.Windows.Explorer" }];
+    const { pinned, transient } = buildDock(pins, [win(1, { exe: "C:\\Windows\\explorer.exe" })]);
+    expect(pinned[0].windows.map((w) => w.hwnd)).toEqual([1]);
+    expect(transient).toEqual([]);
+  });
+});

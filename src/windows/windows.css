@@ -82,3 +82,15 @@
   --ws-surface: rgba(14, 30, 43, 0.94);
   --ws-surface-strong: rgba(11, 24, 35, 0.96);
 }
+
+/* Оболочка — не страница: текст и картинки не выделяются и не перетаскиваются браузером.
+   Выделение картинки иконки дока запускало перетаскивание браузера и срывало перестановку. */
+:root[data-window] {
+  user-select: none;
+}
+:root[data-window] img {
+  -webkit-user-drag: none;
+}
+:root[data-window] :is(input, textarea) {
+  user-select: text;
+}

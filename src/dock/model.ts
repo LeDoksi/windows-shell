@@ -19,11 +19,20 @@ export type DockEntry = {
 
 const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
 
+/**
+ * Приложения, у которых AUMID в «Пуске» есть, а у окон его нет и exe по AUMID не узнать:
+ * окна Проводника приходят только с explorer.exe.
+ */
+const exeOfAumid: Record<string, string> = {
+  "microsoft.windows.explorer": "\\explorer.exe",
+};
+
 /** Окно принадлежит закреплённому приложению: тот же AUMID или тот же exe. */
 function matchesPin(w: WindowInfo, pin: DockPin, target: AppTarget | undefined) {
   const t = norm(pin.target);
   if (w.aumid && norm(w.aumid) === t) return true;
   const exe = norm(w.exe);
+  if (exe !== "" && exeOfAumid[t] && exe.endsWith(exeOfAumid[t])) return true;
   return exe !== "" && (exe === t || exe === norm(target?.exe));
 }
 
