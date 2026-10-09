@@ -20,6 +20,9 @@ public sealed class App : Application, IXamlMetadataProvider
     [STAThread]
     public static void Main()
     {
+        Log.Write("---- запуск");
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Write($"ОШИБКА (домен): {e.ExceptionObject}");
+        TaskScheduler.UnobservedTaskException += (_, e) => Log.Error("задача", e.Exception);
         WinRT.ComWrappersSupport.InitializeComWrappers();
         // Второй экземпляр не нужен: два дока друг на друге.
         using var mutex = new Mutex(true, "WindowsShellNative.Prototype", out var first);
@@ -28,21 +31,37 @@ public sealed class App : Application, IXamlMetadataProvider
         {
             SynchronizationContext.SetSynchronizationContext(new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread()));
             _ = p;
-            new App();
+            var app = new App();
+            app.UnhandledException += (_, e) => { Log.Error("XAML", e.Exception); e.Handled = true; };
         });
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        Resources.MergedDictionaries.Add(new XamlControlsResources());
-        var queue = DispatcherQueue.GetForCurrentThread();
-        var config = PrototypeConfig.Load();
-        _tracker = new WindowTracker(queue);
-        var audio = new AudioService(queue);
-        var icons = new Icons(queue);
-        _tracker.Start();
-        _dock = new Dock.Dock(_tracker, audio, icons, config);
-        _dock.Show();
+        var step = "ресурсы";
+        try
+        {
+            Resources.MergedDictionaries.Add(new XamlControlsResources());
+            var queue = DispatcherQueue.GetForCurrentThread();
+            step = "конфиг";
+            var config = PrototypeConfig.Load();
+            step = "трекер окон";
+            _tracker = new WindowTracker(queue);
+            step = "звук";
+            var audio = new AudioService(queue);
+            var icons = new Icons(queue);
+            _tracker.Start();
+            step = "окна дока";
+            _dock = new Dock.Dock(_tracker, audio, icons, config);
+            step = "показ дока";
+            _dock.Show();
+            Log.Write("док показан");
+        }
+        catch (Exception e)
+        {
+            Log.Error(step, e);
+            throw;
+        }
     }
 
     public IXamlType GetXamlType(Type type) => _metadata.GetXamlType(type);
