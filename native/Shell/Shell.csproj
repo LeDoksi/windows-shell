@@ -11,6 +11,9 @@
     <UseWinUI>true</UseWinUI>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <WindowsPackageType>None</WindowsPackageType>
+    <!-- Без .xaml файлов PRI приложения не собирается, и XamlControlsResources не находит
+         themeresources.xaml. Этот флаг собирает WindowsShellNative.pri всегда. -->
+    <EnableMsixTooling>true</EnableMsixTooling>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SelfContained>true</SelfContained>
     <EnableDefaultPageItems>false</EnableDefaultPageItems>
