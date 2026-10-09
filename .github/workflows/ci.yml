@@ -46,3 +46,22 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.exe
             src-tauri/target/release/bundle/msi/*.msi
           if-no-files-found: error
+
+  native:
+    name: WinUI prototype
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish
+        run: dotnet publish native/Shell/Shell.csproj -c Release -r win-x64 -o native/publish
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-shell-native-${{ github.sha }}
+          path: native/publish
+          if-no-files-found: error
