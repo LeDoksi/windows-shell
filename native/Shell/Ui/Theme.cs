@@ -20,6 +20,7 @@ public static class Theme
     public static readonly Color Stroke = Color.FromArgb(0x18, 255, 255, 255);
     public static readonly Color Separator = Color.FromArgb(0x15, 255, 255, 255);
     public static readonly Color Card = Color.FromArgb(0x0D, 255, 255, 255);
+    public static readonly Color Selected = Color.FromArgb(0x14, 255, 255, 255);
     public static readonly Color Tooltip = Color.FromArgb(0xF0, 0x2B, 0x2B, 0x2B);
 
     public static readonly FontFamily Font = new("Segoe UI Variable Text, Segoe UI");

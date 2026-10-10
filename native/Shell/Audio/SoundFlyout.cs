@@ -16,7 +16,8 @@ public sealed class SoundFlyout : Popup
     readonly Icons _icons;
     readonly StackPanel _body = new() { Padding = new Thickness(16, 14, 16, 12), Spacing = 4 };
     readonly DispatcherQueueTimer _sessionsTimer;
-    bool _devicesOpen;
+    bool _appsOpen;
+    string? _shownDefault;
     bool _updating;
     Slider? _master;
     FontIcon? _masterIcon;
@@ -30,7 +31,13 @@ public sealed class SoundFlyout : Popup
         _audio = audio;
         _icons = icons;
         SetContent(_body);
-        _audio.Changed += () => { if (IsOpen) Refresh(); };
+        // Выход переключили снаружи (горячая клавиша, Параметры): список пересобирается.
+        _audio.Changed += () =>
+        {
+            if (!IsOpen) return;
+            if (_audio.DefaultId() != _shownDefault) { Build(); Layout(); }
+            else Refresh();
+        };
         _sessionsTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
         _sessionsTimer.Interval = TimeSpan.FromSeconds(1);
         // Новое приложение заиграло, пока окошко открыто, — появляется в списке.
@@ -47,7 +54,6 @@ public sealed class SoundFlyout : Popup
 
     public void Show(object anchor, Rect anchorPx)
     {
-        _devicesOpen = false;
         Build();
         Open(anchor, anchorPx);
         _sessionsTimer.Start();
@@ -103,67 +109,8 @@ public sealed class SoundFlyout : Popup
         var sessions = _audio.Sessions();
         _sessionKey = string.Join("|", sessions.Select(s => s.Pid));
 
-        // Заголовок и устройство вывода.
-        var devices = _audio.Devices();
-        var current = _audio.DefaultId();
-        var currentName = devices.FirstOrDefault(d => d.Id == current)?.Name ?? "Нет устройства вывода";
-        var deviceRow = new Button
-        {
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Background = Theme.Brush(Theme.Card),
-            BorderThickness = new Thickness(0),
-            Height = 44,
-            Padding = new Thickness(12, 0, 10, 0),
-            CornerRadius = new CornerRadius(6),
-        };
-        var dGrid = new Grid { ColumnSpacing = 10 };
-        dGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        dGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        dGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        dGrid.Children.Add(new FontIcon { Glyph = "", FontFamily = Theme.Icons, FontSize = 16 });
-        var dName = Label(currentName);
-        Grid.SetColumn(dName, 1);
-        dGrid.Children.Add(dName);
-        var chevron = new FontIcon { Glyph = _devicesOpen ? "" : "", FontFamily = Theme.Icons, FontSize = 12 };
-        Grid.SetColumn(chevron, 2);
-        dGrid.Children.Add(chevron);
-        deviceRow.Content = dGrid;
-        deviceRow.Click += (_, _) => { _devicesOpen = !_devicesOpen; Build(); Layout(); };
-        _body.Children.Add(deviceRow);
-
-        if (_devicesOpen)
-        {
-            foreach (var d in devices)
-            {
-                var item = new Button
-                {
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                    HorizontalContentAlignment = HorizontalAlignment.Left,
-                    Background = Theme.Brush(Microsoft.UI.Colors.Transparent),
-                    BorderThickness = new Thickness(0),
-                    Height = 36,
-                    Padding = new Thickness(12, 0, 10, 0),
-                };
-                var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-                row.Children.Add(new FontIcon
-                {
-                    Glyph = d.Id == current ? "" : "",
-                    FontFamily = Theme.Icons,
-                    FontSize = 14,
-                    Width = 16,
-                    Foreground = Theme.Brush(Theme.Accent),
-                });
-                row.Children.Add(Label(d.Name));
-                item.Content = row;
-                var id = d.Id;
-                item.Click += (_, _) => { _audio.SetDefault(id); _devicesOpen = false; Build(); Layout(); };
-                _body.Children.Add(item);
-            }
-        }
-
-        // Общая громкость.
-        var master = new Grid { Height = 52, ColumnSpacing = 8, Margin = new Thickness(0, 6, 0, 0) };
+        // Общая громкость — первой: ей пользуются чаще всего.
+        var master = new Grid { Height = 52, ColumnSpacing = 8 };
         master.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         master.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         master.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
@@ -181,12 +128,85 @@ public sealed class SoundFlyout : Popup
         master.Children.Add(_masterValue);
         _body.Children.Add(master);
 
-        // Приложения.
+        // Устройства вывода — сразу списком кнопок: переключение одним кликом.
+        var devices = _audio.Devices();
+        var current = _audio.DefaultId();
+        _shownDefault = current;
+        var outHead = Label("Вывод звука", 12, secondary: true);
+        outHead.Margin = new Thickness(4, 6, 0, 2);
+        _body.Children.Add(outHead);
+        if (devices.Count == 0) _body.Children.Add(Label("Нет устройства вывода", 13, secondary: true));
+        foreach (var d in devices)
+        {
+            var active = d.Id == current;
+            var item = new Button
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Background = Theme.Brush(active ? Theme.Selected : Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(6),
+                Height = 40,
+                Padding = new Thickness(12, 0, 10, 0),
+            };
+            var row = new Grid { ColumnSpacing = 10 };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(18) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.Children.Add(new FontIcon
+            {
+                Glyph = "\uE7F5",
+                FontFamily = Theme.Icons,
+                FontSize = 16,
+                Foreground = Theme.Brush(active ? Theme.Accent : Theme.TextSecondary),
+            });
+            var name = Label(d.Name);
+            Grid.SetColumn(name, 1);
+            row.Children.Add(name);
+            if (active)
+            {
+                // Полоска акцента слева, как у выбранного пункта в Windows 11.
+                var bar = new Microsoft.UI.Xaml.Shapes.Rectangle
+                {
+                    Width = 3, Height = 16, RadiusX = 1.5, RadiusY = 1.5,
+                    Fill = Theme.Brush(Theme.Accent),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    Margin = new Thickness(-10, 0, 0, 0),
+                };
+                row.Children.Add(bar);
+            }
+            item.Content = row;
+            var id = d.Id;
+            item.Click += (_, _) => { if (id != _audio.DefaultId()) { _audio.SetDefault(id); Build(); Layout(); } };
+            _body.Children.Add(item);
+        }
+
+        // Громкость приложений нужна редко: свёрнута, раскрывается по клику.
         if (sessions.Count > 0)
         {
-            var head = Label("Приложения", 12, secondary: true);
-            head.Margin = new Thickness(4, 8, 0, 2);
-            _body.Children.Add(head);
+            var toggle = new Button
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Background = Theme.Brush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(6),
+                Height = 36,
+                Margin = new Thickness(0, 6, 0, 0),
+                Padding = new Thickness(4, 0, 10, 0),
+            };
+            var tGrid = new Grid();
+            tGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            tGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            tGrid.Children.Add(Label($"Громкость приложений ({sessions.Count})", 12, secondary: true));
+            var chevron = new FontIcon { Glyph = _appsOpen ? "\uE70E" : "\uE70D", FontFamily = Theme.Icons, FontSize = 11, Foreground = Theme.Brush(Theme.TextSecondary) };
+            Grid.SetColumn(chevron, 1);
+            tGrid.Children.Add(chevron);
+            toggle.Content = tGrid;
+            toggle.Click += (_, _) => { _appsOpen = !_appsOpen; Build(); Layout(); };
+            _body.Children.Add(toggle);
+        }
+        if (_appsOpen)
+        {
             foreach (var s in sessions)
             {
                 var row = new Grid { Height = 44, ColumnSpacing = 10 };
@@ -198,10 +218,10 @@ public sealed class SoundFlyout : Popup
                 if (s.Exe != null)
                 {
                     var img = new Image { Width = 22, Height = 22 };
-                    _icons.Get(s.Exe, bmp => img.Source = bmp);
+                    _icons.Get(s.Exe, (int)Math.Ceiling(22 * Win.Scale), bmp => img.Source = bmp);
                     icon = img;
                 }
-                else icon = new FontIcon { Glyph = "", FontFamily = Theme.Icons, FontSize = 16 };
+                else icon = new FontIcon { Glyph = "\uE8D6", FontFamily = Theme.Icons, FontSize = 16 };
                 row.Children.Add(icon);
                 var name = Label(s.Name, 13);
                 Grid.SetColumn(name, 1);

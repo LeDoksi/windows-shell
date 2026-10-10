@@ -7,24 +7,27 @@ using static WindowsShell.Native.Win32;
 
 namespace WindowsShell.Apps;
 
-/// Иконки 256 px от Проводника (IShellItemImageFactory), как `icons.rs`. Достаются в фоне,
-/// картинка для XAML создаётся в потоке интерфейса. Кэш в памяти на всё время работы.
+/// Иконки от Проводника (IShellItemImageFactory), как `icons.rs`. Достаются в фоне ровно того
+/// размера в пикселях, в котором их покажут: Проводник берёт подходящий кадр иконки и уменьшает
+/// его качественно, а XAML при уменьшении 256 px в 3–5 раз даёт «лесенку» по краям.
+/// Картинка для XAML создаётся в потоке интерфейса. Кэш в памяти на всё время работы.
 public sealed class Icons(DispatcherQueue queue)
 {
-    public const int Size = 256;
-
     readonly Dictionary<string, WriteableBitmap?> _cache = new(StringComparer.OrdinalIgnoreCase);
     readonly Dictionary<string, List<Action<WriteableBitmap?>>> _waiting = new(StringComparer.OrdinalIgnoreCase);
 
-    /// Иконка по имени для оболочки (путь или `shell:AppsFolder\…`). Ответ всегда в потоке интерфейса.
-    public void Get(string source, Action<WriteableBitmap?> done)
+    /// Иконка по имени для оболочки (путь или `shell:AppsFolder\…`) размером `px` физических
+    /// пикселей. Ответ всегда в потоке интерфейса.
+    public void Get(string source, int px, Action<WriteableBitmap?> done)
     {
-        if (_cache.TryGetValue(source, out var ready)) { done(ready); return; }
-        if (_waiting.TryGetValue(source, out var list)) { list.Add(done); return; }
-        _waiting[source] = [done];
+        px = Math.Clamp(px, 16, 256);
+        var key = $"{px}|{source}";
+        if (_cache.TryGetValue(key, out var ready)) { done(ready); return; }
+        if (_waiting.TryGetValue(key, out var list)) { list.Add(done); return; }
+        _waiting[key] = [done];
         var t = new Thread(() =>
         {
-            var pixels = Render(source);
+            var pixels = Render(source, px);
             queue.TryEnqueue(() =>
             {
                 WriteableBitmap? bmp = null;
@@ -34,8 +37,8 @@ public sealed class Icons(DispatcherQueue queue)
                     using (var s = bmp.PixelBuffer.AsStream()) s.Write(px.Data, 0, px.Data.Length);
                     bmp.Invalidate();
                 }
-                _cache[source] = bmp;
-                if (_waiting.Remove(source, out var callbacks)) foreach (var cb in callbacks) cb(bmp);
+                _cache[key] = bmp;
+                if (_waiting.Remove(key, out var callbacks)) foreach (var cb in callbacks) cb(bmp);
             });
         }) { IsBackground = true };
         // Оболочке Windows нужен STA.
@@ -45,7 +48,7 @@ public sealed class Icons(DispatcherQueue queue)
 
     static Guid IID_Factory = typeof(IShellItemImageFactory).GUID;
 
-    static (int W, int H, byte[] Data)? Render(string source)
+    static (int W, int H, byte[] Data)? Render(string source, int px)
     {
         try
         {
@@ -56,7 +59,7 @@ public sealed class Icons(DispatcherQueue queue)
                 // Некоторые приложения сначала отвечают E_PENDING: Проводник ещё достаёт картинку.
                 for (var tries = 0; tries < 20; tries++)
                 {
-                    var hr = factory.GetImage(new SIZE { cx = Size, cy = Size }, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK, out bitmap);
+                    var hr = factory.GetImage(new SIZE { cx = px, cy = px }, SIIGBF_ICONONLY, out bitmap);
                     if (hr == E_PENDING) { Thread.Sleep(100); continue; }
                     if (hr != 0) return null;
                     break;

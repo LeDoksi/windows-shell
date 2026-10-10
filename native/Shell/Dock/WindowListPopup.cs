@@ -67,7 +67,7 @@ public sealed class WindowListPopup : Popup
             head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24) });
             var icon = new Image { Width = 16, Height = 16 };
-            _icons.Get(iconSource, bmp => icon.Source = bmp);
+            _icons.Get(iconSource, (int)Math.Ceiling(16 * Win.Scale), bmp => icon.Source = bmp);
             head.Children.Add(icon);
             var title = new TextBlock
             {

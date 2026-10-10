@@ -336,11 +336,13 @@ public sealed class Dock
             img.Source = bmp;
             if (item.Placeholder != null) item.Placeholder.Visibility = bmp is null ? Visibility.Visible : Visibility.Collapsed;
         }
-        _icons.Get(source, bmp =>
+        // Иконка в размере увеличенной (1,6×): так она чёткая и в покое, и под курсором.
+        var px = (int)Math.Ceiling(ElementSize * _scale);
+        _icons.Get(source, px, bmp =>
         {
             if (item.IconSource != source) return;
             if (bmp != null || fallback is null || string.Equals(fallback, source, StringComparison.OrdinalIgnoreCase)) { Apply(bmp); return; }
-            _icons.Get(fallback, alt => { if (item.IconSource == source) Apply(alt); });
+            _icons.Get(fallback, px, alt => { if (item.IconSource == source) Apply(alt); });
         });
     }
 
