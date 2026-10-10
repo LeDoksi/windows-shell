@@ -371,9 +371,12 @@ public sealed class Dock : IBar, IDropZone
     void PlaceWindows()
     {
         if (_reveal <= 0) return;
-        _strip.Place(_stripX, _stripY + _slide, _stripW, _stripH);
+        // Порядок важен: каждый Place поднимает окно наверх, поэтому подложку ставим первой,
+        // а окно с иконками вторым, иначе стекло закрывает иконки и ловит клики.
         _pillPx = (PillScreenX(), _stripY + _slide + Px(Headroom), Px(PillWidth()));
         _pill.Place(_pillPx.X, _pillPx.Y, _pillPx.W, Px(PillH));
+        _strip.Place(_stripX, _stripY + _slide, _stripW, _stripH);
+        if (Popups.Current is { IsOpen: true } p) SetWindowPos(p.Hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         if (!_hover) SetRegion(pill: true);
     }
 
