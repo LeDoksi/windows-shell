@@ -524,9 +524,7 @@ public sealed class Dock
         }
         else if (_regionIsPill)
         {
-            // Всё окно, кроме верхних 2 px: там окно WinUI без заголовка рисует тонкую белую
-            // полоску рамки, и у прозрачного окна во всю ширину она видна поперёк экрана.
-            SetWindowRgn(_strip.Hwnd, CreateRectRgn(0, Px(2), _stripW, _stripH), true);
+            SetWindowRgn(_strip.Hwnd, IntPtr.Zero, true);
             _regionIsPill = false;
         }
     }

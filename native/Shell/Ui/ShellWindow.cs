@@ -39,6 +39,7 @@ public sealed class ShellWindow
         AppWindow.IsShownInSwitchers = false;
 
         AddExStyle(Hwnd, WS_EX_TOOLWINDOW | (noActivate ? WS_EX_NOACTIVATE : 0));
+        RemoveFrame(Hwnd);
         SetDark(Hwnd);
         if (rounded)
         {

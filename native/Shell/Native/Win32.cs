@@ -91,7 +91,7 @@ internal static partial class Win32
     public const uint WM_SYSCOMMAND = 0x0112;
     public const int SC_CLOSE = 0xF060;
     public static readonly IntPtr HWND_TOPMOST = new(-1);
-    public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_NOOWNERZORDER = 0x200, SWP_ASYNCWINDOWPOS = 0x4000;
+    public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_FRAMECHANGED = 0x20, SWP_NOOWNERZORDER = 0x200, SWP_ASYNCWINDOWPOS = 0x4000;
     public const uint MONITOR_DEFAULTTONEAREST = 2, MONITOR_DEFAULTTOPRIMARY = 1;
     public const uint EVENT_SYSTEM_FOREGROUND = 0x3, EVENT_SYSTEM_MINIMIZESTART = 0x16, EVENT_SYSTEM_MINIMIZEEND = 0x17;
     public const uint EVENT_OBJECT_CREATE = 0x8000, EVENT_OBJECT_DESTROY = 0x8001, EVENT_OBJECT_SHOW = 0x8002, EVENT_OBJECT_HIDE = 0x8003, EVENT_OBJECT_NAMECHANGE = 0x800C;
@@ -203,6 +203,17 @@ internal static partial class Win32
     }
 
     public static long ExStyle(IntPtr h) => (long)GetWindowLongPtrW(h, GWL_EXSTYLE);
+
+    /// Убрать остатки рамки (WS_CAPTION = BORDER | DLGFRAME, WS_THICKFRAME), которые окно WinUI
+    /// без заголовка оставляет: из-за них по краю окна шла белая полоска в 1–2 px. Остальные
+    /// биты стиля не трогаем: полная замена стиля ломала стекло.
+    public static void RemoveFrame(IntPtr h)
+    {
+        const long WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000;
+        var style = (long)GetWindowLongPtrW(h, GWL_STYLE) & ~(WS_CAPTION | WS_THICKFRAME);
+        SetWindowLongPtrW(h, GWL_STYLE, new IntPtr(style));
+        SetWindowPos(h, IntPtr.Zero, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
 
     public static void AddExStyle(IntPtr h, long add, long remove = 0)
     {
