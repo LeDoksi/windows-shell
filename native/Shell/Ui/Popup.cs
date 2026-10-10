@@ -213,8 +213,6 @@ public abstract class Popup
             }
         }
         Win.Place(x, y, w, h);
-        // Окно переехало на монитор с другим масштабом: WinUI пересчитал своё, ставим ещё раз.
-        if (Math.Abs(Win.Scale - scale) > 0.01) Win.Place(x, y, w, h);
     }
 
     /// Появление 150 мс: лёгкий выезд на 8 px и проявление (правило 0.8).

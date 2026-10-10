@@ -103,9 +103,19 @@ public sealed class ShellWindow
     public double Scale => GetDpiForWindow(Hwnd) is var dpi and > 0 ? dpi / 96.0 : 1.0;
 
     /// Положение и размер в физических пикселях экрана.
+    /// Если окно при этом переезжает на монитор с другим масштабом, WinUI подгоняет его размер
+    /// под новый масштаб (иногда уже после SetWindowPos), поэтому ставим ещё раз сразу и после подгонки.
     public void Place(int x, int y, int w, int h)
     {
+        var before = Scale;
         SetWindowPos(Hwnd, HWND_TOPMOST, x, y, Math.Max(1, w), Math.Max(1, h), SWP_NOACTIVATE);
+        if (Math.Abs(Scale - before) < 0.001) return;
+        SetWindowPos(Hwnd, HWND_TOPMOST, x, y, Math.Max(1, w), Math.Max(1, h), SWP_NOACTIVATE);
+        Window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (GetWindowRect(Hwnd, out var r) && (r.Left != x || r.Top != y || r.Right - r.Left != Math.Max(1, w) || r.Bottom - r.Top != Math.Max(1, h)))
+                SetWindowPos(Hwnd, IntPtr.Zero, x, y, Math.Max(1, w), Math.Max(1, h), SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+        });
     }
 
     /// Быстрое перемещение без смены порядка окон (каждый кадр анимации).
