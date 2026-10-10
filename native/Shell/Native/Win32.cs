@@ -204,14 +204,21 @@ internal static partial class Win32
 
     public static long ExStyle(IntPtr h) => (long)GetWindowLongPtrW(h, GWL_EXSTYLE);
 
-    /// Убрать остатки рамки (WS_CAPTION = BORDER | DLGFRAME, WS_THICKFRAME), которые окно WinUI
-    /// без заголовка оставляет: из-за них по краю окна шла белая полоска в 1–2 px. Остальные
-    /// биты стиля не трогаем: полная замена стиля ломала стекло.
+    public delegate IntPtr SubclassProc(IntPtr h, uint msg, IntPtr w, IntPtr l, UIntPtr id, UIntPtr data);
+    [DllImport("comctl32.dll")] static extern bool SetWindowSubclass(IntPtr h, SubclassProc proc, UIntPtr id, UIntPtr data);
+    [DllImport("comctl32.dll")] static extern IntPtr DefSubclassProc(IntPtr h, uint msg, IntPtr w, IntPtr l);
+    const uint WM_NCCALCSIZE = 0x0083;
+
+    // Делегат живёт всё время работы программы: окно зовёт его до самого закрытия.
+    static readonly SubclassProc NoFrameProc = (h, msg, w, l, _, _) =>
+        msg == WM_NCCALCSIZE && w != IntPtr.Zero ? IntPtr.Zero : DefSubclassProc(h, msg, w, l);
+
+    /// Окно без рамки. WinUI без заголовка оставляет WS_DLGFRAME и сам возвращает его после
+    /// каждого показа, а рамка в 3 px рисуется белой полоской по краю окна. Поэтому не трогаем
+    /// стиль, а говорим Windows, что рамки нет: вся площадь окна — содержимое.
     public static void RemoveFrame(IntPtr h)
     {
-        const long WS_CAPTION = 0x00C00000, WS_THICKFRAME = 0x00040000;
-        var style = (long)GetWindowLongPtrW(h, GWL_STYLE) & ~(WS_CAPTION | WS_THICKFRAME);
-        SetWindowLongPtrW(h, GWL_STYLE, new IntPtr(style));
+        SetWindowSubclass(h, NoFrameProc, (UIntPtr)1, UIntPtr.Zero);
         SetWindowPos(h, IntPtr.Zero, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     }
 
