@@ -47,8 +47,9 @@ public sealed class AlwaysActiveAcrylic(bool dock = false) : SystemBackdrop
             Kind = DesktopAcrylicKind.Base,
             // Док чуть плотнее меню: иконки читаются на любом фоне.
             TintColor = dock ? Color.FromArgb(255, 0x1C, 0x1C, 0x1C) : Color.FromArgb(255, 0x2C, 0x2C, 0x2C),
-            TintOpacity = dock ? 0.55f : 0.15f,
-            LuminosityOpacity = dock ? 0.85f : 0.96f,
+            // Прозрачнее штатного (0,96): за меню и окошком звука виден размытый фон.
+            TintOpacity = dock ? 0.45f : 0.2f,
+            LuminosityOpacity = dock ? 0.7f : 0.72f,
             FallbackColor = Color.FromArgb(255, 0x2C, 0x2C, 0x2C),
         };
         _controller.AddSystemBackdropTarget(target);

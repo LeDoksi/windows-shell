@@ -91,7 +91,8 @@ internal static partial class Win32
     public const uint WM_SYSCOMMAND = 0x0112;
     public const int SC_CLOSE = 0xF060;
     public static readonly IntPtr HWND_TOPMOST = new(-1);
-    public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_NOOWNERZORDER = 0x200, SWP_ASYNCWINDOWPOS = 0x4000;
+    public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_FRAMECHANGED = 0x20, SWP_NOOWNERZORDER = 0x200, SWP_ASYNCWINDOWPOS = 0x4000;
+    public const long WS_POPUP = 0x80000000, WS_CLIPCHILDREN = 0x02000000, WS_CLIPSIBLINGS = 0x04000000;
     public const uint MONITOR_DEFAULTTONEAREST = 2, MONITOR_DEFAULTTOPRIMARY = 1;
     public const uint EVENT_SYSTEM_FOREGROUND = 0x3, EVENT_SYSTEM_MINIMIZESTART = 0x16, EVENT_SYSTEM_MINIMIZEEND = 0x17;
     public const uint EVENT_OBJECT_CREATE = 0x8000, EVENT_OBJECT_DESTROY = 0x8001, EVENT_OBJECT_SHOW = 0x8002, EVENT_OBJECT_HIDE = 0x8003, EVENT_OBJECT_NAMECHANGE = 0x800C;
@@ -203,6 +204,15 @@ internal static partial class Win32
     }
 
     public static long ExStyle(IntPtr h) => (long)GetWindowLongPtrW(h, GWL_EXSTYLE);
+
+    /// Окно без рамки вообще: у окна WinUI без заголовка остаётся тонкая белая полоска рамки
+    /// сверху, а у прозрачного окна она видна через весь экран.
+    public static void SetPopupStyle(IntPtr h)
+    {
+        var visible = (long)GetWindowLongPtrW(h, GWL_STYLE) & 0x10000000;
+        SetWindowLongPtrW(h, GWL_STYLE, new IntPtr(WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | visible));
+        SetWindowPos(h, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
 
     public static void AddExStyle(IntPtr h, long add, long remove = 0)
     {

@@ -77,6 +77,8 @@ public sealed class Dock
         public bool IsStart;
         public required Grid Visual;
         public required Image? Image;
+        /// Значок-заглушка, пока у программы нет своей иконки (не найдена, не отдала иконку).
+        public FontIcon? Placeholder;
         public required Border Dot;
         public double Base, BaseV, Size, SizeV;
         public bool Removing;
@@ -277,11 +279,19 @@ public sealed class Dock
     Item CreateItem(string key)
     {
         var image = new Image { Width = ElementSize, Height = ElementSize, Stretch = Stretch.Uniform };
-        var visual = new Grid { Width = ElementSize, Height = ElementSize, Children = { image } };
+        var placeholder = new FontIcon
+        {
+            Glyph = "\uECAA",
+            FontFamily = Theme.Icons,
+            FontSize = ElementSize * 0.6,
+            Foreground = Theme.Brush(Theme.TextSecondary),
+            Visibility = Visibility.Collapsed,
+        };
+        var visual = new Grid { Width = ElementSize, Height = ElementSize, Children = { placeholder, image } };
         var dot = new Border { Width = 5, Height = 5, CornerRadius = new CornerRadius(2.5), Background = Theme.Brush(Theme.Text), Opacity = 0 };
         _canvas.Children.Insert(0, dot);
         _canvas.Children.Insert(0, visual);
-        return new Item { Key = key, Visual = visual, Image = image, Dot = dot };
+        return new Item { Key = key, Visual = visual, Image = image, Dot = dot, Placeholder = placeholder };
     }
 
     Item CreateStart()
@@ -321,11 +331,16 @@ public sealed class Dock
         if (item.IconSource == source || item.Image is null) return;
         item.IconSource = source;
         var img = item.Image;
+        void Apply(ImageSource? bmp)
+        {
+            img.Source = bmp;
+            if (item.Placeholder != null) item.Placeholder.Visibility = bmp is null ? Visibility.Visible : Visibility.Collapsed;
+        }
         _icons.Get(source, bmp =>
         {
             if (item.IconSource != source) return;
-            if (bmp != null || fallback is null || string.Equals(fallback, source, StringComparison.OrdinalIgnoreCase)) { img.Source = bmp; return; }
-            _icons.Get(fallback, alt => { if (item.IconSource == source) img.Source = alt; });
+            if (bmp != null || fallback is null || string.Equals(fallback, source, StringComparison.OrdinalIgnoreCase)) { Apply(bmp); return; }
+            _icons.Get(fallback, alt => { if (item.IconSource == source) Apply(alt); });
         });
     }
 
@@ -779,8 +794,21 @@ public sealed class Dock
         new() { Text = "Параметры", Glyph = "", Invoke = () => Launcher.Open("ms-settings:") },
         new() { Text = "Проводник", Glyph = "", Invoke = () => Launcher.Open("explorer.exe") },
         MenuItem.Sep,
-        new() { Text = "Выйти из прототипа", Glyph = "", Invoke = () => Application.Current.Exit() },
+        new() { Text = "Выйти из прототипа", Glyph = "", Invoke = Quit },
     ];
+
+    /// Выход: окна дока убираются сразу, процесс завершается (Application.Exit оставлял
+    /// окно-полосу на экране и процесс живым).
+    void Quit()
+    {
+        Popups.CloseAll();
+        _list.Close(restoreFocus: false);
+        CompositionTarget.Rendering -= OnRendering;
+        _pill.Hide();
+        _strip.Hide();
+        Log.Write("выход");
+        Environment.Exit(0);
+    }
 
     List<MenuItem> SoundMenu()
     {

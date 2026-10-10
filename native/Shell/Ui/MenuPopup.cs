@@ -58,6 +58,8 @@ public sealed class MenuPopup : Popup
         _graceTimer.Tick += (_, _) =>
         {
             if (_submenu is { IsOpen: true } && _submenu.ContainsCursor()) return;
+            // Курсор вне меню (срезал угол по пути к подменю): подменю остаётся открытым.
+            if (!ContainsCursor()) { if (_submenu is { IsOpen: true }) SetHighlight(_submenuOf); return; }
             if (_highlight != _submenuOf) CloseSubmenu();
             if (_highlight >= 0 && _items[_highlight].Children != null) OpenSubmenu(_highlight, keyboard: false);
         };
@@ -65,6 +67,13 @@ public sealed class MenuPopup : Popup
         {
             if (_submenu is { IsOpen: true }) return;
             SetHighlight(-1);
+        };
+        // Курсор дошёл до подменю: в родительском меню подсвечен пункт, который его открыл.
+        Win.Root.PointerEntered += (_, _) =>
+        {
+            if (_parent is null || _parent._submenuOf < 0) return;
+            _parent._graceTimer.Stop();
+            _parent.SetHighlight(_parent._submenuOf);
         };
     }
 

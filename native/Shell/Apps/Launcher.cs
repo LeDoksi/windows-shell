@@ -66,7 +66,8 @@ public static class Launcher
     /// Запуск. `admin` — от имени администратора (Windows спросит разрешение).
     public static bool Launch(string target, bool admin = false)
     {
-        var file = ShellName(target);
+        // Через AUMID Проводник только показывает уже открытое окно; explorer.exe открывает новое.
+        var file = string.Equals(target, "Microsoft.Windows.Explorer", StringComparison.OrdinalIgnoreCase) ? "explorer.exe" : ShellName(target);
         var info = new SHELLEXECUTEINFO
         {
             cbSize = Marshal.SizeOf<SHELLEXECUTEINFO>(),

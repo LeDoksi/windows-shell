@@ -39,6 +39,20 @@ public static partial class DockModel
         return exe == t || exe == Norm(target.Exe);
     }
 
+    static readonly string WindowsDir = Norm(Environment.GetFolderPath(Environment.SpecialFolder.Windows));
+
+    /// Окно из папки закреплённой программы — её же помощник (у Steam окна рисует
+    /// steamwebhelper.exe из Steam\bin). Системную папку Windows не считаем: там всё подряд.
+    static bool InPinFolder(WindowInfo w, AppTarget target)
+    {
+        var exe = Norm(w.Exe);
+        var dir = Norm(Path.GetDirectoryName(target.Exe ?? ""));
+        if (exe == "" || dir.Length < 4 || PackagedExe().IsMatch(exe)) return false;
+        if (WindowsDir.Length > 0 && (dir == WindowsDir || dir.StartsWith(WindowsDir + "\\"))) return false;
+        if (Path.GetDirectoryName(dir) is not { Length: > 3 }) return false;
+        return exe.StartsWith(dir + "\\");
+    }
+
     public static string AppKey(WindowInfo w) =>
         Norm(w.Aumid) is { Length: > 0 } a ? a : Norm(w.Exe) is { Length: > 0 } e ? e : $"hwnd:{w.Hwnd}";
 
@@ -60,14 +74,17 @@ public static partial class DockModel
     {
         var targets = pins.ToDictionary(p => p.Id, p => Launcher.Resolve(p.Target));
         var owner = new Dictionary<IntPtr, string>();
-        foreach (var pass in new[] { "aumid", "exe" })
+        foreach (var pass in new[] { "aumid", "exe", "folder" })
         {
             foreach (var w in windows)
             {
                 if (owner.ContainsKey(w.Hwnd)) continue;
-                var pin = pins.FirstOrDefault(p => pass == "aumid"
-                    ? w.Aumid != null && Norm(w.Aumid) == Norm(p.Target)
-                    : MatchesPin(w, p, targets[p.Id]));
+                var pin = pins.FirstOrDefault(p => pass switch
+                {
+                    "aumid" => w.Aumid != null && Norm(w.Aumid) == Norm(p.Target),
+                    "exe" => MatchesPin(w, p, targets[p.Id]),
+                    _ => InPinFolder(w, targets[p.Id]),
+                });
                 if (pin != null) owner[w.Hwnd] = pin.Id;
             }
         }
