@@ -6,27 +6,33 @@ using Microsoft.UI.Xaml.XamlTypeInfo;
 using WindowsShell.Apps;
 using WindowsShell.Audio;
 using WindowsShell.Config;
+using WindowsShell.Media;
+using WindowsShell.Native;
 
 namespace WindowsShell;
 
-/// Прототип оболочки на WinUI 3 (WSH-E13): док с увеличением, родное меню, окошко звука.
-/// Интерфейс собран кодом, без .xaml, поэтому метаданные контролов берём у WinUI напрямую.
+/// Оболочка на WinUI 3 (WSH-E14): док и верхняя панель на каждом мониторе, меню и окошки
+/// со стеклом, виджеты. Интерфейс собран кодом, без .xaml, поэтому метаданные контролов
+/// берём у WinUI напрямую.
 public sealed class App : Application, IXamlMetadataProvider
 {
     readonly XamlControlsXamlMetaDataProvider _metadata = new();
-    WindowTracker? _tracker;
-    Dock.Dock? _dock;
+    ShellHost? _host;
 
     [STAThread]
-    public static void Main()
+    public static void Main(string[] args)
     {
         Log.Write("---- запуск");
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Write($"ОШИБКА (домен): {e.ExceptionObject}");
         TaskScheduler.UnobservedTaskException += (_, e) => Log.Error("задача", e.Exception);
         WinRT.ComWrappersSupport.InitializeComWrappers();
-        // Второй экземпляр не нужен: два дока друг на друге.
-        using var mutex = new Mutex(true, "WindowsShellNative.Prototype", out var first);
-        if (!first) return;
+        // Второй экземпляр не нужен: два дока друг на друге. После «Перезапустить» ждём,
+        // пока прежний процесс закончит выход.
+        using var mutex = new Mutex(false, "WindowsShellNative.Shell");
+        bool owned;
+        try { owned = mutex.WaitOne(args.Contains("--restart") ? 10_000 : 0); }
+        catch (AbandonedMutexException) { owned = true; }
+        if (!owned) return;
         Start(p =>
         {
             SynchronizationContext.SetSynchronizationContext(new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread()));
@@ -44,18 +50,32 @@ public sealed class App : Application, IXamlMetadataProvider
             Resources.MergedDictionaries.Add(new XamlControlsResources());
             var queue = DispatcherQueue.GetForCurrentThread();
             step = "конфиг";
-            var config = PrototypeConfig.Load();
+            var config = ShellConfig.Load();
+            step = "окно сообщений";
+            var messages = new MessageWindow();
+            var monitors = new Monitors(queue, messages);
             step = "трекер окон";
-            _tracker = new WindowTracker(queue);
+            var tracker = new WindowTracker(queue);
             step = "звук";
             var audio = new AudioService(queue);
-            var icons = new Icons(queue);
-            _tracker.Start();
-            step = "окна дока";
-            _dock = new Dock.Dock(_tracker, audio, icons, config);
-            step = "показ дока";
-            _dock.Show();
-            Log.Write("док показан");
+            var services = new Services
+            {
+                Queue = queue,
+                Config = config,
+                Messages = messages,
+                Monitors = monitors,
+                Bars = new Ui.Bars(queue, monitors),
+                Tracker = tracker,
+                Audio = audio,
+                Media = new MediaService(queue),
+                Icons = new Icons(queue),
+            };
+            Ui.Popup.RestoreForeground = tracker.RestoreForeground;
+            tracker.Start();
+            step = "док и панель";
+            _host = new ShellHost(services);
+            _host.Start();
+            Log.Write($"оболочка запущена: мониторов {monitors.All.Count}");
         }
         catch (Exception e)
         {

@@ -4,7 +4,7 @@ using System.Text;
 namespace WindowsShell.Native;
 
 /// Вызовы Windows, которые нужны прототипу. Только то, чем пользуемся.
-internal static partial class Win32
+public static partial class Win32
 {
     // ---------- user32: окна ----------
 

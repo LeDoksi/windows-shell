@@ -6,32 +6,30 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
 using WindowsShell.Apps;
-using WindowsShell.Audio;
 using WindowsShell.Config;
 using WindowsShell.Native;
 using WindowsShell.Ui;
-using WinUIEx;
 using static WindowsShell.Native.Win32;
 
 namespace WindowsShell.Dock;
 
-/// Док (раздел 1): кнопка Пуска, закреплённые и запущенные приложения, разделитель и хвост
-/// (звук, часы). Два окна: снизу таблетка с настоящим стеклом, сверху прозрачное окно с
-/// иконками. Увеличение волной считается каждый кадр и двигает только визуалы (без раскладки).
-public sealed class Dock
+/// Док (раздел 1) на одном мониторе: кнопка Пуска, закреплённые и запущенные приложения,
+/// разделитель и хвост (звук и часы на мониторе хвоста, на остальных только часы). Два окна:
+/// снизу таблетка с настоящим стеклом, сверху прозрачное окно с иконками. Увеличение волной,
+/// перетаскивание и выезд считаются каждый кадр и двигают только визуалы (без раскладки).
+public sealed class Dock : IBar, IDropZone
 {
     // Размеры в DIP.
     const double Icon = 48, Gap = 6, Pad = 10, TopPad = 9, PillH = 68, Headroom = 96, Bottom = 8;
     const double MaxScale = 1.6, Reach = 3.0, ElementSize = Icon * MaxScale;
     const double SepW = 21, SoundW = 40, ClockW = 74, TailGap = 2;
-    const double TailW = SepW + SoundW + TailGap + ClockW;
+    /// Потянул иконку выше таблетки на столько — «Убрать».
+    const double RemoveDistance = 80;
 
-    readonly WindowTracker _tracker;
-    readonly AudioService _audio;
-    readonly Icons _icons;
-    readonly PrototypeConfig _config;
+    readonly Services _s;
     readonly ShellWindow _pill;
     readonly ShellWindow _strip;
     readonly Canvas _canvas = new();
@@ -44,23 +42,29 @@ public sealed class Dock
     readonly TextBlock _date;
     readonly Border _tooltip;
     readonly TextBlock _tooltipText;
-    readonly MenuPopup _menu = new();
-    readonly SoundFlyout _soundFlyout;
-    readonly WindowListPopup _list;
+    readonly Border _removeLabel;
     readonly DispatcherQueueTimer _hoverTimer;
     readonly DispatcherQueueTimer _listCloseTimer;
     readonly DispatcherQueueTimer _clockTimer;
     readonly DispatcherQueueTimer _volumeTipTimer;
+    readonly DispatcherQueueTimer _springLoad;
 
-    // Положение окна-полосы на экране (физические пиксели) и масштаб монитора.
+    Screen _screen;
+    bool _fullTail;
+    bool _showSound;
+
+    // Положение окна-полосы на экране (физические пиксели), масштаб монитора и выезд.
     int _stripX, _stripY, _stripW, _stripH;
     double _scale = 1, _widthDip;
+    int _slide;
+    double _reveal;
+    bool _windowsShown;
 
     bool _hover;
     double _cursorX;
     bool _animating;
     TimeSpan _lastFrame;
-    (int X, int W) _pillPx = (-1, -1);
+    (int X, int Y, int W) _pillPx = (-1, -1, -1);
     bool _regionIsPill;
 
     object? _hovered;
@@ -69,6 +73,23 @@ public sealed class Dock
     long _lastLeftClick;
     object? _lastLeftTarget;
     object? _pressed;
+
+    // Перетаскивание иконки внутри дока (1.5).
+    Item? _dragCandidate;
+    Point _pressPoint;
+    Item? _drag;
+    int _dragFrom;
+    double _grabX, _grabY;
+    Point _dragPoint;
+    bool _removeMode;
+    long _reorderUntil;
+
+    // Перетаскивание снаружи (Проводник, плитка категории): промежуток между иконками.
+    int _gapIndex = -1;
+    double _gapW, _gapV;
+    Item? _dropOnto;
+    List<string>? _dragPaths;
+    bool _dragPrograms = true;
 
     sealed class Item
     {
@@ -81,6 +102,10 @@ public sealed class Dock
         public FontIcon? Placeholder;
         public required Border Dot;
         public double Base, BaseV, Size, SizeV;
+        public double DX, DXV;
+        public bool Placed;
+        public double Bounce, BounceV;
+        public bool Attention;
         public bool Removing;
         public long LaunchUntil;
         public string? IconSource;
@@ -88,17 +113,14 @@ public sealed class Dock
         public double X, Top;
     }
 
-    public Dock(WindowTracker tracker, AudioService audio, Icons icons, PrototypeConfig config)
+    public Dock(Services services, Screen screen, bool fullTail)
     {
-        _tracker = tracker;
-        _audio = audio;
-        _icons = icons;
-        _config = config;
-        _soundFlyout = new SoundFlyout(audio, icons);
-        _list = new WindowListPopup(tracker, icons);
+        _s = services;
+        _screen = screen;
+        _fullTail = fullTail;
 
-        _pill = new ShellWindow(new AlwaysActiveAcrylic(dock: true), noActivate: true, rounded: true, transitions: false);
-        _strip = new ShellWindow(new TransparentTintBackdrop(), noActivate: true, rounded: false, transitions: false);
+        _pill = new ShellWindow(Surface.Dock, noActivate: true, rounded: true, transitions: false);
+        _strip = new ShellWindow(Surface.Transparent, noActivate: true, rounded: false, transitions: false);
         _strip.Root.Children.Add(_canvas);
 
         _separator = new Rectangle { Width = 1, Height = 34, Fill = Theme.Brush(Theme.Stroke) };
@@ -134,7 +156,20 @@ public sealed class Dock
         };
         _canvas.Children.Add(_tooltip);
 
-        var q = DispatcherQueue.GetForCurrentThread();
+        _removeLabel = new Border
+        {
+            Background = Theme.Brush(Theme.Tooltip),
+            BorderBrush = Theme.Brush(Theme.Stroke),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(5),
+            Padding = new Thickness(9, 3, 9, 4),
+            Child = new TextBlock { Text = "Убрать", FontFamily = Theme.Font, FontSize = 12, Foreground = Theme.Brush(Theme.Text) },
+            Visibility = Visibility.Collapsed,
+            IsHitTestVisible = false,
+        };
+        _canvas.Children.Add(_removeLabel);
+
+        var q = _s.Queue;
         _hoverTimer = q.CreateTimer();
         _hoverTimer.IsRepeating = false;
         _hoverTimer.Tick += (_, _) => OnHoverTimer();
@@ -143,9 +178,10 @@ public sealed class Dock
         _listCloseTimer.IsRepeating = false;
         _listCloseTimer.Tick += (_, _) =>
         {
-            if (_list.ContainsCursor()) return;
-            if (_hovered is Item it && it.Entry?.Windows.Count >= 2 && _list.IsOpen && Equals(_list.Anchor, it.Key)) return;
-            _list.Close(restoreFocus: false);
+            var list = _s.WindowList;
+            if (list.ContainsCursor() || !Popups.OwnedBy(this)) return;
+            if (_hovered is Item it && it.Entry?.Windows.Count >= 2 && list.IsOpen && Equals(list.Anchor, (this, it.Key))) return;
+            if (list.IsOpen && ReferenceEquals(list.Owner, this)) list.Close(restoreFocus: false);
         };
         _clockTimer = q.CreateTimer();
         _clockTimer.IsRepeating = false;
@@ -154,63 +190,208 @@ public sealed class Dock
         _volumeTipTimer.IsRepeating = false;
         _volumeTipTimer.Interval = TimeSpan.FromMilliseconds(1000);
         _volumeTipTimer.Tick += (_, _) => { if (Equals(_tooltipFor, "volume")) HideTooltip(); };
+        // Файл держат над иконкой программы 600 мс: её окно выходит вперёд (1.5).
+        _springLoad = q.CreateTimer();
+        _springLoad.IsRepeating = false;
+        _springLoad.Interval = TimeSpan.FromMilliseconds(600);
+        _springLoad.Tick += (_, _) =>
+        {
+            if (_dropOnto?.Entry?.Windows.FirstOrDefault() is { } w) _s.Tracker.Activate(w.Hwnd);
+        };
 
         _strip.Root.PointerMoved += OnPointerMoved;
-        _strip.Root.PointerExited += (_, _) => SetHover(false);
+        _strip.Root.PointerExited += (_, _) => { if (_drag is null) SetHover(false); };
         _strip.Root.PointerPressed += OnPointerPressed;
         _strip.Root.PointerReleased += OnPointerReleased;
+        _strip.Root.PointerCaptureLost += (_, _) => { if (_drag != null) EndDrag(commit: false); _dragCandidate = null; };
         _strip.Root.PointerWheelChanged += OnWheel;
-        _list.PointerLeft += () => { _listCloseTimer.Stop(); _listCloseTimer.Start(); };
+        _strip.Root.AllowDrop = true;
+        _strip.Root.DragEnter += OnDragEnter;
+        _strip.Root.DragOver += OnDragOver;
+        _strip.Root.DragLeave += (_, _) =>
+        {
+            // DragLeave приходит и при переходе между иконками: сбрасываем, только если курсор ушёл с дока.
+            if (GetCursorPos(out var c) && InHot(c)) return;
+            _dragPaths = null;
+            ClearExternalDrag();
+        };
+        _strip.Root.Drop += OnDrop;
+        _s.WindowList.PointerLeft += () => { _listCloseTimer.Stop(); _listCloseTimer.Start(); };
 
         // Клик по доку не должен забирать фокус у окна, в котором работаешь (правило 0.6).
         _strip.Window.Activated += (_, e) => GuardFocus(e, _strip.Hwnd);
         _pill.Window.Activated += (_, e) => GuardFocus(e, _pill.Hwnd);
 
-        _tracker.Changed += Rebuild;
-        _tracker.ForegroundChanged += () =>
-        {
-            // Активным стало чужое окно: наше окошко закрывается (страховка к 0.4, если Windows
-            // не дала окошку стать активным).
-            // События приходят с опозданием: смотрим, чьё окно активно сейчас.
-            if (Popups.Current is { IsOpen: true, Activating: true } p && ProcessId(GetForegroundWindow()) != (uint)Environment.ProcessId)
-                p.Close(restoreFocus: false);
-            RaiseAll();
-            UpdateDots();
-        };
-        _audio.Changed += UpdateSound;
-        Popup.RestoreForeground = _tracker.RestoreForeground;
+        _s.Tracker.Changed += Rebuild;
+        _s.Tracker.ForegroundChanged += OnForeground;
+        _s.Tracker.AttentionChanged += UpdateDots;
+        _s.Audio.Changed += UpdateSound;
+        _s.Config.Changed += OnConfigChanged;
+        Popups.CurrentChanged += OnPopupsChanged;
+        _s.DropZones.Add(this);
     }
 
     void GuardFocus(WindowActivatedEventArgs e, IntPtr hwnd)
     {
         if (e.WindowActivationState == WindowActivationState.Deactivated) return;
-        if (GetForegroundWindow() == hwnd) _tracker.RestoreForeground();
+        if (GetForegroundWindow() == hwnd) _s.Tracker.RestoreForeground();
+    }
+
+    void OnForeground()
+    {
+        RaiseAll();
+        UpdateDots();
+    }
+
+    void OnConfigChanged()
+    {
+        var sound = _fullTail && _s.Config.WidgetEnabled("audio");
+        if (sound != _showSound) { _showSound = sound; Relayout(); }
+        Rebuild();
+    }
+
+    void OnPopupsChanged()
+    {
+        // Окошко дока закрылось, курсор не над доком: таблетка снова ловит мышь только на себе.
+        if (!_hover && !Popups.OwnedBy(this)) SetRegion(pill: true);
+    }
+
+    // ---------- IBar ----------
+
+    public Screen Screen => _screen;
+    public bool AtTop => false;
+    public bool Pinned => _s.Config.Bars.DockPinned;
+    public (int Left, int Right) EdgeSpan => (_screen.Bounds.Left, _screen.Bounds.Right);
+    public IntPtr MainHwnd => _pill.Hwnd;
+    /// Windows сам ставит наш резерв над своей панелью задач, поэтому её высоту не считаем.
+    public int Reserve => Px(PillH + Bottom + 4);
+    public bool Busy => _drag != null || _gapIndex >= 0 || Popups.OwnedBy(this);
+
+    public RECT HotRect
+    {
+        get
+        {
+            var x = PillScreenX();
+            var top = _stripY + Px(Headroom - Icon * (MaxScale - 1)) - 2;
+            return new RECT { Left = x - Px(4), Top = top, Right = x + Px(PillWidth()) + Px(4), Bottom = _screen.Bounds.Bottom };
+        }
+    }
+
+    public void SetReveal(double progress)
+    {
+        _reveal = progress;
+        var hidden = _screen.Bounds.Bottom - (_stripY + Px(Headroom)) + Px(4);
+        _slide = (int)Math.Round((1 - progress) * hidden);
+        if (progress <= 0)
+        {
+            if (_windowsShown)
+            {
+                _pill.Hide();
+                _strip.Hide();
+                _windowsShown = false;
+                SetHover(false);
+            }
+            return;
+        }
+        PlaceWindows();
+        if (!_windowsShown)
+        {
+            _pill.Show(activate: false);
+            _strip.Show(activate: false);
+            _windowsShown = true;
+            RaiseAll();
+        }
     }
 
     // ---------- окно и место ----------
 
+    /// Низ дока: над панелью задач Windows, пока она видна на этом мониторе (её скрытие — WSH-E9).
+    int BaseBottom()
+    {
+        var bottom = _screen.Bounds.Bottom;
+        foreach (var cls in new[] { "Shell_TrayWnd", "Shell_SecondaryTrayWnd" })
+        {
+            var h = IntPtr.Zero;
+            while ((h = FindWindowExW(IntPtr.Zero, h, cls, null)) != IntPtr.Zero)
+            {
+                if (!IsWindowVisible(h) || !GetWindowRect(h, out var r)) continue;
+                var cx = (r.Left + r.Right) / 2;
+                // Панель внизу этого монитора и не спрятана автоскрытием.
+                if (cx >= _screen.Bounds.Left && cx < _screen.Bounds.Right && r.Bottom >= _screen.Bounds.Bottom - 2 && r.Top > _screen.Bounds.Top + _screen.Bounds.Height / 2
+                    && r.Top < _screen.Bounds.Bottom - 4)
+                    bottom = Math.Min(bottom, r.Top);
+            }
+        }
+        return bottom;
+    }
+
     public void Show()
     {
-        var mon = MonitorFromPoint(new POINT(), MONITOR_DEFAULTTOPRIMARY);
-        var work = MonitorInfo(mon).rcWork;
-        _scale = MonitorScale(mon);
-        _stripW = work.Width;
-        _stripH = (int)Math.Ceiling((Headroom + PillH + Bottom) * _scale);
-        _stripX = work.Left;
-        _stripY = work.Bottom - _stripH;
-        _widthDip = _stripW / _scale;
-
+        _showSound = _fullTail && _s.Config.WidgetEnabled("audio");
+        Relayout();
         Rebuild(initial: true);
         UpdateSound();
         UpdateClock();
         Frame(0);
+        _s.Bars.Add(this);
+    }
 
-        _pill.Place(PillScreenX(), _stripY + Px(Headroom), Px(PillWidth()), Px(PillH));
-        _strip.Place(_stripX, _stripY, _stripW, _stripH);
-        _pill.Show(activate: false);
-        _strip.Show(activate: false);
-        RaiseAll();
-        SetRegion(pill: true);
+    /// Монитор поменялся (размер, масштаб, панель задач) или он стал/перестал быть монитором хвоста.
+    public void Move(Screen screen, bool fullTail)
+    {
+        var sound = fullTail && _s.Config.WidgetEnabled("audio");
+        // Ничего не поменялось (конфиг сохранили по другому поводу) — окна не трогаем.
+        if (screen.SameAs(_screen) && screen.Work.Bottom == _screen.Work.Bottom && fullTail == _fullTail && sound == _showSound && BaseBottom() - _stripH == _stripY) return;
+        var tailChanged = fullTail != _fullTail;
+        _screen = screen;
+        _fullTail = fullTail;
+        _showSound = _fullTail && _s.Config.WidgetEnabled("audio");
+        Relayout();
+        if (tailChanged) Kick();
+        _s.Bars.Publish();
+    }
+
+    void Relayout()
+    {
+        var oldScale = _scale;
+        _scale = _screen.Scale;
+        _stripW = _screen.Bounds.Width;
+        _stripH = (int)Math.Ceiling((Headroom + PillH + Bottom) * _scale);
+        _stripX = _screen.Bounds.Left;
+        _stripY = BaseBottom() - _stripH;
+        _widthDip = _stripW / _scale;
+        _sound.Visibility = _showSound ? Visibility.Visible : Visibility.Collapsed;
+        // Иконки нужны в пикселях нового масштаба.
+        if (Math.Abs(oldScale - _scale) > 0.001) foreach (var it in _items) { var src = it.IconSource; it.IconSource = null; if (src != null && it.Entry != null) SetIcon(it, src, null); }
+        _pillPx = (-1, -1, -1);
+        Frame(0);
+        PlaceWindows();
+    }
+
+    void PlaceWindows()
+    {
+        if (_reveal <= 0) return;
+        _strip.Place(_stripX, _stripY + _slide, _stripW, _stripH);
+        _pillPx = (PillScreenX(), _stripY + _slide + Px(Headroom), Px(PillWidth()));
+        _pill.Place(_pillPx.X, _pillPx.Y, _pillPx.W, Px(PillH));
+        if (!_hover) SetRegion(pill: true);
+    }
+
+    public void Close()
+    {
+        _s.Bars.Remove(this);
+        _s.DropZones.Remove(this);
+        _s.Tracker.Changed -= Rebuild;
+        _s.Tracker.ForegroundChanged -= OnForeground;
+        _s.Tracker.AttentionChanged -= UpdateDots;
+        _s.Audio.Changed -= UpdateSound;
+        _s.Config.Changed -= OnConfigChanged;
+        Popups.CurrentChanged -= OnPopupsChanged;
+        if (Popups.OwnedBy(this)) Popups.CloseAll();
+        CompositionTarget.Rendering -= OnRendering;
+        _clockTimer.Stop();
+        _pill.Window.Close();
+        _strip.Window.Close();
     }
 
     int Px(double dip) => (int)Math.Round(dip * _scale);
@@ -218,6 +399,7 @@ public sealed class Dock
     /// Подложка ниже иконок, окошки выше дока (правило 0.10).
     void RaiseAll()
     {
+        if (!_windowsShown) return;
         _pill.Raise();
         _strip.Raise();
         if (Popups.Current is { IsOpen: true } p) SetWindowPos(p.Hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -229,7 +411,9 @@ public sealed class Dock
 
     void Rebuild(bool initial)
     {
-        var entries = DockModel.Build(_config.Pins, _tracker.Windows);
+        // Пока тащат, док не пересобирается: пересоберётся, когда отпустят.
+        if (_drag != null) return;
+        var entries = DockModel.Build(_s.Config.Pins, _s.Tracker.Windows);
         var old = _items.ToList();
         var next = new List<Item>();
         var start = old.FirstOrDefault(i => i.IsStart) ?? CreateStart();
@@ -245,7 +429,6 @@ public sealed class Dock
             item.Entry = e;
             if (e.Running) item.LaunchUntil = 0;
             SetIcon(item, IconSource(e), e.Windows.FirstOrDefault()?.Exe ?? Launcher.Resolve(e.Target).Exe);
-            item.Visual.Opacity = e.Missing ? 0.4 : 1;
             next.Add(item);
         }
         // Закрыл последнее окно незакреплённой программы: иконка плавно исчезает на своём месте.
@@ -256,15 +439,19 @@ public sealed class Dock
             o.Removing = true;
             next.Insert(Math.Min(i, next.Count), o);
         }
+        // Порядок поменялся (закрепили, убрали): соседи переезжают плавно.
+        if (!initial && !old.Where(o => !o.Removing).Select(o => o.Key).SequenceEqual(next.Where(o => !o.Removing && old.Contains(o)).Select(o => o.Key)))
+            _reorderUntil = Environment.TickCount64 + 500;
         _items.Clear();
         _items.AddRange(next);
         UpdateDots();
         Kick();
         // Открытый список окон показывает живой список.
-        if (_list.IsOpen && _items.FirstOrDefault(i => Equals(i.Key, _list.Anchor)) is { Entry: { } le } && le.Windows.Count != _list.Windows.Count)
+        var list = _s.WindowList;
+        if (list.IsOpen && ReferenceEquals(list.Owner, this) && _items.FirstOrDefault(i => Equals((this, i.Key), list.Anchor)) is { Entry: { } le } li && le.Windows.Count != list.Windows.Count)
         {
-            if (le.Windows.Count >= 2) ShowWindowList(_items.First(i => Equals(i.Key, _list.Anchor)));
-            else _list.Close(restoreFocus: false);
+            if (le.Windows.Count >= 2) ShowWindowList(li);
+            else list.Close(restoreFocus: false);
         }
     }
 
@@ -281,7 +468,7 @@ public sealed class Dock
         var image = new Image { Width = ElementSize, Height = ElementSize, Stretch = Stretch.Uniform };
         var placeholder = new FontIcon
         {
-            Glyph = "\uECAA",
+            Glyph = "",
             FontFamily = Theme.Icons,
             FontSize = ElementSize * 0.6,
             Foreground = Theme.Brush(Theme.TextSecondary),
@@ -336,17 +523,18 @@ public sealed class Dock
             img.Source = bmp;
             if (item.Placeholder != null) item.Placeholder.Visibility = bmp is null ? Visibility.Visible : Visibility.Collapsed;
         }
+        fallback ??= item.Entry?.Windows.FirstOrDefault()?.Exe ?? (item.Entry is { } en ? Launcher.Resolve(en.Target).Exe : null);
         // Иконка в размере увеличенной (1,6×): так она чёткая и в покое, и под курсором.
         var px = (int)Math.Ceiling(ElementSize * _scale);
-        _icons.Get(source, px, bmp =>
+        _s.Icons.Get(source, px, bmp =>
         {
             if (item.IconSource != source) return;
             if (bmp != null || fallback is null || string.Equals(fallback, source, StringComparison.OrdinalIgnoreCase)) { Apply(bmp); return; }
-            _icons.Get(fallback, px, alt => { if (item.IconSource == source) Apply(alt); });
+            _s.Icons.Get(fallback, px, alt => { if (item.IconSource == source) Apply(alt); });
         });
     }
 
-    bool IsActive(DockEntry e) => e.Windows.Any(w => w.Hwnd == _tracker.Foreground);
+    bool IsActive(DockEntry e) => e.Windows.Any(w => w.Hwnd == _s.Tracker.Foreground);
 
     void UpdateDots()
     {
@@ -355,10 +543,15 @@ public sealed class Dock
             if (it.IsStart || it.Entry is null) continue;
             var running = it.Entry.Running;
             var active = running && IsActive(it.Entry);
+            var attention = running && it.Entry.Windows.Any(w => _s.Tracker.Attention.Contains(w.Hwnd));
+            // Просит внимания: один раз подпрыгивает, точка оранжевая, пока не откроешь (1.1).
+            if (attention && !it.Attention && AnimationsEnabled()) it.BounceV = -260;
+            it.Attention = attention;
             it.Dot.Width = active ? 14 : 5;
             it.Dot.Height = active ? 4 : 5;
             it.Dot.CornerRadius = new CornerRadius(active ? 2 : 2.5);
-            it.Dot.Opacity = !running ? 0 : active ? 1 : 0.55;
+            it.Dot.Background = Theme.Brush(attention ? Theme.Warning : Theme.Text);
+            it.Dot.Opacity = !running ? 0 : active || attention ? 1 : 0.55;
         }
         Kick();
     }
@@ -378,11 +571,13 @@ public sealed class Dock
         var t = ((RenderingEventArgs)e).RenderingTime;
         var dt = _lastFrame == TimeSpan.Zero ? 1 / 60.0 : Math.Clamp((t - _lastFrame).TotalSeconds, 0, 0.05);
         _lastFrame = t;
+        // Esc во время перетаскивания: иконка возвращается на место (1.5).
+        if (_drag != null && (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0) EndDrag(commit: false);
         if (!Frame(dt))
         {
             CompositionTarget.Rendering -= OnRendering;
             _animating = false;
-            if (!_hover) SetRegion(pill: true);
+            if (!_hover && !Popups.OwnedBy(this)) SetRegion(pill: true);
         }
     }
 
@@ -406,10 +601,12 @@ public sealed class Dock
         return true;
     }
 
-    double BaseTotal() => Pad + _items.Sum(i => i.Base + Gap * i.Base / Icon) - (_items.Count > 0 ? Gap : 0) + TailW + Pad;
+    double TailW() => SepW + (_showSound ? SoundW + TailGap : 0) + ClockW;
+
+    double BaseTotal() => Pad + _items.Sum(i => i.Base + Gap * i.Base / Icon) - (_items.Count > 0 ? Gap : 0) + _gapW + TailW() + Pad;
 
     double PillLeft;
-    double PillWidth() => BaseTotal() + _items.Sum(i => i.Size - i.Base);
+    double PillWidth() => BaseTotal() + _items.Sum(i => i == _drag ? 0 : i.Size - i.Base);
     int PillScreenX() => _stripX + Px(PillLeft);
 
     /// Один кадр: пружины, раскладка, подложка. Возвращает true, пока что-то движется.
@@ -425,6 +622,7 @@ public sealed class Dock
             var target = it.Removing ? 0 : Icon;
             if (!animate || dt == 0 && it.Base == target) { it.Base = target; it.BaseV = 0; }
             else moving |= Spring(ref it.Base, ref it.BaseV, target, dt, 500);
+            if (it.Bounce != 0 || it.BounceV != 0) moving |= Spring(ref it.Bounce, ref it.BounceV, 0, dt, 120);
         }
         foreach (var gone in _items.Where(i => i.Removing && i.Base <= 0.01).ToList())
         {
@@ -432,6 +630,10 @@ public sealed class Dock
             _canvas.Children.Remove(gone.Visual);
             _canvas.Children.Remove(gone.Dot);
         }
+        // Промежуток для того, что тащат снаружи.
+        var gapTarget = _gapIndex >= 0 ? Icon + Gap : 0;
+        if (!animate) { _gapW = gapTarget; _gapV = 0; }
+        else moving |= Spring(ref _gapW, ref _gapV, gapTarget, dt, 700);
 
         // Базовая раскладка (без увеличения) по центру полосы.
         var baseTotal = BaseTotal();
@@ -440,16 +642,18 @@ public sealed class Dock
         var x = baseLeft + Pad;
         for (var i = 0; i < _items.Count; i++)
         {
+            if (i == _gapIndex) x += _gapW;
             bl[i] = x;
             x += _items[i].Base + Gap * _items[i].Base / Icon;
         }
 
-        // Цели увеличения: волна от курсора по базовым центрам.
+        // Цели увеличения: волна от курсора по базовым центрам. Пока тащат, док не увеличивается.
+        var magnify = _hover && _drag is null && _gapIndex < 0;
         for (var i = 0; i < _items.Count; i++)
         {
             var it = _items[i];
             var center = bl[i] + it.Base / 2;
-            var target = it.Base * (_hover ? Magnify(Math.Abs(_cursorX - center) / (Icon + Gap)) : 1);
+            var target = it.Base * (magnify ? Magnify(Math.Abs(_cursorX - center) / (Icon + Gap)) : 1);
             if (!animate) { it.Size = target; it.SizeV = 0; }
             else moving |= Spring(ref it.Size, ref it.SizeV, target, dt, 700);
         }
@@ -459,6 +663,7 @@ public sealed class Dock
         for (var i = 0; i < _items.Count; i++)
         {
             var it = _items[i];
+            if (it == _drag) continue;
             var e = it.Size - it.Base;
             extraAll += e;
             var frac = it.Base <= 0 ? (_cursorX > bl[i] ? 1 : 0) : Math.Clamp((_cursorX - bl[i]) / it.Base, 0, 1);
@@ -469,15 +674,27 @@ public sealed class Dock
 
         // Иконки снизу по одной линии: растут вверх, низ стоит на месте.
         var iconBottom = Headroom + TopPad + Icon;
+        var reordering = _drag != null || now < _reorderUntil;
         x = PillLeft + Pad;
         for (var i = 0; i < _items.Count; i++)
         {
+            if (i == _gapIndex) x += _gapW;
             var it = _items[i];
-            it.X = x;
-            it.Top = iconBottom - it.Size;
+            var size = it == _drag ? it.Base : it.Size;
+            // Соседи переезжают на новое место пружиной (перестановка, закрепление).
+            if (!it.Placed || !reordering || !animate) { it.DX = x; it.DXV = 0; it.Placed = true; }
+            else moving |= Spring(ref it.DX, ref it.DXV, x, dt, 900);
+            it.X = it.DX;
+            it.Top = iconBottom - size + it.Bounce;
+            if (it == _drag)
+            {
+                // Тащимая иконка едет за курсором.
+                it.X = _dragPoint.X - _grabX;
+                it.Top = Math.Max(0, _dragPoint.Y - _grabY);
+            }
             var visualSize = it.IsStart ? Icon : ElementSize;
-            var s = (float)(it.Size / visualSize);
-            it.Visual.Translation = new Vector3((float)x, (float)it.Top, 0);
+            var s = (float)(size / visualSize);
+            it.Visual.Translation = new Vector3((float)it.X, (float)it.Top, 0);
             it.Visual.Scale = new Vector3(s, s, 1);
             var opacity = it.Entry?.Missing == true ? 0.4 : 1.0;
             if (it.LaunchUntil > now && it.Entry is { Running: false })
@@ -486,31 +703,44 @@ public sealed class Dock
                 opacity = 0.6 + 0.4 * (0.5 + 0.5 * Math.Cos(now / 1000.0 * 2 * Math.PI / 1.1));
                 moving = true;
             }
+            if (it == _drag && _removeMode) opacity *= 0.6;
             it.Visual.Opacity = opacity;
-            it.Dot.Translation = new Vector3((float)(x + it.Size / 2 - it.Dot.Width / 2), (float)(Headroom + PillH - 7 - it.Dot.Height / 2), 0);
-            x += it.Size + Gap * it.Base / Icon;
+            it.Dot.Opacity = it == _drag ? 0 : it.Dot.Opacity;
+            it.Dot.Translation = new Vector3((float)(it.DX + size / 2 - it.Dot.Width / 2), (float)(Headroom + PillH - 7 - it.Dot.Height / 2), 0);
+            x += size + Gap * it.Base / Icon;
         }
         x -= Gap;
+
+        if (_drag != null && _removeMode)
+        {
+            _removeLabel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            var lw = _removeLabel.DesiredSize.Width;
+            _removeLabel.Translation = new Vector3((float)(_drag.X + _drag.Base / 2 - lw / 2), (float)(_drag.Top + _drag.Base + 4), 0);
+        }
 
         // Хвост: разделитель, звук, часы.
         var tailY = Headroom + PillH / 2;
         _separator.Translation = new Vector3((float)(x + 10), (float)(tailY - 17), 0);
         x += SepW;
-        _sound.Translation = new Vector3((float)x, (float)(tailY - 20), 0);
-        x += SoundW + TailGap;
+        if (_showSound)
+        {
+            _sound.Translation = new Vector3((float)x, (float)(tailY - 20), 0);
+            x += SoundW + TailGap;
+        }
         _clock.Translation = new Vector3((float)x, (float)(tailY - 18), 0);
 
         // Подсказка едет за своей иконкой.
         if (_tooltip.Visibility == Visibility.Visible) PlaceTooltip();
 
         // Подложка со стеклом повторяет таблетку.
-        var px = (PillScreenX(), Px(pillW));
-        if (px != _pillPx && _pill.Visible)
+        var px = (PillScreenX(), _stripY + _slide + Px(Headroom), Px(pillW));
+        if (px != _pillPx && _windowsShown)
         {
             _pillPx = px;
-            _pill.Move(px.Item1, _stripY + Px(Headroom), px.Item2, Px(PillH));
+            _pill.Move(px.Item1, px.Item2, px.Item3, Px(PillH));
+            _s.Bars.Publish();
         }
-        return moving;
+        return moving || (_drag != null);
     }
 
     /// Пока курсор не над доком, окно-полоса ловит мышь только на таблетке, а прозрачное
@@ -553,6 +783,13 @@ public sealed class Dock
     void OnPointerMoved(object sender, PointerRoutedEventArgs e)
     {
         var p = e.GetCurrentPoint(_canvas).Position;
+        if (_drag != null) { UpdateDrag(p); return; }
+        if (_dragCandidate != null && e.GetCurrentPoint(_canvas).Properties.IsLeftButtonPressed
+            && Math.Abs(p.X - _pressPoint.X) + Math.Abs(p.Y - _pressPoint.Y) > 6)
+        {
+            BeginDrag(_dragCandidate, p);
+            return;
+        }
         var pillW = PillWidth();
         var inside = p.X >= PillLeft && p.X <= PillLeft + pillW && p.Y >= Headroom - Icon * (MaxScale - 1) - 2;
         if (inside) _cursorX = p.X;
@@ -568,8 +805,11 @@ public sealed class Dock
             if (it.Removing) continue;
             if (p.X >= it.X - Gap / 2 && p.X < it.X + it.Size + Gap / 2 && p.Y >= it.Top - 4) return it;
         }
-        var s = _sound.Translation;
-        if (p.X >= s.X && p.X < s.X + SoundW && p.Y >= Headroom) return _sound;
+        if (_showSound)
+        {
+            var s = _sound.Translation;
+            if (p.X >= s.X && p.X < s.X + SoundW && p.Y >= Headroom) return _sound;
+        }
         var c = _clock.Translation;
         if (p.X >= c.X && p.X < c.X + ClockW && p.Y >= Headroom) return _clock;
         return null;
@@ -583,19 +823,21 @@ public sealed class Dock
         _hoverTimer.Stop();
         _sound.Background = Theme.Brush(ReferenceEquals(target, _sound) ? Theme.Hover : Microsoft.UI.Colors.Transparent);
         if (!Equals(_tooltipFor, "volume")) HideTooltip();
+        var list = _s.WindowList;
+        var listOpen = list.IsOpen && ReferenceEquals(list.Owner, this);
         if (target is null)
         {
-            if (_list.IsOpen) { _listCloseTimer.Stop(); _listCloseTimer.Start(); }
+            if (listOpen) { _listCloseTimer.Stop(); _listCloseTimer.Start(); }
             return;
         }
         // Открытый список окон сразу перескакивает на соседнюю иконку.
-        if (target is Item { Entry.Windows.Count: >= 2 } it && _list.IsOpen)
+        if (target is Item { Entry.Windows.Count: >= 2 } it && listOpen)
         {
             _listCloseTimer.Stop();
-            if (!Equals(_list.Anchor, it.Key)) ShowWindowList(it);
+            if (!Equals(list.Anchor, (this, it.Key))) ShowWindowList(it);
             return;
         }
-        if (_list.IsOpen) { _listCloseTimer.Stop(); _listCloseTimer.Start(); }
+        if (listOpen) { _listCloseTimer.Stop(); _listCloseTimer.Start(); }
         // Если подсказка уже была видна, соседняя появляется сразу (правило 0.9).
         var recent = hadTooltip || Environment.TickCount64 - _tooltipHiddenAt < 150;
         var wantsList = target is Item { Entry.Windows.Count: >= 2 };
@@ -605,8 +847,8 @@ public sealed class Dock
 
     void OnHoverTimer()
     {
-        if (_hovered is null || _pressed != null) return;
-        if (Popups.Current is { } p && p != _list && p.IsOpen) return;
+        if (_hovered is null || _pressed != null || _drag != null) return;
+        if (Popups.Current is { IsOpen: true } p && p != _s.WindowList) return;
         if (_hovered is Item { Entry.Windows.Count: >= 2 } it) { ShowWindowList(it); return; }
         ShowTooltip(_hovered, TooltipText(_hovered));
     }
@@ -617,7 +859,7 @@ public sealed class Dock
         Item { Entry: { Missing: true } } => "Не найдено",
         Item { Entry: { Windows.Count: 1 } e } => e.Windows[0].Title,
         Item { Entry: { } e } => e.Title,
-        _ when ReferenceEquals(target, _sound) => _audio.Muted ? "Звук выключен" : $"Громкость {_audio.Volume} %",
+        _ when ReferenceEquals(target, _sound) => _s.Audio.Muted ? "Звук выключен" : $"Громкость {_s.Audio.Volume} %",
         _ when ReferenceEquals(target, _clock) => DateTime.Now.ToString("dddd, d MMMM yyyy"),
         _ => "",
     };
@@ -644,7 +886,7 @@ public sealed class Dock
             default: cx = _clock.Translation.X + ClockW / 2; top = Headroom; break;
         }
         var x = Math.Clamp(cx - size.Width / 2, 2, _widthDip - size.Width - 2);
-        _tooltip.Translation = new Vector3((float)x, (float)(top - 8 - size.Height), 0);
+        _tooltip.Translation = new Vector3((float)x, (float)Math.Max(0, top - 8 - size.Height), 0);
     }
 
     void HideTooltip()
@@ -657,14 +899,15 @@ public sealed class Dock
     Rect AnchorPx(object target)
     {
         double x, w;
+        var y = _stripY + _slide;
         switch (target)
         {
             // Над увеличенной иконкой, как у Mac.
-            case Item it: return new Rect(_stripX + it.X * _scale, _stripY + it.Top * _scale, it.Size * _scale, (Headroom + PillH - it.Top) * _scale);
+            case Item it: return new Rect(_stripX + it.X * _scale, y + it.Top * _scale, it.Size * _scale, (Headroom + PillH - it.Top) * _scale);
             case Grid g when ReferenceEquals(g, _sound): x = _sound.Translation.X; w = SoundW; break;
             default: x = _clock.Translation.X; w = ClockW; break;
         }
-        return new Rect(_stripX + x * _scale, _stripY + Headroom * _scale, w * _scale, PillH * _scale);
+        return new Rect(_stripX + x * _scale, y + Headroom * _scale, w * _scale, PillH * _scale);
     }
 
     void ShowWindowList(Item it)
@@ -672,7 +915,12 @@ public sealed class Dock
         if (it.Entry is null) return;
         HideTooltip();
         _listCloseTimer.Stop();
-        _list.Show(it.Key, AnchorPx(it), it.Entry.Windows, it.IconSource ?? "");
+        _s.WindowList.Show((this, it.Key), AnchorPx(it), it.Entry.Windows, it.IconSource ?? "", this);
+    }
+
+    void CloseWindowList()
+    {
+        if (_s.WindowList.IsOpen && ReferenceEquals(_s.WindowList.Owner, this)) _s.WindowList.Close(restoreFocus: false);
     }
 
     void OnPointerPressed(object sender, PointerRoutedEventArgs e)
@@ -682,11 +930,29 @@ public sealed class Dock
         _hoverTimer.Stop();
         if (!Equals(_tooltipFor, "volume")) HideTooltip();
         e.Handled = true;
+        // Иконку можно потащить (кнопку Пуска и хвост нельзя).
+        if (p.Properties.IsLeftButtonPressed && _pressed is Item { IsStart: false, Removing: false } it)
+        {
+            _dragCandidate = it;
+            _pressPoint = p.Position;
+            _strip.Root.CapturePointer(e.Pointer);
+        }
     }
 
     void OnPointerReleased(object sender, PointerRoutedEventArgs e)
     {
         var p = e.GetCurrentPoint(_canvas);
+        _dragCandidate = null;
+        if (_drag != null)
+        {
+            e.Handled = true;
+            _dragPoint = p.Position;
+            EndDrag(commit: true);
+            _strip.Root.ReleasePointerCaptures();
+            _pressed = null;
+            return;
+        }
+        _strip.Root.ReleasePointerCaptures();
         var target = HitTest(p.Position);
         var pressed = _pressed;
         _pressed = null;
@@ -718,47 +984,271 @@ public sealed class Dock
         if (!ReferenceEquals(HitTest(p.Position), _sound)) return;
         var delta = p.Properties.MouseWheelDelta;
         if (delta == 0) return;
-        _audio.Volume = _audio.Volume + Math.Sign(delta) * 2;
+        var step = _s.AudioSettings.Step;
+        _s.Audio.Volume = _s.Audio.Volume + Math.Sign(delta) * step;
         _hoverTimer.Stop();
-        ShowTooltip("volume", $"{_audio.Volume} %");
+        ShowTooltip("volume", $"{_s.Audio.Volume} %");
         _volumeTipTimer.Stop();
         _volumeTipTimer.Start();
+    }
+
+    // ---------- перетаскивание внутри дока (1.5) ----------
+
+    int PinnedCount() => _items.Count(i => !i.Removing && i != _drag && i.Entry is { Pinned: true });
+
+    void BeginDrag(Item it, Point p)
+    {
+        _drag = it;
+        _dragCandidate = null;
+        _dragFrom = _items.IndexOf(it);
+        _grabX = _pressPoint.X - it.X;
+        _grabY = _pressPoint.Y - it.Top;
+        _dragPoint = p;
+        _removeMode = false;
+        HideTooltip();
+        CloseWindowList();
+        Popups.CloseAll();
+        SetHover(true);
+        UpdateDrag(p);
+    }
+
+    void UpdateDrag(Point p)
+    {
+        if (_drag is null) return;
+        _dragPoint = p;
+        // Вверх от дока больше чем на 80 px — «Убрать» (только закреплённое).
+        _removeMode = _drag.Entry is { Pinned: true } && p.Y < Headroom + TopPad - RemoveDistance + _grabY;
+        _removeLabel.Visibility = _removeMode ? Visibility.Visible : Visibility.Collapsed;
+        // Куда встанет: по центрам остальных иконок.
+        var others = _items.Where(i => i != _drag && !i.IsStart && !i.Removing).ToList();
+        var center = p.X - _grabX + _drag.Base / 2;
+        var slot = others.Count(o => o.X + o.Base / 2 < center);
+        var pinned = PinnedCount();
+        // Закреплённое переставляется среди закреплённых; запущенное можно утянуть к закреплённым.
+        slot = _drag.Entry is { Pinned: true } ? Math.Clamp(slot, 0, pinned) : slot;
+        others.Insert(Math.Clamp(slot, 0, others.Count), _drag);
+        var order = new List<Item> { _items.First(i => i.IsStart) };
+        order.AddRange(others);
+        order.AddRange(_items.Where(i => i.Removing));
+        if (!order.SequenceEqual(_items))
+        {
+            _items.Clear();
+            _items.AddRange(order);
+        }
+        Kick();
+    }
+
+    void EndDrag(bool commit)
+    {
+        var it = _drag;
+        if (it is null) return;
+        _drag = null;
+        _removeLabel.Visibility = Visibility.Collapsed;
+        _reorderUntil = Environment.TickCount64 + 500;
+        // Тащимая иконка возвращается в ряд пружиной с того места, где её отпустили.
+        it.DX = _dragPoint.X - _grabX;
+        it.DXV = 0;
+        var remove = _removeMode;
+        _removeMode = false;
+        var index = _items.Where(i => !i.IsStart && !i.Removing).ToList().IndexOf(it);
+        if (commit && it.Entry is { } e)
+        {
+            if (remove && e.Pinned)
+            {
+                _s.Unpin(e.Id);
+                Rebuild();
+                return;
+            }
+            var pinnedNow = _items.Where(i => !i.IsStart && !i.Removing && (i.Entry?.Pinned == true || i == it)).ToList();
+            if (e.Pinned)
+            {
+                var ids = pinnedNow.Select(i => i.Entry!.Id).ToList();
+                if (!ids.SequenceEqual(_s.Config.Pins.Select(p => p.Id)))
+                {
+                    _s.Config.Update(c => c.Dock.Pinned = ids.Select(id => c.Dock.Pinned.First(p => p.Id == id)).ToList());
+                }
+            }
+            else if (index <= PinnedCount() && index != _dragFrom - 1)
+            {
+                // Запущенную незакреплённую утянули к закреплённым — закрепляется на этом месте.
+                _s.PinApp(e.Title, e.Target, index);
+            }
+        }
+        Rebuild();
+    }
+
+    // ---------- перетаскивание снаружи: Проводник и плитки категорий ----------
+
+    /// Перевод экранных пикселей в координаты полосы.
+    Point ToCanvas(int x, int y) => new((x - _stripX) / _scale, (y - _stripY - _slide) / _scale);
+
+    bool OverDock(Point p) => _windowsShown && p.X >= PillLeft - 20 && p.X <= PillLeft + PillWidth() + 20 && p.Y >= Headroom - 30 && p.Y <= Headroom + PillH + Bottom;
+
+    /// Индекс в `_items`, перед которым встанет брошенное (среди закреплённых).
+    int GapIndexAt(double x)
+    {
+        var pinned = _items.Where(i => !i.IsStart && !i.Removing && i.Entry is { Pinned: true }).ToList();
+        var before = pinned.Count(i => i.X + i.Size / 2 < x);
+        if (before >= pinned.Count) return pinned.Count == 0 ? 1 : _items.IndexOf(pinned[^1]) + 1;
+        return _items.IndexOf(pinned[before]);
+    }
+
+    int PinIndexOfGap() => _items.Take(Math.Max(0, _gapIndex)).Count(i => !i.IsStart && !i.Removing && i.Entry is { Pinned: true });
+
+    Item? AppAt(double x) => _items.FirstOrDefault(i => !i.IsStart && !i.Removing && i.Entry is { Missing: false }
+        && x >= i.X + i.Size * 0.2 && x <= i.X + i.Size * 0.8);
+
+    void SetGap(int index)
+    {
+        if (index == _gapIndex) return;
+        _gapIndex = index;
+        Kick();
+    }
+
+    void ClearExternalDrag()
+    {
+        _springLoad.Stop();
+        _dropOnto = null;
+        if (_gapIndex >= 0) SetGap(-1);
+        // Курсор не над доком: прозрачное место над таблеткой снова пропускает клики.
+        if (_drag is null && !(GetCursorPos(out var c) && InHot(c))) SetHover(false);
+    }
+
+    bool InHot(POINT c)
+    {
+        var r = HotRect;
+        return _windowsShown && c.X >= r.Left && c.X < r.Right && c.Y >= r.Top && c.Y < r.Bottom;
+    }
+
+    public bool DragOver(int sx, int sy, DragPayload payload)
+    {
+        var p = ToCanvas(sx, sy);
+        if (!OverDock(p) || payload.Item.Kind != "app") { DragLeave(); return false; }
+        if (!_hover) SetHover(true);
+        SetGap(GapIndexAt(p.X));
+        return true;
+    }
+
+    public void DragLeave() => ClearExternalDrag();
+
+    public bool Drop(int sx, int sy, DragPayload payload)
+    {
+        var p = ToCanvas(sx, sy);
+        var ok = OverDock(p) && payload.Item.Kind == "app";
+        if (ok)
+        {
+            if (_gapIndex < 0) _gapIndex = GapIndexAt(p.X);
+            _s.PinApp(payload.Item.Title, payload.Item.Target, PinIndexOfGap());
+        }
+        ClearExternalDrag();
+        return ok;
+    }
+
+    async void OnDragEnter(object sender, DragEventArgs e)
+    {
+        // DragEnter приходит и от каждой иконки, над которой проходит курсор: файлы читаем один раз.
+        if (_dragPaths != null) { OnDragOver(sender, e); return; }
+        _dragPrograms = true;
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems)) return;
+        var deferral = e.GetDeferral();
+        try
+        {
+            var items = await e.DataView.GetStorageItemsAsync();
+            _dragPaths = items.Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p)).ToList();
+            _dragPrograms = _dragPaths.Count > 0 && _dragPaths.All(ShellConfig.IsProgram);
+            OnDragOver(sender, e);
+        }
+        catch { }
+        finally { deferral.Complete(); }
+    }
+
+    void OnDragOver(object sender, DragEventArgs e)
+    {
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems)) { e.AcceptedOperation = DataPackageOperation.None; return; }
+        var p = e.GetPosition(_canvas);
+        if (!_hover) SetHover(true);
+        if (_dragPrograms)
+        {
+            // Программы и ярлыки: между иконками промежуток, отпустил — закрепилось там.
+            e.AcceptedOperation = DataPackageOperation.Link;
+            e.DragUIOverride.Caption = "Закрепить в доке";
+            SetGap(GapIndexAt(p.X));
+            return;
+        }
+        // Файл: можно бросить только на иконку программы — откроется в ней.
+        SetGap(-1);
+        var onto = AppAt(p.X);
+        if (onto != _dropOnto)
+        {
+            _dropOnto = onto;
+            _springLoad.Stop();
+            if (onto?.Entry?.Running == true) _springLoad.Start();
+        }
+        if (onto is null) { e.AcceptedOperation = DataPackageOperation.None; return; }
+        e.AcceptedOperation = DataPackageOperation.Copy;
+        e.DragUIOverride.Caption = $"Открыть в «{onto.Entry!.Title}»";
+    }
+
+    void OnDrop(object sender, DragEventArgs e)
+    {
+        var paths = _dragPaths;
+        var onto = _dropOnto;
+        var pinAt = PinIndexOfGap();
+        var programs = _dragPrograms;
+        _dragPaths = null;
+        ClearExternalDrag();
+        if (paths is null || paths.Count == 0) return;
+        if (programs)
+        {
+            foreach (var path in paths)
+            {
+                var kept = ShellConfig.KeepShortcut(path);
+                _s.PinApp(System.IO.Path.GetFileNameWithoutExtension(path), kept, pinAt++);
+            }
+            return;
+        }
+        if (onto?.Entry is { } entry)
+        {
+            var exe = entry.Windows.FirstOrDefault()?.Exe ?? Launcher.Resolve(entry.Target).Exe;
+            if (exe != null) Launcher.OpenWith(exe, paths);
+        }
     }
 
     // ---------- клики ----------
 
     void LeftClick(object target)
     {
-        _list.Close(restoreFocus: false);
+        CloseWindowList();
         if (ReferenceEquals(target, _sound))
         {
-            Popups.Toggle(_sound, () => _soundFlyout.Show(_sound, AnchorPx(_sound)));
+            Popups.Toggle(_sound, () => _s.SoundFlyout.Show(_sound, AnchorPx(_sound), this));
             return;
         }
         if (target is not Item it) return;
         // Один клик = одно действие: открытое меню закрывается, и клик срабатывает.
         if (Popups.Current is { IsOpen: true }) Popups.CloseAll(restoreFocus: true);
-        if (it.IsStart)
-        {
-            // Свой Пуск будет в WSH-E15; в прототипе открываем родной.
-            keybd_event(VK_LWIN, 0, 0, IntPtr.Zero);
-            keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, IntPtr.Zero);
-            return;
-        }
+        if (it.IsStart) { _s.OpenStart(); return; }
         var entry = it.Entry!;
         var shift = KeyDown(VK_SHIFT);
         var ctrl = KeyDown(VK_CONTROL);
         if (entry.Missing)
         {
-            ShowTooltip(it, "Программа не найдена. Убрать из дока: правый клик");
+            // Программу удалили: предлагаем убрать её из дока.
+            var key = ("missing", this, it.Key);
+            _s.Menu.Show(key, AnchorPx(it),
+            [
+                new() { Text = "Программа не найдена", Glyph = "", Enabled = false },
+                MenuItem.Sep,
+                new() { Text = "Убрать из дока", Glyph = "", Invoke = () => _s.Unpin(entry.Id) },
+            ], owner: this);
             return;
         }
         if (shift && ctrl) { Launch(it, admin: true); return; }
         if (shift) { Launch(it); return; }
         var recent = entry.Windows.FirstOrDefault();
         if (recent is null) { Launch(it); return; }
-        if (recent.Hwnd == _tracker.Foreground && !recent.Minimized) _tracker.Minimize(recent.Hwnd);
-        else _tracker.Activate(recent.Hwnd);
+        if (recent.Hwnd == _s.Tracker.Foreground && !recent.Minimized) _s.Tracker.Minimize(recent.Hwnd);
+        else _s.Tracker.Activate(recent.Hwnd);
     }
 
     void Launch(Item it, bool admin = false)
@@ -771,57 +1261,51 @@ public sealed class Dock
 
     void MiddleClick(object target)
     {
-        if (ReferenceEquals(target, _sound)) { _audio.Muted = !_audio.Muted; return; }
+        if (ReferenceEquals(target, _sound)) { _s.Audio.Muted = !_s.Audio.Muted; return; }
         if (target is Item { IsStart: false, Entry.Missing: false } it) Launch(it);
     }
 
     void RightClick(object target)
     {
-        _list.Close(restoreFocus: false);
+        CloseWindowList();
         HideTooltip();
         if (ReferenceEquals(target, _sound))
         {
-            Popups.Toggle(("menu", _sound), () => _menu.Show(("menu", _sound), AnchorPx(_sound), SoundMenu()));
+            var sk = ("menu", this, "sound");
+            Popups.Toggle(sk, () => _s.Menu.Show(sk, AnchorPx(_sound), SoundMenu(), owner: this));
+            return;
+        }
+        if (ReferenceEquals(target, _clock))
+        {
+            var ck = ("menu", this, "clock");
+            Popups.Toggle(ck, () => _s.Menu.Show(ck, AnchorPx(_clock),
+                [new() { Text = "Настроить дату и время", Glyph = "", Invoke = () => Launcher.Open("ms-settings:dateandtime") }], owner: this));
             return;
         }
         if (target is not Item it) return;
-        var key = ("menu", it.Key);
+        var key = ("menu", this, it.Key);
         // Правый клик по другой иконке при открытом меню: меню перескакивает одним кликом.
-        Popups.Toggle(key, () => _menu.Show(key, AnchorPx(it), it.IsStart ? StartMenu() : AppMenu(it)));
+        Popups.Toggle(key, () => _s.Menu.Show(key, AnchorPx(it), it.IsStart ? StartMenu() : AppMenu(it), owner: this));
     }
 
-    List<MenuItem> StartMenu() =>
+    static List<MenuItem> StartMenu() =>
     [
         new() { Text = "Диспетчер задач", Glyph = "", Invoke = () => Launcher.Open("taskmgr.exe") },
         new() { Text = "Параметры", Glyph = "", Invoke = () => Launcher.Open("ms-settings:") },
         new() { Text = "Проводник", Glyph = "", Invoke = () => Launcher.Open("explorer.exe") },
-        MenuItem.Sep,
-        new() { Text = "Выйти из прототипа", Glyph = "", Invoke = Quit },
+        new() { Text = "Выполнить", Glyph = "", Invoke = () => Launcher.OpenRunDialog() },
     ];
-
-    /// Выход: окна дока убираются сразу, процесс завершается (Application.Exit оставлял
-    /// окно-полосу на экране и процесс живым).
-    void Quit()
-    {
-        Popups.CloseAll();
-        _list.Close(restoreFocus: false);
-        CompositionTarget.Rendering -= OnRendering;
-        _pill.Hide();
-        _strip.Hide();
-        Log.Write("выход");
-        Environment.Exit(0);
-    }
 
     List<MenuItem> SoundMenu()
     {
-        var current = _audio.DefaultId();
+        var current = _s.Audio.DefaultId();
         return
         [
             new()
             {
                 Text = "Устройства вывода",
                 Glyph = "",
-                Children = _audio.Devices().Select(d => new MenuItem { Text = d.Name, Checked = d.Id == current, Invoke = () => _audio.SetDefault(d.Id) }).ToList(),
+                Children = _s.Audio.Devices().Select(d => new MenuItem { Text = d.Name, Checked = d.Id == current, Invoke = () => _s.Audio.SetDefault(d.Id) }).ToList(),
             },
             new() { Text = "Микшер громкости", Glyph = "", Invoke = () => Launcher.Open("ms-settings:apps-volume") },
             new() { Text = "Параметры звука", Glyph = "", Invoke = () => Launcher.Open("ms-settings:sound") },
@@ -837,11 +1321,11 @@ public sealed class Dock
             foreach (var w in e.Windows.Take(12))
             {
                 var h = w.Hwnd;
-                items.Add(new MenuItem { Text = w.Title, Checked = h == _tracker.Foreground, Invoke = () => _tracker.Activate(h) });
+                items.Add(new MenuItem { Text = w.Title, Checked = h == _s.Tracker.Foreground, Invoke = () => _s.Tracker.Activate(h) });
             }
             items.Add(MenuItem.Sep);
         }
-        items.Add(new MenuItem { Text = e.Running ? "Новое окно" : "Открыть", Glyph = e.Running ? "" : "", Enabled = !e.Missing, Invoke = () => Launch(it) });
+        items.Add(new MenuItem { Text = e.Running ? "Новое окно" : "Открыть", Glyph = e.Running ? "" : "", Enabled = !e.Missing, Invoke = () => Launch(it) });
         items.Add(new MenuItem { Text = "Запустить от имени администратора", Glyph = "", Enabled = !e.Missing, Invoke = () => Launch(it, admin: true) });
         var location = Launcher.IsPath(e.Target) ? e.Target : Launcher.Resolve(e.Target).Exe ?? e.Windows.FirstOrDefault()?.Exe;
         items.Add(new MenuItem
@@ -853,18 +1337,20 @@ public sealed class Dock
         });
         items.Add(MenuItem.Sep);
         if (e.Pinned)
-            items.Add(new MenuItem { Text = "Убрать из дока", Glyph = "", Invoke = () => Unpin(e) });
+            items.Add(new MenuItem { Text = "Убрать из дока", Glyph = "", Invoke = () => _s.Unpin(e.Id) });
         else
-            items.Add(new MenuItem { Text = "Закрепить в доке", Glyph = "", Invoke = () => Pin(e) });
+            items.Add(new MenuItem { Text = "Закрепить в доке", Glyph = "", Invoke = () => _s.PinApp(e.Title, e.Target) });
+        var cats = _s.Config.Categories;
         items.Add(new MenuItem
         {
             Text = "Добавить в категорию",
-            Glyph = "",
-            Children = _config.Categories.Select(kv => new MenuItem
+            Glyph = "",
+            Enabled = cats.Count > 0,
+            Children = cats.Select(c => new MenuItem
             {
-                Text = kv.Key,
-                Checked = kv.Value.Contains(e.Target, StringComparer.OrdinalIgnoreCase),
-                Invoke = () => AddToCategory(kv.Key, e.Target),
+                Text = c.Name,
+                Checked = c.Items.Any(i => string.Equals(i.Target, e.Target, StringComparison.OrdinalIgnoreCase)),
+                Invoke = () => ToggleCategory(c.Id, e),
             }).ToList(),
         });
         if (e.Running)
@@ -876,44 +1362,31 @@ public sealed class Dock
                 Text = windows.Count == 1 ? "Закрыть окно" : $"Закрыть все окна ({windows.Count})",
                 Glyph = "",
                 Danger = true,
-                Invoke = () => { foreach (var h in windows) _tracker.Close(h); },
+                Invoke = () => { foreach (var h in windows) _s.Tracker.Close(h); },
             });
         }
         return items;
     }
 
-    void Pin(DockEntry e)
+    void ToggleCategory(string categoryId, DockEntry e)
     {
-        _config.Pins.Add(new Pin(Guid.NewGuid().ToString("N")[..8], e.Title, e.Target));
-        _config.Save();
-        Rebuild();
-    }
-
-    void Unpin(DockEntry e)
-    {
-        _config.Pins.RemoveAll(p => p.Id == e.Id);
-        _config.Save();
-        Rebuild();
-    }
-
-    void AddToCategory(string name, string target)
-    {
-        var list = _config.Categories[name];
-        if (list.Contains(target, StringComparer.OrdinalIgnoreCase)) list.RemoveAll(t => string.Equals(t, target, StringComparison.OrdinalIgnoreCase));
-        else list.Add(target);
-        _config.Save();
+        var cat = _s.Config.CategoryById(categoryId);
+        if (cat is null) return;
+        var existing = cat.Items.FirstOrDefault(i => string.Equals(i.Target, e.Target, StringComparison.OrdinalIgnoreCase));
+        if (existing != null) _s.Config.Update(_ => cat.Items.Remove(existing));
+        else _s.AddToCategory(categoryId, [new LauncherItem { Kind = "app", Title = e.Title, Target = e.Target, Meta = "Приложение" }]);
     }
 
     // ---------- хвост ----------
 
     void UpdateSound()
     {
-        var v = _audio.Volume;
-        _soundIcon.Glyph = !_audio.HasOutput ? "" : _audio.Muted ? "" : v == 0 ? "" : v < 34 ? "" : v < 67 ? "" : "";
+        var v = _s.Audio.Volume;
+        _soundIcon.Glyph = !_s.Audio.HasOutput ? "" : _s.Audio.Muted ? "" : v == 0 ? "" : v < 34 ? "" : v < 67 ? "" : "";
         if (Equals(_tooltipFor, "volume")) { _tooltipText.Text = $"{v} %"; PlaceTooltip(); }
     }
 
-    void UpdateClock()
+    public void UpdateClock()
     {
         var now = DateTime.Now;
         _time.Text = now.ToString("HH:mm");
@@ -921,4 +1394,10 @@ public sealed class Dock
         _clockTimer.Interval = TimeSpan.FromSeconds(60 - now.Second + 0.05);
         _clockTimer.Start();
     }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern IntPtr FindWindowExW(IntPtr parent, IntPtr after, string cls, string? title);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern short GetAsyncKeyState(int key);
 }

@@ -77,10 +77,17 @@ public sealed class MenuPopup : Popup
         };
     }
 
-    public void Show(object anchor, Rect anchorPx, IReadOnlyList<MenuItem> items)
+    /// Меню внутри окошка (правый клик по плитке в окне категории).
+    public void ShowInside(Popup host, object anchor, Rect anchorPx, IReadOnlyList<MenuItem> items)
     {
         Build(items);
-        Open(anchor, anchorPx);
+        OpenInside(host, anchor, anchorPx, Placement.AtPoint);
+    }
+
+    public void Show(object anchor, Rect anchorPx, IReadOnlyList<MenuItem> items, Placement placement = Placement.Above, object? owner = null)
+    {
+        Build(items);
+        Open(anchor, anchorPx, placement, owner: owner);
     }
 
     void Build(IReadOnlyList<MenuItem> items)
@@ -222,7 +229,7 @@ public sealed class MenuPopup : Popup
         var origin = row.TransformToVisual(null).TransformPoint(new Point(0, 0));
         Native.Win32.GetWindowRect(Win.Hwnd, out var wr);
         var rect = new Rect(wr.Left + origin.X * scale, wr.Top + origin.Y * scale, row.ActualWidth * scale + 4 * scale, row.ActualHeight * scale);
-        _submenu.Open(item, rect, beside: true, nested: true);
+        _submenu.Open(item, rect, Placement.Beside, nested: true);
         if (keyboard) { _keyboardInSubmenu = true; _submenu.MoveHighlight(+1); }
     }
 

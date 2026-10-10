@@ -100,6 +100,34 @@ public static class Launcher
         t.Start();
     }
 
+    /// Открыть файлы программой (файл бросили на её иконку в доке).
+    public static void OpenWith(string exe, IEnumerable<string> files)
+    {
+        var args = string.Join(" ", files.Select(f => $"\"{f}\""));
+        var t = new Thread(() =>
+        {
+            var info = new SHELLEXECUTEINFO
+            {
+                cbSize = Marshal.SizeOf<SHELLEXECUTEINFO>(),
+                fMask = SEE_MASK_NOASYNC,
+                lpFile = exe,
+                lpParameters = args,
+                lpDirectory = Path.GetDirectoryName(exe),
+                nShow = 1,
+            };
+            ShellExecuteExW(ref info);
+        }) { IsBackground = true };
+        t.SetApartmentState(ApartmentState.STA);
+        t.Start();
+    }
+
+    /// Окно «Выполнить» Windows.
+    public static void OpenRunDialog()
+    {
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("rundll32.exe", "shell32.dll,#61") { UseShellExecute = false }); }
+        catch { }
+    }
+
     /// «Открыть расположение файла»: Проводник с выделенным файлом.
     public static void Reveal(string path)
     {

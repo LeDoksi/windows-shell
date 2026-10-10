@@ -3,9 +3,26 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using WindowsShell.Native;
+using WinUIEx;
 using static WindowsShell.Native.Win32;
 
 namespace WindowsShell.Ui;
+
+public enum Surface { Dock, Menu, Transparent }
+
+/// «Стекло» (размытие) или «Тонировка» (ровная тёмная заливка): выбирается вручную в меню трея.
+public static class Glass
+{
+    public static bool Tint { get; private set; }
+    public static event Action? Changed;
+
+    public static void Set(bool tint)
+    {
+        if (Tint == tint) return;
+        Tint = tint;
+        Changed?.Invoke();
+    }
+}
 
 /// Окно оболочки без рамки и заголовка, поверх всех, не в Alt+Tab и не в панели задач.
 public sealed class ShellWindow
@@ -16,11 +33,15 @@ public sealed class ShellWindow
     public Grid Root { get; }
     public bool Visible { get; private set; }
 
+    readonly Surface _surface;
+
+    /// <param name="surface">Стекло дока, стекло меню или прозрачное окно (полоса с иконками).</param>
     /// <param name="noActivate">Окно никогда не становится активным (док, список окон).</param>
     /// <param name="rounded">Скругление DWM 8 px с тонкой обводкой, как у меню Windows 11.</param>
-    public ShellWindow(SystemBackdrop backdrop, bool noActivate, bool rounded, bool transitions = true)
+    public ShellWindow(Surface surface, bool noActivate, bool rounded, bool transitions = true)
     {
-        Window = new Window { SystemBackdrop = backdrop };
+        _surface = surface;
+        Window = new Window();
         Hwnd = WinRT.Interop.WindowNative.GetWindowHandle(Window);
         Root = new Grid
         {
@@ -28,6 +49,10 @@ public sealed class ShellWindow
             RequestedTheme = ElementTheme.Dark,
         };
         Window.Content = Root;
+        ApplySurface();
+        // «Стекло / Тонировка» переключается сразу во всех окнах, без перезапуска.
+        Glass.Changed += ApplySurface;
+        Window.Closed += (_, _) => Glass.Changed -= ApplySurface;
 
         var presenter = OverlappedPresenter.Create();
         presenter.IsResizable = false;
@@ -53,6 +78,25 @@ public sealed class ShellWindow
             SetBorderColor(Hwnd, DWMWA_COLOR_NONE);
         }
         if (!transitions) NoTransitions(Hwnd);
+    }
+
+    void ApplySurface()
+    {
+        switch (_surface)
+        {
+            case Surface.Transparent:
+                Window.SystemBackdrop ??= new TransparentTintBackdrop();
+                break;
+            case var s when Glass.Tint:
+                Window.SystemBackdrop = null;
+                Root.Background = Theme.Brush(s == Surface.Dock ? Theme.TintDock : Theme.TintMenu);
+                break;
+            default:
+                if (Window.SystemBackdrop is not AlwaysActiveAcrylic)
+                    Window.SystemBackdrop = new AlwaysActiveAcrylic(dock: _surface == Surface.Dock);
+                Root.Background = Theme.Brush(Microsoft.UI.Colors.Transparent);
+                break;
+        }
     }
 
     /// Масштаб монитора окна (1,0 = 100 %, 1,75 = 175 %).

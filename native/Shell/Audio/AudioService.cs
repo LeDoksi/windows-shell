@@ -58,7 +58,7 @@ public sealed class AudioService
     void Notify() => _queue.TryEnqueue(() => Changed?.Invoke());
 
     /// Устройство по умолчанию сменилось — подписываемся на новое.
-    void Rebind()
+    public void Rebind()
     {
         if (_output != null) { try { _output.UnregisterControlChangeNotify(_callback); } catch { } }
         _output = Endpoint(EDataFlow.Render);
@@ -147,6 +147,15 @@ public sealed class AudioService
             return ok;
         }
         catch { return false; }
+    }
+
+    /// Следующее устройство вывода по кругу (горячая клавиша).
+    public void NextOutput()
+    {
+        var all = Devices();
+        if (all.Count < 2) return;
+        var i = all.FindIndex(d => d.Id == DefaultId());
+        SetDefault(all[(i + 1) % all.Count].Id);
     }
 
     /// Приложения, которые сейчас могут играть звук на устройстве по умолчанию.

@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Прототип оболочки на WinUI 3 (WSH-E13). Интерфейс собирается кодом, без .xaml. -->
+  <!-- Оболочка на WinUI 3 (WSH-E13 прототип, WSH-E14 переезд). Интерфейс собирается кодом, без .xaml. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows10.0.22621.0</TargetFramework>
@@ -19,6 +19,7 @@
     <EnableDefaultPageItems>false</EnableDefaultPageItems>
     <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>shell.ico</ApplicationIcon>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -27,6 +28,10 @@
     <!-- Предупреждения interop-генератора про [DllImport] нам не мешают. -->
     <NoWarn>$(NoWarn);SYSLIB1054;CA1416</NoWarn>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Значок в трее берётся из файла рядом с exe. -->
+    <Content Include="shell.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
     <PackageReference Include="WinUIEx" Version="2.9.3" />
