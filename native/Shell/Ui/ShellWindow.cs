@@ -38,7 +38,6 @@ public sealed class ShellWindow
         AppWindow.SetPresenter(presenter);
         AppWindow.IsShownInSwitchers = false;
 
-        SetPopupStyle(Hwnd);
         AddExStyle(Hwnd, WS_EX_TOOLWINDOW | (noActivate ? WS_EX_NOACTIVATE : 0));
         SetDark(Hwnd);
         if (rounded)
@@ -72,8 +71,6 @@ public sealed class ShellWindow
 
     public void Show(bool activate)
     {
-        // Показ окна WinUI может вернуть рамку: снимаем её каждый раз.
-        SetPopupStyle(Hwnd);
         if (activate)
         {
             AppWindow.Show(true);
