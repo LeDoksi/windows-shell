@@ -47,6 +47,9 @@ public sealed class CategoryWindow : Popup
     Microsoft.UI.Xaml.Input.Pointer? _pointer;
     // Во время перетаскивания мышь захвачена окном, а не плиткой: плитки пересобираются.
     bool _rootCapture;
+    // За пределами окна события мыши не приходят: пока тащат плитку, опрашиваем курсор сами.
+    readonly DispatcherTimer _dragPoll = new() { Interval = TimeSpan.FromMilliseconds(16) };
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
     POINT _pressAt;
     LauncherItem? _dragItem;
     int _dragIndex = -1;
@@ -59,15 +62,20 @@ public sealed class CategoryWindow : Popup
     public CategoryWindow(Services services) : base(activating: true)
     {
         _s = services;
+        _dragPoll.Tick += (_, _) =>
+        {
+            if (_dragItem is null) { _dragPoll.Stop(); return; }
+            GetCursorPos(out var c);
+            if (GetAsyncKeyState(0x1B) < 0) { FinishDrag(commit: false); return; }
+            if (GetAsyncKeyState(0x01) >= 0) { FinishDrag(commit: true); return; }
+            UpdateDrag(c);
+        };
         Win.Root.PointerMoved += (_, e) => { if (_rootCapture) OnTileMoved(e); };
         Win.Root.PointerReleased += (_, e) =>
         {
             if (!_rootCapture) return;
             e.Handled = true;
-            EndDrag(commit: true);
-            _pressItem = null;
-            _rootCapture = false;
-            Win.Root.ReleasePointerCaptures();
+            FinishDrag(commit: true);
         };
         Win.Root.PointerCaptureLost += (_, _) =>
         {
@@ -333,8 +341,21 @@ public sealed class CategoryWindow : Popup
         else if (kind == PointerUpdateKind.RightButtonReleased) ShowTileMenu(item);
     }
 
+    /// Тащат плитку из окна (панель тогда не переключает категории наведением).
+    public bool Dragging => _dragItem != null;
+
+    void FinishDrag(bool commit)
+    {
+        _dragPoll.Stop();
+        EndDrag(commit);
+        _pressItem = null;
+        _rootCapture = false;
+        Win.Root.ReleasePointerCaptures();
+    }
+
     void BeginDrag(LauncherItem item, POINT c)
     {
+        _dragPoll.Start();
         _rootCapture = true;
         if (_pointer != null) Win.Root.CapturePointer(_pointer);
         _dragItem = item;

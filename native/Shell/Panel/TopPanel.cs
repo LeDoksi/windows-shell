@@ -272,7 +272,7 @@ public sealed class TopPanel : IBar, IDropZone
         };
         pill.PointerEntered += (_, _) =>
         {
-            if (_dragCat != null) return;
+            if (_dragCat != null || _s.CategoryWindow.Dragging) return;
             pill.Background = Theme.Brush(Theme.Hover);
             // Другая категория уже открыта: наведение переключает, как строка меню Windows (раздел 4).
             if (_s.CategoryWindow.OpenCategory is { } openId && openId != cat.Id && ReferenceEquals(_s.CategoryWindow.Owner, this))
