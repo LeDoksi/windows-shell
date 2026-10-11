@@ -53,6 +53,12 @@ public sealed class WidgetSettingsFlyout : Popup
         if (hint != null) text.Children.Add(Text(hint, 12, secondary: true));
         row.Children.Add(text);
         var toggle = new ToggleSwitch { IsOn = on, OnContent = "", OffContent = "", MinWidth = 0, VerticalAlignment = VerticalAlignment.Center };
+        // Включённый — нашим акцентом, как в Windows 11 (иначе он серый и не видно, что включён).
+        foreach (var key in new[] { "ToggleSwitchFillOn", "ToggleSwitchFillOnPointerOver", "ToggleSwitchFillOnPressed" })
+            toggle.Resources[key] = Theme.Brush(Theme.Accent);
+        foreach (var key in new[] { "ToggleSwitchKnobFillOn", "ToggleSwitchKnobFillOnPointerOver", "ToggleSwitchKnobFillOnPressed" })
+            toggle.Resources[key] = Theme.Brush(Microsoft.UI.Colors.Black);
+        toggle.Resources["ToggleSwitchStrokeOn"] = Theme.Brush(Theme.Accent);
         toggle.Toggled += (_, _) => changed(toggle.IsOn);
         Grid.SetColumn(toggle, 1);
         row.Children.Add(toggle);

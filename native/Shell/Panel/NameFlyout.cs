@@ -18,7 +18,7 @@ public sealed class NameFlyout : Popup
     public NameFlyout() : base(activating: true)
     {
         _title = new TextBlock { FontFamily = Theme.Font, FontSize = 12, Foreground = Theme.Brush(Theme.TextSecondary), Margin = new Thickness(2, 0, 0, 6) };
-        _box = new TextBox { FontFamily = Theme.Font, FontSize = 14, MaxLength = 40, MinWidth = 240 };
+        _box = new TextBox { FontFamily = Theme.Font, FontSize = 14, MaxLength = 40, MinWidth = 240, MinHeight = 32 };
         _box.KeyDown += OnKey;
         var hint = new TextBlock
         {

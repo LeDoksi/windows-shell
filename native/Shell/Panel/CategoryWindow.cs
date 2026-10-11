@@ -303,10 +303,11 @@ public sealed class CategoryWindow : Popup
     {
         e.Handled = true;
         var kind = e.GetCurrentPoint(tile).Properties.PointerUpdateKind;
-        tile.ReleasePointerCaptures();
-        if (_dragItem != null) { EndDrag(commit: true); _pressItem = null; return; }
+        // Захват отпускаем последним: PointerCaptureLost сбрасывает нажатие и отменяет перетаскивание.
+        if (_dragItem != null) { EndDrag(commit: true); _pressItem = null; tile.ReleasePointerCaptures(); return; }
         var pressed = _pressItem;
         _pressItem = null;
+        tile.ReleasePointerCaptures();
         if (kind == PointerUpdateKind.LeftButtonReleased && pressed == item) OpenItem(item);
         else if (kind == PointerUpdateKind.RightButtonReleased) ShowTileMenu(item);
     }

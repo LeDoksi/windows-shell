@@ -57,6 +57,7 @@ public abstract class Popup
     protected readonly ShellWindow Win;
     readonly bool _activating;
     readonly ContentControl _host;
+    int _openCount;
     readonly CompositeTransform _shift = new();
     Rect _anchorPx;
     Placement _placement;
@@ -158,6 +159,10 @@ public abstract class Popup
         Animate();
         Win.Show(_activating);
         if (_activating) _host.Focus(FocusState.Programmatic);
+        // Шаблоны полей ввода и переключателей применяются только в показанном окне, до этого
+        // содержимое меряется ниже настоящего (поле названия обрезалось). Меряем ещё раз.
+        var opened = ++_openCount;
+        Win.Window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => { if (IsOpen && opened == _openCount) Layout(); });
         OnOpened();
         if (!nested) Popups.RaiseChanged();
     }

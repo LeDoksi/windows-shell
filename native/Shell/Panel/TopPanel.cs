@@ -196,11 +196,17 @@ public sealed class TopPanel : IBar, IDropZone
             VerticalAlignment = VerticalAlignment.Center,
         };
         if (icon is FrameworkElement fe) { fe.HorizontalAlignment = HorizontalAlignment.Center; fe.VerticalAlignment = VerticalAlignment.Center; }
-        ToolTipService.SetToolTip(b, tip);
+        // Подсказка пропадает при клике и не встаёт поверх открытого окошка (0.9, 0.10),
+        // пока курсор не уйдёт с кнопки.
+        var tt = new ToolTip { Content = tip };
+        ToolTipService.SetToolTip(b, tt);
+        b.PointerExited += (_, _) => tt.IsEnabled = true;
         Hover(b);
         b.PointerReleased += (_, e) =>
         {
             e.Handled = true;
+            tt.IsOpen = false;
+            tt.IsEnabled = false;
             if (e.GetCurrentPoint(b).Properties.PointerUpdateKind == PointerUpdateKind.LeftButtonReleased) click();
         };
         return b;
@@ -342,15 +348,18 @@ public sealed class TopPanel : IBar, IDropZone
     void OnPillReleased(Border pill, Category cat, PointerRoutedEventArgs e)
     {
         e.Handled = true;
-        pill.ReleasePointerCaptures();
         var kind = e.GetCurrentPoint(pill).Properties.PointerUpdateKind;
-        if (_dragCat != null) { EndPillDrag(commit: true); _pressPill = null; return; }
+        // Отпускаем захват только после того, как всё запомнили: PointerCaptureLost приходит
+        // сразу и сбрасывает нажатие (и отменяет перетаскивание).
+        if (_dragCat != null) { EndPillDrag(commit: true); _pressPill = null; pill.ReleasePointerCaptures(); return; }
         var pressed = _pressPill == pill;
         _pressPill = null;
+        pill.ReleasePointerCaptures();
         if (kind == PointerUpdateKind.LeftButtonReleased && pressed)
         {
             // Повторный клик закрывает, клик по другой — переключает одним кликом.
-            var key = (this, cat.Id);
+            // Тот же тип ключа, что у окна категории: (object владелец, id).
+            var key = ((object)this, cat.Id);
             if (Popups.Current == _s.CategoryWindow && Equals(_s.CategoryWindow.Anchor, key)) { _s.CategoryWindow.Close(restoreFocus: true); return; }
             if (Popups.JustClosed(key)) return;
             OpenCategory(cat, pill);
