@@ -47,6 +47,8 @@ public sealed class TopPanel : IBar, IDropZone
     Border? _pressPill;
     POINT _pressAt;
     Category? _dragCat;
+    int _dragFrom, _dragTo;
+    List<Rect> _dragRects = [];
 
     // Файлы или плитка над пилюлей.
     string? _springCat;
@@ -332,17 +334,27 @@ public sealed class TopPanel : IBar, IDropZone
             _dragCat = cat;
             Popups.CloseAll();
             _pressPill.Opacity = 0.6;
+            // Места пилюль на момент начала: дальше двигаем только их отрисовку (TranslateX),
+            // сама пилюля остаётся в дереве, иначе теряется захват мыши.
+            _dragFrom = _pillList.FindIndex(p => p.Cat == cat);
+            _dragTo = _dragFrom;
+            _dragRects = _pillList.Select(p => AnchorOf(p.Pill)).ToList();
         }
-        // Пилюля встаёт туда, где курсор (порядок меняется сразу).
-        var others = _pillList.Where(p => p.Cat != _dragCat).ToList();
-        var index = others.Count(p => { var a = AnchorOf(p.Pill); return a.X + a.Width / 2 < c.X; });
-        var current = _pillList.FindIndex(p => p.Cat == _dragCat);
-        if (index == current) return;
-        var moving = _pillList[current];
-        _pillList.RemoveAt(current);
-        _pillList.Insert(index, moving);
-        _pills.Children.Remove(moving.Pill);
-        _pills.Children.Insert(index, moving.Pill);
+        var from = _dragFrom;
+        var rects = _dragRects;
+        var shift = (rects[from].Width + _pills.Spacing * _scale) / _scale;
+        var to = 0;
+        for (var i = 0; i < rects.Count; i++) if (i != from && rects[i].X + rects[i].Width / 2 < c.X) to++;
+        _dragTo = to;
+        for (var i = 0; i < _pillList.Count; i++)
+        {
+            var pill = _pillList[i].Pill;
+            if (pill.RenderTransform is not TranslateTransform t) pill.RenderTransform = t = new TranslateTransform();
+            t.X = i == from ? (c.X - _pressAt.X) / _scale
+                : i > from && i <= to ? -shift
+                : i < from && i >= to ? shift
+                : 0;
+        }
     }
 
     void OnPillReleased(Border pill, Category cat, PointerRoutedEventArgs e)
@@ -376,10 +388,13 @@ public sealed class TopPanel : IBar, IDropZone
         var cat = _dragCat;
         _dragCat = null;
         if (cat is null) return;
+        foreach (var (_, pill) in _pillList) { pill.RenderTransform = null; pill.Opacity = 1; }
+        if (!commit || _dragTo == _dragFrom) return;
         var order = _pillList.Select(p => p.Cat.Id).ToList();
-        if (commit && !order.SequenceEqual(_s.Config.Categories.Select(c => c.Id)))
-            _s.Config.Update(c => c.Categories = order.Select(id => c.Categories.First(x => x.Id == id)).ToList());
-        else { _built = ""; Build(); }
+        var id = order[_dragFrom];
+        order.RemoveAt(_dragFrom);
+        order.Insert(Math.Clamp(_dragTo, 0, order.Count), id);
+        _s.Config.Update(c => c.Categories = order.Select(x => c.Categories.First(y => y.Id == x)).ToList());
     }
 
     void NewCategory()

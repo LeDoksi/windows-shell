@@ -44,6 +44,9 @@ public sealed class CategoryWindow : Popup
 
     // Перетаскивание плитки.
     LauncherItem? _pressItem;
+    Microsoft.UI.Xaml.Input.Pointer? _pointer;
+    // Во время перетаскивания мышь захвачена окном, а не плиткой: плитки пересобираются.
+    bool _rootCapture;
     POINT _pressAt;
     LauncherItem? _dragItem;
     int _dragIndex = -1;
@@ -56,6 +59,23 @@ public sealed class CategoryWindow : Popup
     public CategoryWindow(Services services) : base(activating: true)
     {
         _s = services;
+        Win.Root.PointerMoved += (_, e) => { if (_rootCapture) OnTileMoved(e); };
+        Win.Root.PointerReleased += (_, e) =>
+        {
+            if (!_rootCapture) return;
+            e.Handled = true;
+            EndDrag(commit: true);
+            _pressItem = null;
+            _rootCapture = false;
+            Win.Root.ReleasePointerCaptures();
+        };
+        Win.Root.PointerCaptureLost += (_, _) =>
+        {
+            if (!_rootCapture) return;
+            _rootCapture = false;
+            if (_dragItem != null) EndDrag(commit: false);
+            _pressItem = null;
+        };
         for (var i = 0; i < Columns; i++) _tiles.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TileW) });
         var edit = new Button
         {
@@ -213,7 +233,7 @@ public sealed class CategoryWindow : Popup
         tile.PointerPressed += (_, e) => OnTilePressed(tile, item, e);
         tile.PointerMoved += (_, e) => OnTileMoved(e);
         tile.PointerReleased += (_, e) => OnTileReleased(tile, item, e);
-        tile.PointerCaptureLost += (_, _) => { if (_dragItem != null) EndDrag(commit: false); _pressItem = null; };
+        tile.PointerCaptureLost += (_, _) => { if (_rootCapture) return; if (_dragItem != null) EndDrag(commit: false); _pressItem = null; };
         return tile;
     }
 
@@ -282,6 +302,7 @@ public sealed class CategoryWindow : Popup
         e.Handled = true;
         if (!p.Properties.IsLeftButtonPressed) return;
         _pressItem = item;
+        _pointer = e.Pointer;
         GetCursorPos(out _pressAt);
         tile.CapturePointer(e.Pointer);
     }
@@ -314,6 +335,8 @@ public sealed class CategoryWindow : Popup
 
     void BeginDrag(LauncherItem item, POINT c)
     {
+        _rootCapture = true;
+        if (_pointer != null) Win.Root.CapturePointer(_pointer);
         _dragItem = item;
         _dragIndex = Visible().IndexOf(item);
         _dragIcon = _shown.FirstOrDefault(x => x.Item == item).Tile is { } t ? FindImage(t) : null;
