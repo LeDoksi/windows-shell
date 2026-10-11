@@ -106,7 +106,8 @@ public abstract class Popup
         {
             if (e.WindowActivationState != WindowActivationState.Deactivated) { _wasActive = true; return; }
             // Клик мимо: окошко закрывается, а клик срабатывает там, куда нажали (0.4).
-            if (_child is { IsOpen: true }) return;
+            // Внутреннее меню ещё открывается (его окно только что стало активным) или открыто.
+            if (_child != null) return;
             if (_activating && _wasActive && IsOpen) Close(restoreFocus: false);
         };
     }
