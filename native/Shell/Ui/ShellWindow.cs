@@ -78,6 +78,31 @@ public sealed class ShellWindow
             SetBorderColor(Hwnd, DWMWA_COLOR_NONE);
         }
         if (!transitions) NoTransitions(Hwnd);
+        Root.Loaded += (_, _) =>
+        {
+            if (Root.XamlRoot is not { } xr || _watchingScale) return;
+            _watchingScale = true;
+            _rasterScale = xr.RasterizationScale;
+            xr.Changed += (_, _) =>
+            {
+                if (Math.Abs(xr.RasterizationScale - _rasterScale) < 0.001) return;
+                _rasterScale = xr.RasterizationScale;
+                RefreshImages(Root);
+                Window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => RefreshImages(Root));
+            };
+        };
+    }
+
+    bool _watchingScale;
+    double _rasterScale;
+
+    /// Окно переехало на монитор с другим масштабом: готовые картинки (WriteableBitmap), выставленные
+    /// до или во время смены масштаба, WinUI перестаёт рисовать. Переприсваиваем их.
+    static void RefreshImages(DependencyObject node)
+    {
+        if (node is Image { Source: { } src } img) { img.Source = null; img.Source = src; }
+        var n = VisualTreeHelper.GetChildrenCount(node);
+        for (var i = 0; i < n; i++) RefreshImages(VisualTreeHelper.GetChild(node, i));
     }
 
     void ApplySurface()
