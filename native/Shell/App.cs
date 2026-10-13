@@ -69,6 +69,8 @@ public sealed class App : Application, IXamlMetadataProvider
                 Audio = audio,
                 Media = new MediaService(queue),
                 Icons = new Icons(queue),
+                Keys = new WinKeys(queue),
+                Catalog = new Start.Catalog(queue),
             };
             Ui.Popup.RestoreForeground = tracker.RestoreForeground;
             tracker.Start();

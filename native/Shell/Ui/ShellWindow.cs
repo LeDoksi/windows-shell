@@ -154,13 +154,34 @@ public sealed class ShellWindow
         if (activate)
         {
             AppWindow.Show(true);
-            SetForegroundWindow(Hwnd);
+            ForceForeground(Hwnd);
         }
         else
         {
             AppWindow.Show(false);
         }
         Visible = true;
+    }
+
+    /// Вывести окно вперёд. Windows разрешает это не всегда (Пуск открыт клавишей Win, а клавишу
+    /// получило чужое окно): тогда на миг подцепляемся к потоку активного окна.
+    public static void ForceForeground(IntPtr h)
+    {
+        if (SetForegroundWindow(h) && GetForegroundWindow() == h) return;
+        var fg = GetForegroundWindow();
+        var theirs = GetWindowThreadProcessId(fg, out _);
+        var ours = GetCurrentThreadId();
+        var attached = theirs != ours && AttachThreadInput(ours, theirs, true);
+        BringWindowToTop(h);
+        SetForegroundWindow(h);
+        if (attached) AttachThreadInput(ours, theirs, false);
+        if (GetForegroundWindow() != h)
+        {
+            // Последняя попытка: своё «пустое» нажатие клавиши даёт право сменить активное окно.
+            WinKeys.SendMask();
+            SetForegroundWindow(h);
+        }
+        if (GetForegroundWindow() != h) Log.Write("окно не вышло вперёд: Windows не разрешила");
     }
 
     public void Hide()

@@ -25,9 +25,40 @@ public sealed class Icons(DispatcherQueue queue)
         if (_cache.TryGetValue(key, out var ready)) { done(ready); return; }
         if (_waiting.TryGetValue(key, out var list)) { list.Add(done); return; }
         _waiting[key] = [done];
-        var t = new Thread(() =>
+        lock (_jobs) { _jobs.Push((source, px, key)); Monitor.Pulse(_jobs); }
+        StartWorkers();
+    }
+
+    // Иконки достают несколько фоновых потоков по очереди (свежие запросы первыми): «Все
+    // приложения» в Пуске просят сотни иконок сразу, а поток на каждую — слишком много.
+    readonly Stack<(string Source, int Px, string Key)> _jobs = new();
+    bool _started;
+
+    void StartWorkers()
+    {
+        if (_started) return;
+        _started = true;
+        for (var i = 0; i < 4; i++)
         {
-            var pixels = Render(source, px);
+            var t = new Thread(Work) { IsBackground = true, Name = "icons" };
+            // Оболочке Windows нужен STA.
+            t.SetApartmentState(ApartmentState.STA);
+            t.Start();
+        }
+    }
+
+    void Work()
+    {
+        while (true)
+        {
+            (string Source, int Px, string Key) job;
+            lock (_jobs)
+            {
+                while (_jobs.Count == 0) Monitor.Wait(_jobs);
+                job = _jobs.Pop();
+            }
+            var pixels = Render(job.Source, job.Px);
+            var key = job.Key;
             queue.TryEnqueue(() =>
             {
                 WriteableBitmap? bmp = null;
@@ -40,10 +71,7 @@ public sealed class Icons(DispatcherQueue queue)
                 _cache[key] = bmp;
                 if (_waiting.Remove(key, out var callbacks)) foreach (var cb in callbacks) cb(bmp);
             });
-        }) { IsBackground = true };
-        // Оболочке Windows нужен STA.
-        t.SetApartmentState(ApartmentState.STA);
-        t.Start();
+        }
     }
 
     static Guid IID_Factory = typeof(IShellItemImageFactory).GUID;

@@ -19,6 +19,8 @@ public sealed class MenuItem
     public bool Separator { get; init; }
     public bool Enabled { get; init; } = true;
     public IReadOnlyList<MenuItem>? Children { get; init; }
+    /// Буква-ускоритель, как в меню Win+X: нажал — пункт срабатывает. Показывается справа.
+    public char? Key { get; init; }
     public Action? Invoke { get; init; }
 
     public static MenuItem Sep => new() { Separator = true };
@@ -120,7 +122,7 @@ public sealed class MenuPopup : Popup
             };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var glyph = item.Checked ? "" : item.Glyph;
             if (glyph != null)
             {
@@ -145,12 +147,13 @@ public sealed class MenuPopup : Popup
             };
             Grid.SetColumn(text, 1);
             row.Children.Add(text);
+            var tail = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, MinWidth = 20, VerticalAlignment = VerticalAlignment.Center };
+            if (item.Key is { } key)
+                tail.Children.Add(new TextBlock { Text = key.ToString(), FontFamily = Theme.Font, FontSize = 12, Foreground = Theme.Brush(Theme.TextTertiary), VerticalAlignment = VerticalAlignment.Center });
             if (item.Children != null)
-            {
-                var chevron = new FontIcon { Glyph = "", FontFamily = Theme.Icons, FontSize = 11, Foreground = Theme.Brush(Theme.TextSecondary) };
-                Grid.SetColumn(chevron, 2);
-                row.Children.Add(chevron);
-            }
+                tail.Children.Add(new FontIcon { Glyph = "", FontFamily = Theme.Icons, FontSize = 11, Foreground = Theme.Brush(Theme.TextSecondary) });
+            Grid.SetColumn(tail, 2);
+            row.Children.Add(tail);
             var index = i;
             row.PointerEntered += (_, _) => OnHover(index);
             row.PointerPressed += (_, e) => { e.Handled = true; row.Background = Theme.Brush(Theme.Pressed); };
@@ -274,6 +277,17 @@ public sealed class MenuPopup : Popup
                 return true;
             case VirtualKey.Escape when _submenu is { IsOpen: true }:
                 CloseSubmenu();
+                return true;
+            case >= VirtualKey.A and <= VirtualKey.Z:
+                // Буква-ускоритель (Win+X, затем T — «Диспетчер задач»). Клавиша физическая,
+                // поэтому работает и в русской раскладке.
+                var letter = (char)('A' + (key - VirtualKey.A));
+                var hit = -1;
+                for (var i = 0; i < _items.Count; i++)
+                    if (_items[i].Key is { } k && char.ToUpperInvariant(k) == letter && _items[i].Enabled && !_items[i].Separator) { hit = i; break; }
+                if (hit < 0) return false;
+                SetHighlight(hit);
+                Activate(hit);
                 return true;
         }
         return false;

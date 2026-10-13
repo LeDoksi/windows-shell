@@ -73,7 +73,7 @@ public static partial class Win32
 
     // ---------- shell32 ----------
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern bool ShellExecuteExW(ref SHELLEXECUTEINFO info);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern bool ShellExecuteExW(ref SHELLEXECUTEINFO info);
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr ILCreateFromPathW(string path);
     [DllImport("shell32.dll")] public static extern void ILFree(IntPtr pidl);
     [DllImport("shell32.dll")] public static extern int SHOpenFolderAndSelectItems(IntPtr pidl, uint count, IntPtr items, uint flags);

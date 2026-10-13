@@ -35,6 +35,8 @@ public sealed class Services
     public required AudioService Audio { get; init; }
     public required MediaService Media { get; init; }
     public required Icons Icons { get; init; }
+    public required WinKeys Keys { get; init; }
+    public required Start.Catalog Catalog { get; init; }
 
     MenuPopup? _menu;
     SoundFlyout? _sound;
@@ -42,6 +44,7 @@ public sealed class Services
     Panel.CategoryWindow? _category;
     Panel.NameFlyout? _name;
     Panel.MediaFlyout? _mediaFlyout;
+    Start.StartMenu? _start;
 
     public MenuPopup Menu => _menu ??= new MenuPopup();
     public SoundFlyout SoundFlyout => _sound ??= new SoundFlyout(Audio, Icons, Config);
@@ -49,13 +52,21 @@ public sealed class Services
     public Panel.CategoryWindow CategoryWindow => _category ??= new Panel.CategoryWindow(this);
     public Panel.NameFlyout NameFlyout => _name ??= new Panel.NameFlyout();
     public Panel.MediaFlyout MediaFlyout => _mediaFlyout ??= new Panel.MediaFlyout(Media);
+    public Start.StartMenu StartMenu => _start ??= new Start.StartMenu(this, Catalog);
 
     public List<IDropZone> DropZones { get; } = [];
 
     public AudioSettings AudioSettings => new(Config.Widget("audio"));
 
-    /// Открыть Пуск (свой будет в WSH-E15; пока родной).
-    public Action OpenStart { get; set; } = () => { };
+    /// Открыть или закрыть Пуск над кнопкой этого дока (null — док монитора с курсором).
+    public Action<Dock.Dock?> ToggleStart { get; set; } = _ => { };
+
+    /// Открыть или закрыть служебное меню (Win+X) над кнопкой Пуска этого дока.
+    public Action<Dock.Dock?> ToggleTools { get; set; } = _ => { };
+
+    /// Программу запустили не из дока (из Пуска): её иконка в доке пульсирует.
+    public event Action<string>? Launched;
+    public void NoteLaunch(string target) => Launched?.Invoke(target);
 
     /// Открыть настройки виджетов (пункт меню трея).
     public Action OpenWidgetSettings { get; set; } = () => { };

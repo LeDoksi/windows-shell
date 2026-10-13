@@ -227,6 +227,7 @@ public sealed class Dock : IBar, IDropZone
         _s.Tracker.AttentionChanged += UpdateDots;
         _s.Audio.Changed += UpdateSound;
         _s.Config.Changed += OnConfigChanged;
+        _s.Launched += OnLaunched;
         Popups.CurrentChanged += OnPopupsChanged;
         _s.DropZones.Add(this);
     }
@@ -239,6 +240,7 @@ public sealed class Dock : IBar, IDropZone
 
     void OnForeground()
     {
+        EndKeyboard();
         RaiseAll();
         UpdateDots();
     }
@@ -265,7 +267,129 @@ public sealed class Dock : IBar, IDropZone
     public IntPtr MainHwnd => _pill.Hwnd;
     /// Windows сам ставит наш резерв над своей панелью задач, поэтому её высоту не считаем.
     public int Reserve => Px(PillH + Bottom + 4);
-    public bool Busy => _drag != null || _gapIndex >= 0 || Popups.OwnedBy(this);
+    public bool Busy => _drag != null || _gapIndex >= 0 || _kb >= 0 || Popups.OwnedBy(this);
+
+    /// Таблетка дока там, где она стоит, когда док выехал (физические пиксели экрана): над её
+    /// левым краем открывается Пуск.
+    public Rect PillPx => new(PillScreenX(), _stripY + Px(Headroom), Px(PillWidth()), Px(PillH));
+
+    /// Кнопка Пуска, когда док выехал: над ней открывается меню Win+X.
+    public Rect StartButtonPx
+    {
+        get
+        {
+            var x = _items.FirstOrDefault(i => i.IsStart)?.DX ?? PillLeft + Pad;
+            return new Rect(_stripX + Px(x), _stripY + Px(Headroom + TopPad), Px(Icon), Px(Icon));
+        }
+    }
+
+    // ---------- клавиатура: Win+1…9, Win+T, Win+B (раздел 6) ----------
+
+    int _kb = -1;
+
+    /// Win+цифра: как клик по n-й иконке (Shift — новое окно, Ctrl+Shift — от администратора).
+    public void ClickIndex(int n, bool newWindow, bool admin)
+    {
+        var apps = _items.Where(i => !i.IsStart && !i.Removing && i.Entry != null).ToList();
+        if (n < 1 || n > apps.Count) return;
+        var it = apps[n - 1];
+        _s.Bars.Reveal(this, holdMs: 800);
+        if (admin) Launch(it, admin: true);
+        else if (newWindow) Launch(it);
+        else LeftClick(it);
+    }
+
+    List<object> KeyboardTargets()
+    {
+        var list = _items.Where(i => !i.Removing).Cast<object>().ToList();
+        if (_showSound) list.Add(_sound);
+        list.Add(_clock);
+        return list;
+    }
+
+    /// Win+T (с первой программы) или Win+B (с хвоста): стрелки ходят по доку, Enter — клик,
+    /// клавиша меню или Shift+F10 — правый клик, Esc — выйти.
+    public void BeginKeyboard(bool tail)
+    {
+        var targets = KeyboardTargets();
+        _kb = tail ? Math.Max(0, targets.FindIndex(t => t is not Item)) : Math.Min(1, targets.Count - 1);
+        _s.Keys.Capturing = true;
+        _s.Bars.Reveal(this);
+        ShowKeyboard();
+    }
+
+    public bool KeyboardActive => _kb >= 0;
+
+    public void KeyboardKey(int vk, bool shift)
+    {
+        if (_kb < 0) return;
+        var targets = KeyboardTargets();
+        if (targets.Count == 0) { EndKeyboard(); return; }
+        _kb = Math.Clamp(_kb, 0, targets.Count - 1);
+        switch (vk)
+        {
+            case 0x25: _kb = Math.Max(0, _kb - 1); break;
+            case 0x27: _kb = Math.Min(targets.Count - 1, _kb + 1); break;
+            case 0x24: _kb = 0; break;
+            case 0x23: _kb = targets.Count - 1; break;
+            case 0x09: _kb = (_kb + (shift ? -1 : 1) + targets.Count) % targets.Count; break;
+            case 0x0D or 0x20:
+            {
+                var t = targets[_kb];
+                EndKeyboard();
+                LeftClick(t);
+                return;
+            }
+            case 0x5D or 0x79:
+            {
+                // Меню само принимает клавиатуру.
+                var t = targets[_kb];
+                EndKeyboard();
+                RightClick(t);
+                return;
+            }
+            case 0x1B: EndKeyboard(); return;
+        }
+        ShowKeyboard();
+    }
+
+    void ShowKeyboard()
+    {
+        var targets = KeyboardTargets();
+        if (_kb < 0 || _kb >= targets.Count) return;
+        var t = targets[_kb];
+        _sound.Background = Theme.Brush(ReferenceEquals(t, _sound) ? Theme.Hover : Microsoft.UI.Colors.Transparent);
+        if (t is Item it)
+        {
+            // Выделенная иконка увеличена, как под курсором.
+            _cursorX = it.DX + it.Base / 2;
+            SetHover(true);
+            Kick();
+        }
+        else SetHover(false);
+        HideTooltip();
+        ShowTooltip(t, TooltipText(t));
+    }
+
+    public void EndKeyboard()
+    {
+        if (_kb < 0) return;
+        _kb = -1;
+        _s.Keys.Capturing = false;
+        HideTooltip();
+        _sound.Background = Theme.Brush(Microsoft.UI.Colors.Transparent);
+        SetHover(false);
+    }
+
+    void OnLaunched(string target)
+    {
+        foreach (var it in _items)
+        {
+            if (it.Entry is not { Running: false } e || !string.Equals(e.Target, target, StringComparison.OrdinalIgnoreCase)) continue;
+            it.LaunchUntil = Environment.TickCount64 + 10_000;
+            Kick();
+        }
+    }
 
     public RECT HotRect
     {
@@ -389,6 +513,8 @@ public sealed class Dock : IBar, IDropZone
         _s.Tracker.AttentionChanged -= UpdateDots;
         _s.Audio.Changed -= UpdateSound;
         _s.Config.Changed -= OnConfigChanged;
+        _s.Launched -= OnLaunched;
+        EndKeyboard();
         Popups.CurrentChanged -= OnPopupsChanged;
         if (Popups.OwnedBy(this)) Popups.CloseAll();
         CompositionTarget.Rendering -= OnRendering;
@@ -786,6 +912,7 @@ public sealed class Dock : IBar, IDropZone
     void OnPointerMoved(object sender, PointerRoutedEventArgs e)
     {
         var p = e.GetCurrentPoint(_canvas).Position;
+        if (_kb >= 0) EndKeyboard();
         if (_drag != null) { UpdateDrag(p); return; }
         if (_dragCandidate != null && e.GetCurrentPoint(_canvas).Properties.IsLeftButtonPressed
             && Math.Abs(p.X - _pressPoint.X) + Math.Abs(p.Y - _pressPoint.Y) > 6)
@@ -1228,9 +1355,10 @@ public sealed class Dock : IBar, IDropZone
             return;
         }
         if (target is not Item it) return;
+        // Пуск: повторный клик закрывает его, клик по Пуску другого монитора переносит.
+        if (it.IsStart) { _s.ToggleStart(this); return; }
         // Один клик = одно действие: открытое меню закрывается, и клик срабатывает.
         if (Popups.Current is { IsOpen: true }) Popups.CloseAll(restoreFocus: true);
-        if (it.IsStart) { _s.OpenStart(); return; }
         var entry = it.Entry!;
         var shift = KeyDown(VK_SHIFT);
         var ctrl = KeyDown(VK_CONTROL);
@@ -1286,18 +1414,12 @@ public sealed class Dock : IBar, IDropZone
             return;
         }
         if (target is not Item it) return;
+        // Правый клик по Пуску — служебное меню, то же, что Win+X (3.7).
+        if (it.IsStart) { _s.ToggleTools(this); return; }
         var key = ("menu", this, it.Key);
         // Правый клик по другой иконке при открытом меню: меню перескакивает одним кликом.
-        Popups.Toggle(key, () => _s.Menu.Show(key, AnchorPx(it), it.IsStart ? StartMenu() : AppMenu(it), owner: this));
+        Popups.Toggle(key, () => _s.Menu.Show(key, AnchorPx(it), AppMenu(it), owner: this));
     }
-
-    static List<MenuItem> StartMenu() =>
-    [
-        new() { Text = "Диспетчер задач", Glyph = "", Invoke = () => Launcher.Open("taskmgr.exe") },
-        new() { Text = "Параметры", Glyph = "", Invoke = () => Launcher.Open("ms-settings:") },
-        new() { Text = "Проводник", Glyph = "", Invoke = () => Launcher.Open("explorer.exe") },
-        new() { Text = "Выполнить", Glyph = "", Invoke = () => Launcher.OpenRunDialog() },
-    ];
 
     List<MenuItem> SoundMenu()
     {
