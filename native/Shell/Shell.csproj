@@ -35,5 +35,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
     <PackageReference Include="WinUIEx" Version="2.9.3" />
+    <!-- Поиск файлов в Пуске: индекс Windows Search через OLE DB. -->
+    <PackageReference Include="System.Data.OleDb" Version="8.0.1" />
   </ItemGroup>
 </Project>

@@ -49,6 +49,19 @@ public sealed class Bars
     public string? Monitor { get; set; }
 }
 
+/// Свой Пуск (WSH-E15).
+public sealed class StartSection
+{
+    /// Последняя открытая вкладка: id категории или «all».
+    public string? LastTab { get; set; }
+    /// Блок «Недавние файлы» (выключается в меню трея, потом в окне настроек).
+    public bool RecentFiles { get; set; } = true;
+    /// Быстрые папки в нижней строке: explorer, documents, downloads, pictures, music, videos, settings.
+    public List<string> Folders { get; set; } = ["explorer", "downloads", "settings"];
+    /// Сколько раз что запускали из Пуска: частое выше в поиске.
+    public Dictionary<string, int> Launches { get; set; } = [];
+}
+
 public sealed class WidgetEntry
 {
     public string Id { get; set; } = "";
@@ -64,6 +77,7 @@ public sealed class ConfigData
     public Appearance Appearance { get; set; } = new();
     public Bars Bars { get; set; } = new();
     public List<WidgetEntry> Widgets { get; set; } = [];
+    public StartSection Start { get; set; } = new();
 }
 
 /// Конфиг оболочки на диске: `%APPDATA%\WindowsShellNative\config.json`. Запись атомарная,
@@ -95,6 +109,7 @@ public sealed class ShellConfig
     public List<Category> Categories => Data.Categories;
     public Bars Bars => Data.Bars;
     public bool Tint => Data.Appearance.Glass == "tint";
+    public StartSection Start => Data.Start;
 
     public static ShellConfig Load()
     {
@@ -168,6 +183,9 @@ public sealed class ShellConfig
         Data.Appearance ??= new();
         Data.Bars ??= new();
         Data.Widgets ??= [];
+        Data.Start ??= new();
+        Data.Start.Folders ??= ["explorer", "downloads", "settings"];
+        Data.Start.Launches ??= [];
         var seen = new HashSet<string>();
         Data.Dock.Pinned = Data.Dock.Pinned.Where(p => p != null && seen.Add("pin:" + p.Id)).ToList();
         foreach (var c in Data.Categories)

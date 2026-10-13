@@ -48,7 +48,7 @@ public static class Popups
     internal static void RaiseChanged() => CurrentChanged?.Invoke();
 }
 
-public enum Placement { Above, Below, Beside, AtPoint }
+public enum Placement { Above, Below, Beside, AtPoint, AboveLeft }
 
 /// Всплывающее окошко с настоящим стеклом (меню, окошко звука, список окон). Стоит над кнопкой,
 /// выровнено по её центру и не выходит за край экрана.
@@ -81,6 +81,8 @@ public abstract class Popup
     /// Отступ окошка от кнопки (DIP).
     protected virtual double Gap => 10;
     protected virtual double Width => 0;
+    /// На сколько окошко выезжает при появлении (DIP).
+    protected virtual double Rise => 8;
 
     /// Закрыть и вернуть фокус прежнему окну.
     public event Action? Closed;
@@ -102,6 +104,8 @@ public abstract class Popup
         };
         Win.Root.Children.Add(_host);
         Win.Root.KeyDown += OnKeyDown;
+        // Alt+F4 в окошке: просто закрыть его, окно не уничтожать (оно нужно снова).
+        Win.AppWindow.Closing += (_, e) => { e.Cancel = true; Close(restoreFocus: true); };
         Win.Window.Activated += (_, e) =>
         {
             if (e.WindowActivationState != WindowActivationState.Deactivated) { _wasActive = true; return; }
@@ -202,7 +206,8 @@ public abstract class Popup
         }
         else
         {
-            x = (int)(_anchorPx.X + _anchorPx.Width / 2 - w / 2.0);
+            // Пуск: левым краем по левому краю дока, а не по центру кнопки.
+            x = _placement == Placement.AboveLeft ? (int)_anchorPx.X : (int)(_anchorPx.X + _anchorPx.Width / 2 - w / 2.0);
             // Окошко на мониторе своей кнопки и не выходит за его край (раздел 9). Рабочую
             // область не берём: закреплённый док сам её уменьшает, а окошко стоит над ним.
             var area = MonitorInfo(mon).rcMonitor;
@@ -230,7 +235,7 @@ public abstract class Popup
         var fade = new DoubleAnimation { From = 0, To = 1, Duration = Theme.Ms(150), EasingFunction = ease };
         Storyboard.SetTarget(fade, _host);
         Storyboard.SetTargetProperty(fade, "Opacity");
-        var move = new DoubleAnimation { From = 8, To = 0, Duration = Theme.Ms(150), EasingFunction = ease };
+        var move = new DoubleAnimation { From = Rise, To = 0, Duration = Theme.Ms(150), EasingFunction = ease };
         Storyboard.SetTarget(move, _shift);
         Storyboard.SetTargetProperty(move, "TranslateY");
         sb.Children.Add(fade);

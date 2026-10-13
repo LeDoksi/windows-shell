@@ -100,6 +100,32 @@ public static class Launcher
         t.Start();
     }
 
+    /// Выполнить как в окне «Выполнить»: команда (`cmd`, `services.msc`, `%temp%`) с аргументами.
+    /// `admin` — от имени администратора. Не вышло — пробуем `fallback` (wt → powershell).
+    public static void Run(string file, string? args = null, bool admin = false, string? fallback = null)
+    {
+        var t = new Thread(() =>
+        {
+            bool Exec(string f)
+            {
+                var info = new SHELLEXECUTEINFO
+                {
+                    cbSize = Marshal.SizeOf<SHELLEXECUTEINFO>(),
+                    fMask = SEE_MASK_NOASYNC,
+                    lpVerb = admin ? "runas" : null,
+                    lpFile = Environment.ExpandEnvironmentVariables(f),
+                    lpParameters = string.IsNullOrEmpty(args) ? null : args,
+                    nShow = 1,
+                };
+                return ShellExecuteExW(ref info);
+            }
+            // Отказ в окне UAC (1223) — не ошибка, запасной вариант не нужен.
+            if (!Exec(file) && Marshal.GetLastWin32Error() != 1223 && fallback != null) Exec(fallback);
+        }) { IsBackground = true };
+        t.SetApartmentState(ApartmentState.STA);
+        t.Start();
+    }
+
     /// Открыть файлы программой (файл бросили на её иконку в доке).
     public static void OpenWith(string exe, IEnumerable<string> files)
     {

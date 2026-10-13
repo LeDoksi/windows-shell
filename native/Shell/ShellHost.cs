@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Windows.Foundation;
+using WindowsShell.Apps;
 using WindowsShell.Audio;
 using WindowsShell.Native;
 using WindowsShell.Panel;
@@ -24,7 +25,8 @@ public sealed class ShellHost
     {
         _s = services;
         _hotkeys = new Hotkeys(services.Messages);
-        _s.OpenStart = OpenNativeStart;
+        _s.ToggleStart = dock => ToggleStart(dock);
+        _s.ToggleTools = ToggleTools;
         _s.OpenWidgetSettings = () => OpenWidgetSettings(null);
         _s.ToggleWidgetSettings = ToggleWidgetSettings;
         _s.RenameCategory = id =>
@@ -63,6 +65,10 @@ public sealed class ShellHost
         };
         ApplyWidgets();
         RegisterHotkeys();
+        _s.Keys.Start += () => ToggleStart(null);
+        _s.Keys.Combo += OnWinCombo;
+        _s.Keys.Captured += (vk, shift) => { foreach (var d in _docks.Values) if (d.KeyboardActive) d.KeyboardKey(vk, shift); };
+        _s.Keys.CaptureBroken += () => { foreach (var d in _docks.Values) d.EndKeyboard(); };
         // Док показывается на пару секунд при запуске: видно, что оболочка запустилась.
         foreach (var d in _docks.Values) _s.Bars.Reveal(d, holdMs: 2000);
     }
@@ -139,11 +145,105 @@ public sealed class ShellHost
         _hotkeys.Set(keys);
     }
 
-    /// Свой Пуск будет в WSH-E15; пока кнопка открывает родной.
-    static void OpenNativeStart()
+    /// Док монитора, где сейчас курсор (Пуск, Win+X, Win+S открываются там — раздел 9).
+    Dock.Dock? CursorDock()
     {
-        keybd_event(VK_LWIN, 0, 0, IntPtr.Zero);
-        keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, IntPtr.Zero);
+        GetCursorPos(out var p);
+        var screen = _s.Monitors.At(p.X, p.Y);
+        return _docks.TryGetValue(screen.Name, out var d) ? d : _docks.Values.FirstOrDefault();
+    }
+
+    /// Пуск над кнопкой этого дока; клавиша Win (dock = null): открыт — закрыть, иначе открыть
+    /// на мониторе с курсором.
+    void ToggleStart(Dock.Dock? dock, bool search = false)
+    {
+        var start = _s.StartMenu;
+        if (dock is null)
+        {
+            if (start.IsOpen)
+            {
+                if (search) start.FocusSearch();
+                else start.Close(restoreFocus: true);
+                return;
+            }
+            dock = CursorDock();
+            if (dock is null) return;
+            Popups.Current?.Close(restoreFocus: false);
+            OpenStart(dock);
+            return;
+        }
+        Popups.Toggle(("start", dock), () => OpenStart(dock));
+    }
+
+    void OpenStart(Dock.Dock dock)
+    {
+        foreach (var d in _docks.Values) d.EndKeyboard();
+        // Док выезжает и стоит, пока Пуск открыт (3.1).
+        _s.Bars.Reveal(dock);
+        _s.StartMenu.Show(("start", dock), dock.PillPx, dock);
+    }
+
+    void ToggleTools(Dock.Dock? dock)
+    {
+        dock ??= CursorDock();
+        if (dock is null) return;
+        var key = ("tools", dock);
+        Popups.Toggle(key, () =>
+        {
+            _s.Bars.Reveal(dock);
+            _s.Menu.Show(key, dock.StartButtonPx, ToolsMenu(), owner: dock);
+        });
+    }
+
+    void OnWinCombo(int vk, bool shift, bool ctrl)
+    {
+        switch (vk)
+        {
+            case 'X': ToggleTools(null); break;
+            case 'S' or 'Q': ToggleStart(null, search: true); break;
+            case 'T' or 'B':
+                Popups.CloseAll();
+                foreach (var d in _docks.Values) d.EndKeyboard();
+                CursorDock()?.BeginKeyboard(tail: vk == 'B');
+                break;
+            case >= '1' and <= '9':
+                if (Popups.Current is { IsOpen: true }) Popups.CloseAll();
+                CursorDock()?.ClickIndex(vk - '0', newWindow: shift && !ctrl, admin: shift && ctrl);
+                break;
+        }
+    }
+
+    /// Служебное меню (3.7): пункты как в Win+X Windows 11, буквы-ускорители справа.
+    List<MenuItem> ToolsMenu()
+    {
+        var items = new List<MenuItem>
+        {
+            new() { Text = "Установленные приложения", Glyph = "\uE71D", Key = 'F', Invoke = () => Launcher.Open("ms-settings:appsfeatures") },
+        };
+        if (WindowsShell.Start.Power.HasBattery)
+            items.Add(new() { Text = "Мобильность", Glyph = "\uE8EA", Key = 'B', Invoke = () => Launcher.Run("mblctr.exe") });
+        items.AddRange(
+        [
+            new() { Text = "Электропитание", Glyph = "\uE7E8", Key = 'O', Invoke = () => Launcher.Open("ms-settings:powersleep") },
+            new() { Text = "Просмотр событий", Glyph = "\uE7C3", Key = 'V', Invoke = () => Launcher.Run("eventvwr.msc") },
+            new() { Text = "Система", Glyph = "\uE7F8", Key = 'Y', Invoke = () => Launcher.Open("ms-settings:about") },
+            new() { Text = "Диспетчер устройств", Glyph = "\uE772", Key = 'M', Invoke = () => Launcher.Run("devmgmt.msc") },
+            new() { Text = "Сетевые подключения", Glyph = "\uE968", Key = 'W', Invoke = () => Launcher.Open("ms-settings:network") },
+            new() { Text = "Управление дисками", Glyph = "\uEDA2", Key = 'K', Invoke = () => Launcher.Run("diskmgmt.msc") },
+            new() { Text = "Управление компьютером", Glyph = "\uE977", Key = 'G', Invoke = () => Launcher.Run("compmgmt.msc") },
+            new() { Text = "Терминал", Glyph = "\uE756", Key = 'I', Invoke = () => Launcher.Run("wt.exe", fallback: "powershell.exe") },
+            new() { Text = "Терминал (администратор)", Glyph = "\uE7EF", Key = 'A', Invoke = () => Launcher.Run("wt.exe", admin: true, fallback: "powershell.exe") },
+            MenuItem.Sep,
+            new() { Text = "Диспетчер задач", Glyph = "\uE9D9", Key = 'T', Invoke = () => Launcher.Run("taskmgr.exe") },
+            new() { Text = "Параметры", Glyph = "\uE713", Key = 'N', Invoke = () => Launcher.Open("ms-settings:") },
+            new() { Text = "Проводник", Glyph = "\uEC50", Key = 'E', Invoke = () => Launcher.Run("explorer.exe") },
+            new() { Text = "Поиск", Glyph = "\uE721", Key = 'S', Invoke = () => ToggleStart(null, search: true) },
+            new() { Text = "Выполнить", Glyph = "\uE7C5", Key = 'R', Invoke = Launcher.OpenRunDialog },
+            MenuItem.Sep,
+            new() { Text = "Завершение работы или выход из системы", Glyph = "\uE7E8", Key = 'U', Children = WindowsShell.Start.StartMenu.PowerMenu(signOut: true) },
+            new() { Text = "Рабочий стол", Glyph = "\uE8FC", Key = 'D', Invoke = () => WinKeys.SendWinCombo('D') },
+        ]);
+        return items;
     }
 
     void OpenWidgetSettings(Rect? anchor)
@@ -194,6 +294,29 @@ public sealed class ShellHost
                     new() { Text = "Тонировка", Checked = _s.Config.Tint, Invoke = () => _s.Config.Update(c => c.Appearance.Glass = "tint") },
                 ],
             },
+            new()
+            {
+                Text = "Пуск",
+                Glyph = "\uE8FC",
+                Children =
+                [
+                    new() { Text = "Недавние файлы", Checked = _s.Config.Start.RecentFiles, Invoke = () => _s.Config.Update(c => c.Start.RecentFiles = !c.Start.RecentFiles) },
+                    new()
+                    {
+                        Text = "Быстрые папки",
+                        Children = WindowsShell.Start.StartMenu.FolderChoices.Select(f => new MenuItem
+                        {
+                            Text = f.Title,
+                            Checked = _s.Config.Start.Folders.Contains(f.Id),
+                            Invoke = () => _s.Config.Update(c =>
+                            {
+                                if (!c.Start.Folders.Remove(f.Id))
+                                    c.Start.Folders = WindowsShell.Start.StartMenu.FolderChoices.Select(x => x.Id).Where(id => id == f.Id || c.Start.Folders.Contains(id)).ToList();
+                            }),
+                        }).ToList(),
+                    },
+                ],
+            },
             MenuItem.Sep,
             new() { Text = "Перезапустить оболочку", Glyph = "", Invoke = Restart },
             new() { Text = "Выход", Glyph = "", Invoke = Quit },
@@ -202,6 +325,7 @@ public sealed class ShellHost
 
     void Shutdown()
     {
+        _s.Keys.Stop();
         Popups.CloseAll();
         _s.Bars.Shutdown();
         _tray?.Remove();
