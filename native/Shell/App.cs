@@ -33,6 +33,7 @@ public sealed class App : Application, IXamlMetadataProvider
         try { owned = mutex.WaitOne(args.Contains("--restart") ? 10_000 : 0); }
         catch (AbandonedMutexException) { owned = true; }
         if (!owned) return;
+        if (args.Contains(Native.Autostart.Arg)) WaitForExplorer();
         Start(p =>
         {
             SynchronizationContext.SetSynchronizationContext(new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread()));
@@ -41,6 +42,20 @@ public sealed class App : Application, IXamlMetadataProvider
             app.UnhandledException += (_, e) => { Log.Error("XAML", e.Exception); e.Handled = true; };
         });
     }
+
+    /// Задача планировщика запускает оболочку сразу при входе, раньше Проводника. Трею и резерву
+    /// места (AppBar) нужен Проводник, поэтому ждём его окно панели задач (не дольше минуты).
+    static void WaitForExplorer()
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (FindWindowW("Shell_TrayWnd", null) == IntPtr.Zero && sw.ElapsedMilliseconds < 60_000) Thread.Sleep(200);
+        Log.Write($"Проводник готов через {sw.ElapsedMilliseconds} мс");
+        // Пусть Проводник успеет создать трей и рабочие области мониторов.
+        Thread.Sleep(500);
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern IntPtr FindWindowW(string cls, string? title);
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
