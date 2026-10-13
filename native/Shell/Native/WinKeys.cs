@@ -94,8 +94,9 @@ public sealed class WinKeys
         try
         {
             var k = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(l);
-            // Свои же нажатия (маска, Win+D из меню) не разбираем.
-            if ((k.flags & LLKHF_INJECTED) != 0) return CallNextHookEx(IntPtr.Zero, code, w, l);
+            // Свои же нажатия (маска, Win+D из меню) не разбираем. Чужие программные нажатия
+            // (AutoHotkey, удалённый рабочий стол, макросы клавиатуры) разбираем как обычные.
+            if ((k.flags & LLKHF_INJECTED) != 0 && k.dwExtraInfo == Mark) return CallNextHookEx(IntPtr.Zero, code, w, l);
             var vk = (int)k.vkCode;
             var down = (int)w is WM_KEYDOWN or WM_SYSKEYDOWN;
 
@@ -206,10 +207,13 @@ public sealed class WinKeys
         SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
     }
 
+    /// Метка наших нажатий (dwExtraInfo), чтобы хук узнавал их среди программных.
+    static readonly IntPtr Mark = new(0x57534845); // «WSHE»
+
     static INPUT Key(int vk, ushort scan, uint flags) => new()
     {
         type = 1,
-        ki = new KEYBDINPUT { wVk = (ushort)vk, wScan = scan, dwFlags = flags },
+        ki = new KEYBDINPUT { wVk = (ushort)vk, wScan = scan, dwFlags = flags, dwExtraInfo = Mark },
     };
 
     const uint KEYEVENTF_EXTENDEDKEY = 1, KEYEVENTF_KEYUP = 2;
