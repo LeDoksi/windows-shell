@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.Foundation;
 using WindowsShell.Apps;
+using WindowsShell.Config;
 using WindowsShell.Ui;
 
 namespace WindowsShell.Audio;
@@ -26,10 +27,13 @@ public sealed class SoundFlyout : Popup
     FontIcon? _micIcon;
     string _sessionKey = "";
 
-    public SoundFlyout(AudioService audio, Icons icons) : base(activating: true)
+    readonly ShellConfig _config;
+
+    public SoundFlyout(AudioService audio, Icons icons, ShellConfig config) : base(activating: true)
     {
         _audio = audio;
         _icons = icons;
+        _config = config;
         SetContent(_body);
         // Выход переключили снаружи (горячая клавиша, Параметры): список пересобирается.
         _audio.Changed += () =>
@@ -52,10 +56,10 @@ public sealed class SoundFlyout : Popup
         return _body.DesiredSize;
     }
 
-    public void Show(object anchor, Rect anchorPx)
+    public void Show(object anchor, Rect anchorPx, object? owner = null)
     {
         Build();
-        Open(anchor, anchorPx);
+        Open(anchor, anchorPx, owner: owner);
         _sessionsTimer.Start();
     }
 
@@ -128,8 +132,44 @@ public sealed class SoundFlyout : Popup
         master.Children.Add(_masterValue);
         _body.Children.Add(master);
 
-        // Устройства вывода — сразу списком кнопок: переключение одним кликом.
+        var settings = new AudioSettings(_config.Widget("audio"));
         var devices = _audio.Devices();
+
+        // Профили: устройство и громкость одним кликом.
+        var profiles = settings.Profiles;
+        if (profiles.Count > 0)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(0, 2, 0, 4) };
+            var activeId = _audio.DefaultId();
+            foreach (var p in profiles)
+            {
+                var on = p.DeviceId == activeId && p.Volume == _audio.Volume;
+                var b = new Button
+                {
+                    Content = Label(p.Name, 13),
+                    Height = 32,
+                    Padding = new Thickness(12, 0, 12, 0),
+                    CornerRadius = new CornerRadius(16),
+                    Background = Theme.Brush(on ? Theme.Accent : Theme.Card),
+                    Foreground = Theme.Brush(on ? Microsoft.UI.Colors.Black : Theme.Text),
+                    BorderThickness = new Thickness(0),
+                };
+                if (on && b.Content is TextBlock t) t.Foreground = Theme.Brush(Microsoft.UI.Colors.Black);
+                var profile = p;
+                b.Click += (_, _) => { ApplyProfile(_audio, profile); Build(); Layout(); };
+                row.Children.Add(b);
+            }
+            _body.Children.Add(new ScrollViewer
+            {
+                Content = row,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
+                HorizontalScrollMode = ScrollMode.Enabled,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                VerticalScrollMode = ScrollMode.Disabled,
+            });
+        }
+
+        // Устройства вывода — сразу списком кнопок: переключение одним кликом.
         var current = _audio.DefaultId();
         _shownDefault = current;
         var outHead = Label("Вывод звука", 12, secondary: true);
@@ -181,7 +221,7 @@ public sealed class SoundFlyout : Popup
         }
 
         // Громкость приложений нужна редко: свёрнута, раскрывается по клику.
-        if (sessions.Count > 0)
+        if (sessions.Count > 0 && settings.ShowApps)
         {
             var toggle = new Button
             {
@@ -205,7 +245,7 @@ public sealed class SoundFlyout : Popup
             toggle.Click += (_, _) => { _appsOpen = !_appsOpen; Build(); Layout(); };
             _body.Children.Add(toggle);
         }
-        if (_appsOpen)
+        if (_appsOpen && settings.ShowApps)
         {
             foreach (var s in sessions)
             {
@@ -240,7 +280,7 @@ public sealed class SoundFlyout : Popup
         }
 
         // Микрофон.
-        if (_audio.HasInput)
+        if (_audio.HasInput && settings.ShowMic)
         {
             var head = Label("Микрофон", 12, secondary: true);
             head.Margin = new Thickness(4, 8, 0, 2);
@@ -274,6 +314,15 @@ public sealed class SoundFlyout : Popup
         };
         footer.Click += (_, _) => { Close(restoreFocus: false); Launcher.Open("ms-settings:sound"); };
         _body.Children.Add(footer);
+    }
+
+    /// Профиль: устройство по умолчанию и громкость.
+    public static void ApplyProfile(AudioService audio, AudioProfile p)
+    {
+        if (audio.DefaultId() != p.DeviceId) audio.SetDefault(p.DeviceId);
+        // Громкость — уже у нового устройства (подписка переезжает на него сразу).
+        audio.Rebind();
+        audio.Volume = p.Volume;
     }
 
     /// Звук поменяли снаружи (медиаклавиши, микшер): ползунки идут за ним без пересборки.

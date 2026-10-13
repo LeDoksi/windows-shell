@@ -37,10 +37,10 @@ public sealed class WindowListPopup : Popup
 
     public IReadOnlyList<WindowInfo> Windows => _windows;
 
-    public void Show(object anchor, Rect anchorPx, IReadOnlyList<WindowInfo> windows, string iconSource)
+    public void Show(object anchor, Rect anchorPx, IReadOnlyList<WindowInfo> windows, string iconSource, object? owner = null)
     {
         Build(windows, iconSource);
-        Open(anchor, anchorPx);
+        Open(anchor, anchorPx, owner: owner);
     }
 
     protected override Size Measure(double width) =>

@@ -41,6 +41,12 @@ public sealed class WindowTracker
 
     public event Action? Changed;
 
+    /// Окна, которые просят внимания (мигают), пока их не откроют.
+    public HashSet<IntPtr> Attention { get; } = [];
+
+    /// Окно просит внимания или перестало.
+    public event Action? AttentionChanged;
+
     /// Сменилось активное окно (чужое).
     public event Action? ForegroundChanged;
 
@@ -107,6 +113,7 @@ public sealed class WindowTracker
         if (root == IntPtr.Zero) root = hwnd;
         Foreground = root;
         _focused[root] = ++_tick;
+        if (Attention.Remove(root) | Attention.Remove(hwnd)) AttentionChanged?.Invoke();
         ForegroundChanged?.Invoke();
     }
 
@@ -153,6 +160,16 @@ public sealed class WindowTracker
         return name;
     }
 
+    /// Окно замигало в панели задач (HSHELL_FLASH).
+    public void Flash(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero) return;
+        var root = GetAncestor(hwnd, GA_ROOTOWNER);
+        if (root == IntPtr.Zero) root = hwnd;
+        if (root == Foreground && GetForegroundWindow() is var fg && (fg == root || GetAncestor(fg, GA_ROOTOWNER) == root)) return;
+        if (Attention.Add(root)) AttentionChanged?.Invoke();
+    }
+
     public void Scan()
     {
         var handles = new List<IntPtr>();
@@ -179,7 +196,7 @@ public sealed class WindowTracker
         }
         // Закрытые окна забываем.
         var alive = list.Select(w => w.Hwnd).ToHashSet();
-        foreach (var dead in _seq.Keys.Where(k => !alive.Contains(k)).ToList()) { _seq.Remove(dead); _focused.Remove(dead); }
+        foreach (var dead in _seq.Keys.Where(k => !alive.Contains(k)).ToList()) { _seq.Remove(dead); _focused.Remove(dead); Attention.Remove(dead); }
         list.Sort((a, b) => a.Seq.CompareTo(b.Seq));
         if (!list.SequenceEqual(Windows))
         {

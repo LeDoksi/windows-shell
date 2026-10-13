@@ -21,12 +21,25 @@ public static class Theme
     public static readonly Color Separator = Color.FromArgb(0x15, 255, 255, 255);
     public static readonly Color Card = Color.FromArgb(0x0D, 255, 255, 255);
     public static readonly Color Selected = Color.FromArgb(0x14, 255, 255, 255);
+    /// «Тонировка»: ровная заливка вместо стекла, непрозрачная.
+    public static readonly Color TintDock = Color.FromArgb(0xFF, 0x1E, 0x1E, 0x1E);
+    public static readonly Color TintMenu = Color.FromArgb(0xFF, 0x2B, 0x2B, 0x2B);
+    public static readonly Color Warning = Color.FromArgb(255, 0xFF, 0x9F, 0x2E);
     public static readonly Color Tooltip = Color.FromArgb(0xF0, 0x2B, 0x2B, 0x2B);
 
     public static readonly FontFamily Font = new("Segoe UI Variable Text, Segoe UI");
     public static readonly FontFamily Icons = new("Segoe Fluent Icons, Segoe MDL2 Assets");
 
     public static SolidColorBrush Brush(Color c) => new(c);
+
+    /// «#43B4F5» → цвет; не разобрать — акцент.
+    public static Color Parse(string hex)
+    {
+        var h = hex.TrimStart('#');
+        if (h.Length == 6 && uint.TryParse(h, System.Globalization.NumberStyles.HexNumber, null, out var v))
+            return Color.FromArgb(255, (byte)(v >> 16), (byte)(v >> 8), (byte)v);
+        return Accent;
+    }
 
     /// COLORREF для DWM (0x00BBGGRR).
     public static int ColorRef(byte r, byte g, byte b) => r | (g << 8) | (b << 16);
