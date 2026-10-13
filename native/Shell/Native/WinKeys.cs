@@ -31,6 +31,10 @@ public sealed class WinKeys
     bool _swallowedCombo;
     readonly HashSet<int> _swallowUp = [];
 
+    /// Что из наших сочетаний включено (окно настроек → «Клавиши»). Выключенное Windows
+    /// получает как обычно: Win одна — родной Пуск, Win+X — родное меню.
+    public volatile bool WinStart = true, WinX = true, WinSearch = true, DockKeys = true;
+
     /// Клавиши-стрелки уходят доку (Win+T, Win+B), а не активному окну.
     public volatile bool Capturing;
 
@@ -77,11 +81,17 @@ public sealed class WinKeys
     static bool Down(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
 
     /// Наши сочетания с Win. Остальные (Win+E, Win+D, Win+L…) пропускаем Windows.
-    static bool Ours(int vk, bool shift, bool ctrl)
+    bool Ours(int vk, bool shift, bool ctrl)
     {
-        if (vk is >= 0x31 and <= 0x39) return !ctrl || shift; // Win+цифра, Win+Shift+цифра, Win+Ctrl+Shift+цифра
+        if (vk is >= 0x31 and <= 0x39) return DockKeys && (!ctrl || shift); // Win+цифра, Win+Shift+цифра, Win+Ctrl+Shift+цифра
         if (shift || ctrl) return false;
-        return vk is 'X' or 'S' or 'Q' or 'T' or 'B';
+        return vk switch
+        {
+            'X' => WinX,
+            'S' or 'Q' => WinSearch,
+            'T' or 'B' => DockKeys,
+            _ => false,
+        };
     }
 
     /// Клавиши, которыми ходят по доку в режиме клавиатуры.
@@ -110,7 +120,7 @@ public sealed class WinKeys
                     return CallNextHookEx(IntPtr.Zero, code, w, l);
                 }
                 var other = vk == VK_LWIN ? VK_RWIN : VK_LWIN;
-                var alone = _winDown && !_combo && !Down(other);
+                var alone = _winDown && !_combo && !Down(other) && WinStart;
                 if (!Down(other)) _winDown = false;
                 if (!alone)
                 {

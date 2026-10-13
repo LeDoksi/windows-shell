@@ -68,11 +68,11 @@ public sealed class Services
     public event Action<string>? Launched;
     public void NoteLaunch(string target) => Launched?.Invoke(target);
 
-    /// Открыть настройки виджетов (пункт меню трея).
-    public Action OpenWidgetSettings { get; set; } = () => { };
+    /// Открыть окно настроек на странице (null — на последней открытой): меню трея, ⚙ на панели.
+    public Action<string?> OpenSettings { get; set; } = _ => { };
 
-    /// ⚙ на панели: открыть или закрыть настройки виджетов под кнопкой.
-    public Action<Windows.Foundation.Rect, object> ToggleWidgetSettings { get; set; } = (_, _) => { };
+    /// Перезапустить оболочку (кнопка в окне настроек).
+    public Action Restart { get; set; } = () => { };
 
     /// Переименовать категорию: поле под её пилюлей на панели монитора с курсором.
     public Action<string>? RenameCategory { get; set; }
