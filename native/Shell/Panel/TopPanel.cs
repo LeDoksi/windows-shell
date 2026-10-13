@@ -77,7 +77,7 @@ public sealed class TopPanel : IBar, IDropZone
         };
         _mediaPlay = IconButton(_mediaPlayIcon, "Пауза / играть", () => _s.Media.PlayPause());
         _add = IconButton(new FontIcon { Glyph = "", FontFamily = Theme.Icons, FontSize = 14, Foreground = Theme.Brush(Theme.Text) }, "Новая категория", NewCategory);
-        _gear = IconButton(new FontIcon { Glyph = "", FontFamily = Theme.Icons, FontSize = 14, Foreground = Theme.Brush(Theme.Text) }, "Настройки виджетов", () => _s.ToggleWidgetSettings(AnchorOf(_gear!), this));
+        _gear = IconButton(new FontIcon { Glyph = "", FontFamily = Theme.Icons, FontSize = 14, Foreground = Theme.Brush(Theme.Text) }, "Настройки", () => _s.OpenSettings(null));
 
         _springTimer = _s.Queue.CreateTimer();
         _springTimer.Interval = TimeSpan.FromMilliseconds(600);

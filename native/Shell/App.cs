@@ -22,7 +22,7 @@ public sealed class App : Application, IXamlMetadataProvider
     [STAThread]
     public static void Main(string[] args)
     {
-        Log.Write("---- запуск");
+        Log.Write(args.Contains(Native.Autostart.Arg) ? "---- запуск вместе с Windows" : "---- запуск");
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Write($"ОШИБКА (домен): {e.ExceptionObject}");
         TaskScheduler.UnobservedTaskException += (_, e) => Log.Error("задача", e.Exception);
         WinRT.ComWrappersSupport.InitializeComWrappers();
@@ -51,6 +51,7 @@ public sealed class App : Application, IXamlMetadataProvider
             var queue = DispatcherQueue.GetForCurrentThread();
             step = "конфиг";
             var config = ShellConfig.Load();
+            Autostart.Refresh();
             step = "окно сообщений";
             var messages = new MessageWindow();
             var monitors = new Monitors(queue, messages);

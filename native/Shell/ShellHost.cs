@@ -18,7 +18,6 @@ public sealed class ShellHost
     readonly Dictionary<string, TopPanel> _panels = [];
     readonly Hotkeys _hotkeys;
     TrayIcon? _tray;
-    WidgetSettingsFlyout? _widgetSettings;
     string _hotkeysKey = "";
 
     public ShellHost(Services services)
@@ -27,8 +26,8 @@ public sealed class ShellHost
         _hotkeys = new Hotkeys(services.Messages);
         _s.ToggleStart = dock => ToggleStart(dock);
         _s.ToggleTools = ToggleTools;
-        _s.OpenWidgetSettings = () => OpenWidgetSettings(null);
-        _s.ToggleWidgetSettings = ToggleWidgetSettings;
+        _s.OpenSettings = page => Settings.SettingsWindow.Open(_s, page);
+        _s.Restart = Restart;
         _s.RenameCategory = id =>
         {
             // Поле появляется под пилюлей на мониторе, где курсор.
@@ -64,6 +63,7 @@ public sealed class ShellHost
             if (msg == 0x0016 /* WM_ENDSESSION */) Shutdown();
         };
         ApplyWidgets();
+        ApplyKeys();
         RegisterHotkeys();
         _s.Keys.Start += () => ToggleStart(null);
         _s.Keys.Combo += OnWinCombo;
@@ -115,11 +115,22 @@ public sealed class ShellHost
     void OnConfigChanged()
     {
         Glass.Set(_s.Config.Tint);
+        ApplyKeys();
         // Сменили монитор хвоста — хвост переезжает; закрепили док или панель — резерв места.
         Sync();
         _s.Bars.Update();
         ApplyWidgets();
         RegisterHotkeys();
+    }
+
+    /// Какие сочетания с Win наши (окно настроек → «Клавиши»).
+    void ApplyKeys()
+    {
+        var k = _s.Config.Keys;
+        _s.Keys.WinStart = k.WinStart;
+        _s.Keys.WinX = k.WinX;
+        _s.Keys.WinSearch = k.WinSearch;
+        _s.Keys.DockKeys = k.DockKeys;
     }
 
     void ApplyWidgets()
@@ -246,24 +257,7 @@ public sealed class ShellHost
         return items;
     }
 
-    void OpenWidgetSettings(Rect? anchor)
-    {
-        _widgetSettings ??= new WidgetSettingsFlyout(_s);
-        if (anchor is { } a) Popups.Toggle(_widgetSettings, () => _widgetSettings.Show(a, null));
-        else
-        {
-            // Из меню трея: окошко у курсора.
-            GetCursorPos(out var p);
-            _widgetSettings.Show(new Rect(p.X, p.Y, 0, 0), null);
-        }
-    }
-
-    public void ToggleWidgetSettings(Rect anchor, object owner)
-    {
-        _widgetSettings ??= new WidgetSettingsFlyout(_s);
-        Popups.Toggle(_widgetSettings, () => _widgetSettings.Show(anchor, owner));
-    }
-
+    /// Меню значка в трее (раздел 5): частое под рукой, всё остальное — в окне настроек.
     List<MenuItem> TrayMenu()
     {
         var bars = _s.Config.Bars;
@@ -280,7 +274,7 @@ public sealed class ShellHost
         }).ToList();
         return
         [
-            new() { Text = "Настройки виджетов…", Glyph = "", Invoke = () => _s.OpenWidgetSettings() },
+            new() { Text = "Настройки…", Glyph = "", Invoke = () => _s.OpenSettings(null) },
             new() { Text = "Монитор для хвоста", Glyph = "", Children = screens },
             new() { Text = "Закрепить док", Checked = bars.DockPinned, Glyph = "", Invoke = () => _s.Config.Update(c => c.Bars.DockPinned = !c.Bars.DockPinned) },
             new() { Text = "Закрепить панель", Checked = bars.LauncherPinned, Glyph = "", Invoke = () => _s.Config.Update(c => c.Bars.LauncherPinned = !c.Bars.LauncherPinned) },
@@ -292,29 +286,6 @@ public sealed class ShellHost
                 [
                     new() { Text = "Стекло (размытие)", Checked = !_s.Config.Tint, Invoke = () => _s.Config.Update(c => c.Appearance.Glass = "acrylic") },
                     new() { Text = "Тонировка", Checked = _s.Config.Tint, Invoke = () => _s.Config.Update(c => c.Appearance.Glass = "tint") },
-                ],
-            },
-            new()
-            {
-                Text = "Пуск",
-                Glyph = "\uE8FC",
-                Children =
-                [
-                    new() { Text = "Недавние файлы", Checked = _s.Config.Start.RecentFiles, Invoke = () => _s.Config.Update(c => c.Start.RecentFiles = !c.Start.RecentFiles) },
-                    new()
-                    {
-                        Text = "Быстрые папки",
-                        Children = WindowsShell.Start.StartMenu.FolderChoices.Select(f => new MenuItem
-                        {
-                            Text = f.Title,
-                            Checked = _s.Config.Start.Folders.Contains(f.Id),
-                            Invoke = () => _s.Config.Update(c =>
-                            {
-                                if (!c.Start.Folders.Remove(f.Id))
-                                    c.Start.Folders = WindowsShell.Start.StartMenu.FolderChoices.Select(x => x.Id).Where(id => id == f.Id || c.Start.Folders.Contains(id)).ToList();
-                            }),
-                        }).ToList(),
-                    },
                 ],
             },
             MenuItem.Sep,

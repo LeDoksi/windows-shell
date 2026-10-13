@@ -54,12 +54,25 @@ public sealed class StartSection
 {
     /// Последняя открытая вкладка: id категории или «all».
     public string? LastTab { get; set; }
-    /// Блок «Недавние файлы» (выключается в меню трея, потом в окне настроек).
+    /// Блок «Недавние файлы» (выключается в окне настроек).
     public bool RecentFiles { get; set; } = true;
     /// Быстрые папки в нижней строке: explorer, documents, downloads, pictures, music, videos, settings.
     public List<string> Folders { get; set; } = ["explorer", "downloads", "settings"];
     /// Сколько раз что запускали из Пуска: частое выше в поиске.
     public Dictionary<string, int> Launches { get; set; } = [];
+}
+
+/// Наши сочетания с Win (окно настроек → «Клавиши»). Выключил — клавиша работает как в Windows.
+public sealed class KeysSection
+{
+    /// Win одна открывает наш Пуск (иначе родной).
+    public bool WinStart { get; set; } = true;
+    /// Win+X — наше служебное меню.
+    public bool WinX { get; set; } = true;
+    /// Win+S и Win+Q — поиск в нашем Пуске.
+    public bool WinSearch { get; set; } = true;
+    /// Win+1…9, Win+T, Win+B — наш док.
+    public bool DockKeys { get; set; } = true;
 }
 
 public sealed class WidgetEntry
@@ -78,6 +91,7 @@ public sealed class ConfigData
     public Bars Bars { get; set; } = new();
     public List<WidgetEntry> Widgets { get; set; } = [];
     public StartSection Start { get; set; } = new();
+    public KeysSection Keys { get; set; } = new();
 }
 
 /// Конфиг оболочки на диске: `%APPDATA%\WindowsShellNative\config.json`. Запись атомарная,
@@ -110,6 +124,7 @@ public sealed class ShellConfig
     public Bars Bars => Data.Bars;
     public bool Tint => Data.Appearance.Glass == "tint";
     public StartSection Start => Data.Start;
+    public KeysSection Keys => Data.Keys;
 
     public static ShellConfig Load()
     {
@@ -184,6 +199,7 @@ public sealed class ShellConfig
         Data.Bars ??= new();
         Data.Widgets ??= [];
         Data.Start ??= new();
+        Data.Keys ??= new();
         Data.Start.Folders ??= ["explorer", "downloads", "settings"];
         Data.Start.Launches ??= [];
         var seen = new HashSet<string>();
