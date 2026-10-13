@@ -66,8 +66,8 @@ public sealed class CategoryWindow : Popup
         {
             if (_dragItem is null) { _dragPoll.Stop(); return; }
             GetCursorPos(out var c);
-            if (GetAsyncKeyState(0x1B) < 0) { FinishDrag(commit: false); return; }
-            if (GetAsyncKeyState(0x01) >= 0) { FinishDrag(commit: true); return; }
+            if (GetAsyncKeyState(0x1B) < 0) { Log.Write("плитка: Esc"); FinishDrag(commit: false); return; }
+            if (GetAsyncKeyState(0x01) >= 0) { Log.Write($"плитка: кнопка отпущена ({c.X},{c.Y}), в окне={InsideWindow(c)}"); FinishDrag(commit: true); return; }
             UpdateDrag(c);
         };
         Win.Root.PointerMoved += (_, e) => { if (_rootCapture) OnTileMoved(e); };
@@ -77,11 +77,12 @@ public sealed class CategoryWindow : Popup
             e.Handled = true;
             FinishDrag(commit: true);
         };
+        // Захват мыши может пропасть (окно призрака, уход курсора за окно). Пока плитку тащат,
+        // это не важно: конец перетаскивания ловит опрос кнопки мыши.
         Win.Root.PointerCaptureLost += (_, _) =>
         {
-            if (!_rootCapture) return;
+            if (!_rootCapture || _dragItem != null) return;
             _rootCapture = false;
-            if (_dragItem != null) EndDrag(commit: false);
             _pressItem = null;
         };
         for (var i = 0; i < Columns; i++) _tiles.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TileW) });
@@ -241,7 +242,7 @@ public sealed class CategoryWindow : Popup
         tile.PointerPressed += (_, e) => OnTilePressed(tile, item, e);
         tile.PointerMoved += (_, e) => OnTileMoved(e);
         tile.PointerReleased += (_, e) => OnTileReleased(tile, item, e);
-        tile.PointerCaptureLost += (_, _) => { if (_rootCapture) return; if (_dragItem != null) EndDrag(commit: false); _pressItem = null; };
+        tile.PointerCaptureLost += (_, _) => { if (_rootCapture || _dragItem != null) return; _pressItem = null; };
         return tile;
     }
 
@@ -355,6 +356,7 @@ public sealed class CategoryWindow : Popup
 
     void BeginDrag(LauncherItem item, POINT c)
     {
+        Log.Write($"плитка: начало перетаскивания «{item.Title}» ({c.X},{c.Y})");
         _dragPoll.Start();
         _rootCapture = true;
         if (_pointer != null) Win.Root.CapturePointer(_pointer);
@@ -411,6 +413,7 @@ public sealed class CategoryWindow : Popup
             if (hit is null && z.DragOver(c.X, c.Y, payload)) hit = z;
             else z.DragLeave();
         }
+        if (hit != _zone) Log.Write($"плитка: над {(hit is null ? "ничем" : hit.GetType().Name)} ({c.X},{c.Y})");
         _zone = hit;
     }
 
@@ -549,7 +552,7 @@ public sealed class CategoryWindow : Popup
 
     protected override void OnClosing()
     {
-        if (_dragItem != null) EndDrag(commit: false);
+        if (_dragItem != null) { Log.Write("плитка: окно закрылось во время перетаскивания"); EndDrag(commit: false); }
         _dropIndex = -1;
     }
 }
