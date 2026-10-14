@@ -77,7 +77,19 @@ public static class Launcher
             lpDirectory = IsPath(target) ? Path.GetDirectoryName(target) : null,
             nShow = 1,
         };
-        return ShellExecuteExW(ref info);
+        return Exec(ref info);
+    }
+
+    /// ShellExecuteEx и вернуть текущую папку оболочки. Запуск с `lpDirectory` оставляет
+    /// текущей папкой процесса оболочки папку программы, а текущая папка держит её открытой:
+    /// Проводник не даёт её переименовать, пока оболочка работает (WSH-93).
+    static bool Exec(ref SHELLEXECUTEINFO info)
+    {
+        var ok = ShellExecuteExW(ref info);
+        var error = Marshal.GetLastWin32Error();
+        try { Directory.SetCurrentDirectory(AppContext.BaseDirectory); } catch { }
+        Marshal.SetLastPInvokeError(error);
+        return ok;
     }
 
     /// Запуск в своём потоке: ShellExecuteEx бывает медленным, а интерфейс не должен замирать.
@@ -94,7 +106,7 @@ public static class Launcher
         var t = new Thread(() =>
         {
             var info = new SHELLEXECUTEINFO { cbSize = Marshal.SizeOf<SHELLEXECUTEINFO>(), fMask = SEE_MASK_NOASYNC, lpFile = file, nShow = 1 };
-            ShellExecuteExW(ref info);
+            Exec(ref info);
         }) { IsBackground = true };
         t.SetApartmentState(ApartmentState.STA);
         t.Start();
@@ -117,7 +129,7 @@ public static class Launcher
                     lpParameters = string.IsNullOrEmpty(args) ? null : args,
                     nShow = 1,
                 };
-                return ShellExecuteExW(ref info);
+                return Exec(ref info);
             }
             // Отказ в окне UAC (1223) — не ошибка, запасной вариант не нужен.
             if (!Exec(file) && Marshal.GetLastWin32Error() != 1223 && fallback != null) Exec(fallback);
@@ -141,7 +153,7 @@ public static class Launcher
                 lpDirectory = Path.GetDirectoryName(exe),
                 nShow = 1,
             };
-            ShellExecuteExW(ref info);
+            Exec(ref info);
         }) { IsBackground = true };
         t.SetApartmentState(ApartmentState.STA);
         t.Start();
@@ -154,9 +166,14 @@ public static class Launcher
         catch { }
     }
 
-    /// «Открыть расположение файла»: Проводник с выделенным файлом.
+    /// «Открыть расположение файла»: Проводник с выделенным файлом. У ярлыка — его цель, как в
+    /// Проводнике: ярлыки с рабочего стола лежат копиями в нашей папке, и показывать её незачем (WSH-96).
     public static void Reveal(string path)
     {
+        if (path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)
+            && ShellProperty(path, PKEY_Link_TargetParsingPath) is { } target
+            && IsPath(target) && (File.Exists(target) || Directory.Exists(target)))
+            path = target;
         var pidl = ILCreateFromPathW(path);
         if (pidl == IntPtr.Zero) return;
         try { SHOpenFolderAndSelectItems(pidl, 0, IntPtr.Zero, 0); }

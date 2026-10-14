@@ -173,7 +173,7 @@ public sealed class TrayFlyout : Popup
             var now = Environment.TickCount64;
             var dbl = _lastDown.Item1 == it.Hwnd && _lastDown.Item2 == it.Uid && _lastDown.Item3 == button && now - _lastDown.Item4 <= GetDoubleClickTime();
             _lastDown = (it.Hwnd, it.Uid, button, dbl ? 0 : now);
-            if (it.Callback == 0) return;
+            if (it.Callback == 0 || IsOwn(it)) return;
             NoteClick(it);
             var (x, y) = Center(cell);
             TrayHost.Down(it, button, dbl, x, y);
@@ -191,6 +191,7 @@ public sealed class TrayFlyout : Popup
                 _ => TrayHost.Button.Left,
             };
             if (it.Callback == 0) { NoCallback(it, button); return; }
+            if (IsOwn(it)) { if (button != TrayHost.Button.Middle) ShowOwnMenu(it); return; }
             NoteClick(it);
             var (x, y) = Center(cell);
             TrayHost.Up(it, button, x, y);
@@ -198,6 +199,13 @@ public sealed class TrayFlyout : Popup
         cell.KeyDown += (_, e) =>
         {
             var (x, y) = Center(cell);
+            var menuKey = e.Key is VirtualKey.Enter or VirtualKey.Space or VirtualKey.Application || (e.Key == VirtualKey.F10 && KeyDown(VK_SHIFT));
+            if (menuKey && IsOwn(it))
+            {
+                e.Handled = true;
+                ShowOwnMenu(it);
+                return;
+            }
             switch (e.Key)
             {
                 case VirtualKey.Enter or VirtualKey.Space:
@@ -219,6 +227,34 @@ public sealed class TrayFlyout : Popup
     }
 
     MenuPopup? _ownMenu;
+
+    /// Меню самой оболочки (как по её значку в трее Windows).
+    public Func<List<MenuItem>>? ShellMenu { get; set; }
+
+    /// Значок самой оболочки. Его сообщения пришли бы нам же, и наше меню открылось бы как
+    /// отдельное окошко — закрыв это и отпустив док (WSH-97). Показываем меню внутри окошка.
+    static bool IsOwn(TrayItem it) => ProcessId(it.Hwnd) == (uint)Environment.ProcessId;
+
+    void ShowOwnMenu(TrayItem it)
+    {
+        if (ShellMenu is null) return;
+        GetCursorPos(out var c);
+        _ownMenu ??= new MenuPopup();
+        _ownMenu.ShowInside(this, it, new Rect(c.X, c.Y, 0, 0), ClosingFirst(ShellMenu()));
+    }
+
+    /// Пункт выбран — сначала закрываем окошко трея (окно настроек не должно открыться под ним).
+    List<MenuItem> ClosingFirst(IEnumerable<MenuItem> items) => items.Select(m => m.Separator ? m : new MenuItem
+    {
+        Text = m.Text,
+        Glyph = m.Glyph,
+        Danger = m.Danger,
+        Checked = m.Checked,
+        Enabled = m.Enabled,
+        Key = m.Key,
+        Children = m.Children is { } ch ? ClosingFirst(ch) : null,
+        Invoke = m.Invoke is { } run ? () => { Close(restoreFocus: false); run(); } : null,
+    }).ToList();
 
     /// Иконка, у которой мы не знаем сообщения для кликов: программа сообщила его Проводнику
     /// ещё до запуска оболочки и нам не повторила (так делает щит «Безопасность Windows»).
