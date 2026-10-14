@@ -65,17 +65,18 @@ public sealed class TrayFlyout : Popup
     public void Show(object anchor, Rect anchorPx, object? owner)
     {
         _fgBeforeOpen = GetForegroundWindow();
-        _wasDown = true;
         _host.Prune();
         _clickedPid = 0;
         Build();
         Open(anchor, anchorPx, owner: owner);
         _watch.Start();
+        HookMouse();
     }
 
     protected override void OnClosing()
     {
         _watch.Stop();
+        UnhookMouse();
         _clickedAt = 0;
         _hadMenu = false;
         _keepFor = IntPtr.Zero;
@@ -262,10 +263,56 @@ public sealed class TrayFlyout : Popup
     readonly HashSet<IntPtr> _visibleAtClick = [];
     IntPtr _keepFor;
     IntPtr _fgBeforeOpen;
-    bool _wasDown = true;
 
-    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+    // ---------- клик мимо ----------
+    // Пока окошко открыто, слушаем нажатия мыши во всей системе (как окошко трея Windows): клик
+    // по чужому окну, не по меню программы, закрывает окошко, даже если фокус не сменился (после
+    // меню Chrome фокус уже у того окна, по которому кликают). В самом перехватчике ничего не
+    // делаем — только ставим проверку в очередь окна.
+
+    delegate IntPtr MouseProc(int code, IntPtr w, IntPtr l);
+    MouseProc? _mouseProc;
+    IntPtr _mouseHook;
+
+    void HookMouse()
+    {
+        if (_mouseHook != IntPtr.Zero) return;
+        _mouseProc ??= OnMouse;
+        _mouseHook = SetWindowsHookExW(14 /* WH_MOUSE_LL */, _mouseProc, GetModuleHandleW(null), 0);
+    }
+
+    void UnhookMouse()
+    {
+        if (_mouseHook == IntPtr.Zero) return;
+        UnhookWindowsHookEx(_mouseHook);
+        _mouseHook = IntPtr.Zero;
+    }
+
+    IntPtr OnMouse(int code, IntPtr w, IntPtr l)
+    {
+        var msg = (uint)(long)w;
+        if (code >= 0 && msg is 0x201 or 0x204 or 0x207 /* L, R, M down */)
+        {
+            var pt = System.Runtime.InteropServices.Marshal.PtrToStructure<POINT>(l);
+            Win.Window.DispatcherQueue.TryEnqueue(() => ClickAt(pt));
+        }
+        return CallNextHookEx(IntPtr.Zero, code, w, l);
+    }
+
+    void ClickAt(POINT pt)
+    {
+        if (!IsOpen) return;
+        var root = GetAncestor(WindowFromPoint(pt), 2 /* GA_ROOT */);
+        if (root == IntPtr.Zero || ProcessId(root) == (uint)Environment.ProcessId || ClassName(root) == "#32768") return;
+        if (FindPopups().Contains(root)) return;
+        Close(restoreFocus: false);
+    }
+
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr SetWindowsHookExW(int id, MouseProc proc, IntPtr mod, uint thread);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr w, IntPtr l);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] static extern IntPtr GetModuleHandleW(string? name);
     readonly HashSet<IntPtr> _placed = [];
 
     /// Окна «поверх всех», которые были до клика (у Проводника их много, и это не меню).
@@ -384,20 +431,6 @@ public sealed class TrayFlyout : Popup
             _keepFor = _fgBeforeOpen;
             SetForegroundWindow(Hwnd);
         }
-        // Клик мимо — по чужому окну, не по меню программы — закрывает окошко, даже если фокус
-        // остался прежним.
-        var down = GetAsyncKeyState(0x01) < 0 || GetAsyncKeyState(0x02) < 0;
-        if (down && !_wasDown && GetCursorPos(out var c))
-        {
-            var root = GetAncestor(WindowFromPoint(c), 2 /* GA_ROOT */);
-            if (root != IntPtr.Zero && ProcessId(root) != (uint)Environment.ProcessId && !popups.Contains(root) && ClassName(root) != "#32768")
-            {
-                _wasDown = down;
-                Close(restoreFocus: false);
-                return;
-            }
-        }
-        _wasDown = down;
         var fg = GetForegroundWindow();
         if (fg == IntPtr.Zero || fg == Hwnd || ProcessId(fg) == (uint)Environment.ProcessId) return;
         if (!IsRealWindow(fg) || popups.Contains(fg) || fg == _keepFor) return;
