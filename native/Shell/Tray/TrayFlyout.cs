@@ -64,6 +64,8 @@ public sealed class TrayFlyout : Popup
 
     public void Show(object anchor, Rect anchorPx, object? owner)
     {
+        _fgBeforeOpen = GetForegroundWindow();
+        _wasDown = true;
         _host.Prune();
         _clickedPid = 0;
         Build();
@@ -259,6 +261,11 @@ public sealed class TrayFlyout : Popup
     bool _hadMenu;
     readonly HashSet<IntPtr> _visibleAtClick = [];
     IntPtr _keepFor;
+    IntPtr _fgBeforeOpen;
+    bool _wasDown = true;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
     readonly HashSet<IntPtr> _placed = [];
 
     /// Окна «поверх всех», которые были до клика (у Проводника их много, и это не меню).
@@ -371,7 +378,26 @@ public sealed class TrayFlyout : Popup
             // Окну программы — пустое сообщение после меню (так советует Microsoft для меню из
             // трея): иначе его меню держит мышь и следующий клик по ⌃ пропадает.
             if (_clickedHwnd != IntPtr.Zero) PostMessageW(_clickedHwnd, 0 /* WM_NULL */, IntPtr.Zero, IntPtr.Zero);
+            // Меню Chrome и Discord, закрываясь, отдают фокус окну, которое было впереди до ⌃.
+            // Это не уход из окошка: фокус забираем назад (как окошко трея Windows), а если
+            // Windows не даст — то окно окошко не закрывает.
+            _keepFor = _fgBeforeOpen;
+            SetForegroundWindow(Hwnd);
         }
+        // Клик мимо — по чужому окну, не по меню программы — закрывает окошко, даже если фокус
+        // остался прежним.
+        var down = GetAsyncKeyState(0x01) < 0 || GetAsyncKeyState(0x02) < 0;
+        if (down && !_wasDown && GetCursorPos(out var c))
+        {
+            var root = GetAncestor(WindowFromPoint(c), 2 /* GA_ROOT */);
+            if (root != IntPtr.Zero && ProcessId(root) != (uint)Environment.ProcessId && !popups.Contains(root) && ClassName(root) != "#32768")
+            {
+                _wasDown = down;
+                Close(restoreFocus: false);
+                return;
+            }
+        }
+        _wasDown = down;
         var fg = GetForegroundWindow();
         if (fg == IntPtr.Zero || fg == Hwnd || ProcessId(fg) == (uint)Environment.ProcessId) return;
         if (!IsRealWindow(fg) || popups.Contains(fg) || fg == _keepFor) return;
