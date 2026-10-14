@@ -28,7 +28,8 @@ public sealed class ClockFlyout : Popup
             Background = Theme.Brush(Microsoft.UI.Colors.Transparent),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             CalendarIdentifier = Windows.Globalization.CalendarIdentifiers.Gregorian,
-            Language = CultureInfo.CurrentUICulture.Name,
+            // Явный формат дней недели: без него строка «пн вт ср…» на mephPC была пустой.
+            DayOfWeekFormat = "{dayofweek.abbreviated(2)}",
         };
         _body.Children.Add(_date);
         _body.Children.Add(_calendar);

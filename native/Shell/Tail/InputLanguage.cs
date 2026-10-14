@@ -103,11 +103,12 @@ public sealed class Notifications
         _ = StartListener();
         new Thread(() =>
         {
-            while (true)
+            // «Не беспокоить» — дёшево, раз в 2 с; список уведомлений (WinRT) — раз в 10 с.
+            for (var tick = 0; ; tick++)
             {
                 var dnd = QuietMode();
                 if (dnd != DoNotDisturb) _queue.TryEnqueue(() => { DoNotDisturb = dnd; Changed?.Invoke(); });
-                if (_listener) _ = Poll();
+                if (_listener && tick % 5 == 0) _ = Poll();
                 Thread.Sleep(2000);
             }
         }) { IsBackground = true, Name = "notifications" }.Start();

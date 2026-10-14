@@ -227,6 +227,8 @@ public sealed class TrayFlyout : Popup
         }
     }
 
+    IntPtr _raisedMenu;
+
     void NoteClick(TrayItem it)
     {
         _clickedPid = ProcessId(it.Hwnd);
@@ -246,7 +248,19 @@ public sealed class TrayFlyout : Popup
         var fgPid = fg == IntPtr.Zero ? 0 : ProcessId(fg);
         var programMenu = menu != IntPtr.Zero && IsWindowVisible(menu)
             || _clickedPid != 0 && fgPid == _clickedPid && !IsRealWindow(fg);
-        if (programMenu) { _menuSeen = true; return; }
+        if (programMenu)
+        {
+            _menuSeen = true;
+            // Наше окошко тоже поверх всех: меню программы поднимаем над ним, иначе оно под нами.
+            var shown = menu != IntPtr.Zero && IsWindowVisible(menu) ? menu : fg;
+            if (shown != IntPtr.Zero && shown != _raisedMenu)
+            {
+                _raisedMenu = shown;
+                SetWindowPos(shown, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            }
+            return;
+        }
+        _raisedMenu = IntPtr.Zero;
         if (_menuSeen) { Close(restoreFocus: false); return; }
         // Только что кликнули: программа ещё выводит своё меню (её скрытое окно уже впереди).
         if (_clickedPid != 0 && Environment.TickCount64 - _clickedAt < 1500 && (fgPid == _clickedPid || fg == IntPtr.Zero) && !IsRealWindow(fg)) return;

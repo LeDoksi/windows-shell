@@ -34,7 +34,8 @@ public static class JumpLists
             }
         }
         catch (Exception e) { Log.Write($"быстрые действия: {e.Message}"); }
-        return result.DistinctBy(l => (l.Title, l.Args)).Take(10).ToList();
+        // Chrome пишет одни и те же действия в несколько файлов (по профилю): одинаковые названия — один пункт.
+        return result.DistinctBy(l => l.Title, StringComparer.CurrentCultureIgnoreCase).Take(10).ToList();
     }
 
     static List<JumpEntry> Read(string file)

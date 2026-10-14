@@ -142,10 +142,16 @@ public static class Taskbar
         HideAgain("Проводник перезапущен");
     }
 
+    static long _loggedAgain = -10_000;
+
     static void HideAgain(string reason)
     {
         if (!TrayWindows().Any(IsWindowVisible)) return;
         SetVisible(false);
+        // При запуске Проводник несколько секунд показывает панель снова и снова: в журнал — не чаще раза в 10 с.
+        var now = Environment.TickCount64;
+        if (now - _loggedAgain < 10_000) return;
+        _loggedAgain = now;
         Log.Write($"панель задач спрятана снова ({reason})");
     }
 
