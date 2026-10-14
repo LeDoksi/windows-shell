@@ -388,7 +388,9 @@ public sealed class TrayHost
             w = new IntPtr((nint)it.Uid);
             l = new IntPtr((nint)ev);
         }
-        SendNotifyMessageW(it.Hwnd, it.Callback, w, l);
+        // Программы ставят меню по GetMessagePos: у отправленного (SendNotifyMessage) сообщения
+        // там 0,0 и меню уезжает в угол экрана, у поставленного в очередь — курсор.
+        PostMessageW(it.Hwnd, it.Callback, w, l);
     }
 
     static IntPtr MakeLParam(int lo, int hi) => new((nint)(uint)((lo & 0xFFFF) | ((hi & 0xFFFF) << 16)));
