@@ -270,8 +270,11 @@ public sealed class TrayFlyout : Popup
         Log.Write($"трей: меню перенесено из {r.Left},{r.Top} к иконке");
     }
 
+    IntPtr _clickedHwnd;
+
     void NoteClick(TrayItem it)
     {
+        _clickedHwnd = it.Hwnd;
         GetCursorPos(out _clickPoint);
         _clickedPid = ProcessId(it.Hwnd);
         _clickedAt = Environment.TickCount64;
@@ -296,7 +299,15 @@ public sealed class TrayFlyout : Popup
         if (visibleMenu != IntPtr.Zero) programMenu = true;
         // Меню было видно и пропало (Esc, выбор пункта): закрываемся, даже если впереди осталось
         // скрытое окно программы — иначе следующий клик по ⌃ уйдёт на закрытие невидимого окошка.
-        else if (_raisedMenu != IntPtr.Zero) { _raisedMenu = IntPtr.Zero; Close(restoreFocus: false); return; }
+        else if (_raisedMenu != IntPtr.Zero)
+        {
+            _raisedMenu = IntPtr.Zero;
+            // Окну программы — пустое сообщение после меню (так советует Microsoft для меню из
+            // трея): иначе его меню держит мышь и следующий клик по ⌃ пропадает.
+            if (_clickedHwnd != IntPtr.Zero) PostMessageW(_clickedHwnd, 0 /* WM_NULL */, IntPtr.Zero, IntPtr.Zero);
+            Close(restoreFocus: false);
+            return;
+        }
         if (programMenu)
         {
             _menuSeen = true;
