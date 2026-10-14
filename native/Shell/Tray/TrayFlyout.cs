@@ -30,7 +30,6 @@ public sealed class TrayFlyout : Popup
     // Последний клик: по какой программе и когда — её меню и окна не закрывают окошко сразу.
     uint _clickedPid;
     long _clickedAt;
-    bool _menuSeen;
     (IntPtr, uint, TrayHost.Button, long) _lastDown;
     TrayItem? _hovered;
 
@@ -66,7 +65,6 @@ public sealed class TrayFlyout : Popup
     public void Show(object anchor, Rect anchorPx, object? owner)
     {
         _host.Prune();
-        _menuSeen = false;
         _clickedPid = 0;
         Build();
         Open(anchor, anchorPx, owner: owner);
@@ -244,24 +242,28 @@ public sealed class TrayFlyout : Popup
         }
     }
 
-    /// Меню, открытое кликом по иконке: обычное меню Windows (#32768) или своё окно «поверх всех»,
-    /// которое появилось после клика (Chrome, Discord, Xbox и другие рисуют меню сами, иногда
-    /// даже в другом процессе). Наши окна и подсказки не в счёт.
+    /// Окна, которые программа вывела после клика по иконке: обычное меню Windows (#32768) или
+    /// свои окна «поверх всех» (Chrome, Discord, Fan Control, Xbox рисуют меню сами, вместе с
+    /// подсказками, иногда в другом процессе). Возвращает самое нижнее из них: наши окна должны
+    /// стоять под всеми, иначе подсказка над меню принималась за меню, а само меню оставалось под
+    /// окошком. Наши окна не в счёт.
     IntPtr FindMenu()
     {
+        var lowest = IntPtr.Zero;
         var menu = FindWindowW("#32768", null);
-        if (menu != IntPtr.Zero && IsWindowVisible(menu)) return menu;
-        if (_clickedAt == 0) return IntPtr.Zero;
+        if (menu != IntPtr.Zero && IsWindowVisible(menu)) lowest = menu;
+        if (_clickedAt == 0) return lowest;
         var own = (uint)Environment.ProcessId;
+        var late = Environment.TickCount64 - _clickedAt > 3000;
         foreach (var h in TopmostWindows())
         {
             if (_before.Contains(h) || ProcessId(h) == own || IsRealWindow(h)) continue;
-            if (ClassName(h) is "tooltips_class32" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") continue;
+            if (ClassName(h) is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") continue;
             // Чужое новое окно через много секунд после клика — уже не меню (уведомление и т. п.).
-            if (ProcessId(h) != _clickedPid && Environment.TickCount64 - _clickedAt > 3000) continue;
-            return h;
+            if (late && ProcessId(h) != _clickedPid) continue;
+            lowest = h;
         }
-        return IntPtr.Zero;
+        return lowest;
     }
 
     /// Все наши окна, которые выше меню (это окошко, док, панель), ставим прямо под него, сохраняя
@@ -308,7 +310,6 @@ public sealed class TrayFlyout : Popup
         GetCursorPos(out _clickPoint);
         _clickedPid = ProcessId(it.Hwnd);
         _clickedAt = Environment.TickCount64;
-        _menuSeen = false;
     }
 
     static string ProcessName(uint pid)
@@ -317,48 +318,41 @@ public sealed class TrayFlyout : Popup
         catch { return pid.ToString(); }
     }
 
-    /// Окошко не закрывается само, когда теряет фокус (так меню программы может открыться).
-    /// Решаем здесь: пока открыто меню — окошко стоит под ним; меню закрылось или ушли в другое
-    /// окно — закрываемся.
+    /// Окошко живёт как в Windows 11: стоит, пока открыто меню программы и после него, и
+    /// закрывается, когда ушли в другое окно (клик мимо, программа открыла своё окно), по Esc или
+    /// повторному клику по ⌃. Меню программы на это не влияет — только на порядок окон: пока оно
+    /// открыто, наши окна стоят под ним.
     void Watch()
     {
         if (!IsOpen) { _watch.Stop(); return; }
         var menu = FindMenu();
         if (menu != IntPtr.Zero)
         {
-            _menuSeen = true;
             if (menu != _menu)
             {
                 _menu = menu;
-                // Пока меню открыто, док и панель не поднимаются выше него (смена активного окна
-                // и перестановки раньше закрывали меню доком).
+                // Пока меню открыто, док и панель не поднимаются выше него.
                 ForeignMenu = menu;
                 Log.Write($"трей: меню {ClassName(menu)} программы {ProcessName(ProcessId(menu))}");
                 PlaceStrayMenu(menu);
             }
             // Каждый раз: наше окно могло подняться между проверками.
             StepBelow(menu);
-            return;
         }
-        if (_menu != IntPtr.Zero)
+        else if (_menu != IntPtr.Zero)
         {
-            // Меню было и закрылось (Esc, выбрали пункт).
+            // Меню закрылось (Esc, выбрали пункт).
             _menu = IntPtr.Zero;
             ForeignMenu = IntPtr.Zero;
             // Окну программы — пустое сообщение после меню (так советует Microsoft для меню из
             // трея): иначе его меню держит мышь и следующий клик по ⌃ пропадает.
             if (_clickedHwnd != IntPtr.Zero) PostMessageW(_clickedHwnd, 0 /* WM_NULL */, IntPtr.Zero, IntPtr.Zero);
-            Close(restoreFocus: false);
-            return;
         }
         var fg = GetForegroundWindow();
-        var own = (uint)Environment.ProcessId;
-        if (fg == Hwnd || fg != IntPtr.Zero && ProcessId(fg) == own) return;
-        if (_menuSeen) { Close(restoreFocus: false); return; }
-        // Только что кликнули: программа ещё выводит своё меню (её скрытое окно уже впереди,
-        // а у программ из Магазина вроде Xbox меню появляется не сразу).
-        if (_clickedAt != 0 && Environment.TickCount64 - _clickedAt < 3000 && !IsRealWindow(fg)) return;
-        Close(restoreFocus: false);
+        if (fg == IntPtr.Zero || fg == Hwnd || ProcessId(fg) == (uint)Environment.ProcessId) return;
+        // Впереди обычное окно (рабочий стол, другая программа, окно, открытое кликом по иконке):
+        // окошко закрывается. Скрытые служебные окна программ и их меню — нет.
+        if (IsRealWindow(fg) && fg != _menu) Close(restoreFocus: false);
     }
 
     /// Обычное окно программы (а не меню, подсказка или скрытое служебное окно).
