@@ -229,6 +229,18 @@ public sealed class TrayFlyout : Popup
 
     IntPtr _raisedMenu;
 
+    /// Видимое окно «поверх всех» этой программы (её меню), если есть.
+    static IntPtr TopmostOf(uint pid)
+    {
+        if (pid == 0) return IntPtr.Zero;
+        for (var h = GetWindow(GetDesktopWindow(), 5 /* GW_CHILD */); h != IntPtr.Zero; h = GetWindow(h, 2 /* GW_HWNDNEXT */))
+        {
+            if ((ExStyle(h) & WS_EX_TOPMOST) == 0) break;
+            if (IsWindowVisible(h) && ProcessId(h) == pid && !IsRealWindow(h) && ClassName(h) != "tooltips_class32") return h;
+        }
+        return IntPtr.Zero;
+    }
+
     static void StepBelow(IntPtr menu)
     {
         var own = (uint)Environment.ProcessId;
@@ -260,10 +272,10 @@ public sealed class TrayFlyout : Popup
         var fgPid = fg == IntPtr.Zero ? 0 : ProcessId(fg);
         var programMenu = menu != IntPtr.Zero && IsWindowVisible(menu)
             || _clickedPid != 0 && fgPid == _clickedPid && (!IsRealWindow(fg) || (ExStyle(fg) & WS_EX_TOPMOST) != 0);
-        // Видимое меню: #32768 или «поверх всех» окно программы (Chrome, Discord рисуют меню сами).
-        var visibleMenu = menu != IntPtr.Zero && IsWindowVisible(menu) ? menu
-            : _clickedPid != 0 && fgPid == _clickedPid && IsWindowVisible(fg) && (ExStyle(fg) & WS_EX_TOPMOST) != 0 ? fg
-            : IntPtr.Zero;
+        // Видимое меню: #32768 или «поверх всех» окно программы (Chrome, Discord рисуют меню сами,
+        // и впереди у них бывает скрытое служебное окно, а не меню).
+        var visibleMenu = menu != IntPtr.Zero && IsWindowVisible(menu) ? menu : TopmostOf(_clickedPid);
+        if (visibleMenu != IntPtr.Zero) programMenu = true;
         if (programMenu)
         {
             _menuSeen = true;
@@ -302,4 +314,7 @@ public sealed class TrayFlyout : Popup
 
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
     static extern IntPtr FindWindowW(string cls, string? title);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    static extern IntPtr GetDesktopWindow();
 }

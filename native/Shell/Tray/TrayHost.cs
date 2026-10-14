@@ -354,12 +354,12 @@ public sealed class TrayHost
                 if (it.Version >= 3) Send(it, NIN_SELECT, x, y);
                 break;
             case Button.Right:
-                // Классические программы (Безопасность Windows, Bluetooth) выводят меню через
-                // TrackPopupMenu, а оно сразу закрывается, если окно программы не впереди. Мы сейчас
-                // впереди, значит можем отдать первенство окну иконки — как это делает Проводник.
-                SetForegroundWindow(it.Hwnd);
                 Send(it, WM_RBUTTONUP, x, y);
-                if (it.Version >= 3) Send(it, WM_CONTEXTMENU, x, y);
+                // Меню по правой кнопке программы версии 3–4 выводят по WM_CONTEXTMENU. Версию мы
+                // можем не знать (программа сообщила её Проводнику до нашего запуска), а старые
+                // программы лишнее событие просто пропускают — поэтому шлём всегда.
+                Send(it, WM_CONTEXTMENU, x, y);
+                Log.Write($"трей: правый клик, версия {it.Version}, {ClassName(it.Hwnd)}");
                 break;
             default:
                 Send(it, WM_MBUTTONUP, x, y);
