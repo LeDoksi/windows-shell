@@ -1460,6 +1460,20 @@ public sealed partial class Dock : IBar, IDropZone
             }
             items.Add(MenuItem.Sep);
         }
+        // Списки быстрых действий программы (раздел 8): недавние файлы и её действия.
+        var exe = e.Windows.FirstOrDefault()?.Exe ?? Launcher.Resolve(e.Target).Exe;
+        var aumid = e.Windows.FirstOrDefault()?.Aumid ?? (Launcher.IsPath(e.Target) ? null : e.Target);
+        var recent = JumpLists.Recent(aumid);
+        if (recent.Count > 0)
+            items.Add(new MenuItem
+            {
+                Text = "Недавние",
+                Glyph = "\uE81C",
+                Children = recent.Select(r => new MenuItem { Text = r.Title, Invoke = () => Launcher.Open(r.Path) }).ToList(),
+            });
+        var tasks = JumpLists.Tasks(exe);
+        foreach (var t in tasks) items.Add(new MenuItem { Text = t.Title, Invoke = () => Launcher.Run(t.Path, t.Args) });
+        if (recent.Count > 0 || tasks.Count > 0) items.Add(MenuItem.Sep);
         items.Add(new MenuItem { Text = e.Running ? "Новое окно" : "Открыть", Glyph = e.Running ? "" : "", Enabled = !e.Missing, Invoke = () => Launch(it) });
         items.Add(new MenuItem { Text = "Запустить от имени администратора", Glyph = "", Enabled = !e.Missing, Invoke = () => Launch(it, admin: true) });
         var location = Launcher.IsPath(e.Target) ? e.Target : Launcher.Resolve(e.Target).Exe ?? e.Windows.FirstOrDefault()?.Exe;
