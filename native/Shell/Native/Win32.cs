@@ -91,6 +91,23 @@ public static partial class Win32
     public const uint WM_SYSCOMMAND = 0x0112;
     public const int SC_CLOSE = 0xF060;
     public static readonly IntPtr HWND_TOPMOST = new(-1), HWND_NOTOPMOST = new(-2);
+
+    /// Открытое меню чужой программы (из трея). Наши окна «поверх всех» поднимаются только до
+    /// него: иначе любой подъём дока (смена активного окна, перестановка) закрывает меню собой.
+    public static IntPtr ForeignMenu;
+
+    /// Куда ставить наше окно «поверх всех»: на самый верх или прямо под открытое чужое меню.
+    public static IntPtr TopZ
+    {
+        get
+        {
+            if (ForeignMenu != IntPtr.Zero && !IsWindowVisible(ForeignMenu)) ForeignMenu = IntPtr.Zero;
+            return ForeignMenu != IntPtr.Zero ? ForeignMenu : HWND_TOPMOST;
+        }
+    }
+
+    /// Поднять наше окно наверх (но не выше открытого чужого меню).
+    public static void RaiseTop(IntPtr hwnd) => SetWindowPos(hwnd, TopZ, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_FRAMECHANGED = 0x20, SWP_NOOWNERZORDER = 0x200, SWP_ASYNCWINDOWPOS = 0x4000;
     public const uint MONITOR_DEFAULTTONEAREST = 2, MONITOR_DEFAULTTOPRIMARY = 1;
     public const uint EVENT_SYSTEM_FOREGROUND = 0x3, EVENT_SYSTEM_MINIMIZESTART = 0x16, EVENT_SYSTEM_MINIMIZEEND = 0x17;

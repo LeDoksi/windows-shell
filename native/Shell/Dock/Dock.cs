@@ -482,7 +482,7 @@ public sealed partial class Dock : IBar, IDropZone
         _pillPx = (PillScreenX(), _stripY + _slide + Px(Headroom), Px(PillWidth()));
         _pill.Place(_pillPx.X, _pillPx.Y, _pillPx.W, Px(PillH));
         _strip.Place(_stripX, _stripY + _slide, _stripW, _stripH);
-        if (Popups.Current is { IsOpen: true } p) SetWindowPos(p.Hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        if (Popups.Current is { IsOpen: true } p) RaiseTop(p.Hwnd);
         if (!_hover) SetRegion(pill: true);
     }
 
@@ -514,7 +514,7 @@ public sealed partial class Dock : IBar, IDropZone
         if (!_windowsShown) return;
         _pill.Raise();
         _strip.Raise();
-        if (Popups.Current is { IsOpen: true } p) SetWindowPos(p.Hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        if (Popups.Current is { IsOpen: true } p) RaiseTop(p.Hwnd);
     }
 
     // ---------- модель ----------

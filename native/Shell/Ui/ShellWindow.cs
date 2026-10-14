@@ -133,9 +133,9 @@ public sealed class ShellWindow
     public void Place(int x, int y, int w, int h)
     {
         var before = Scale;
-        SetWindowPos(Hwnd, HWND_TOPMOST, x, y, Math.Max(1, w), Math.Max(1, h), SWP_NOACTIVATE);
+        SetWindowPos(Hwnd, TopZ, x, y, Math.Max(1, w), Math.Max(1, h), SWP_NOACTIVATE);
         if (Math.Abs(Scale - before) < 0.001) return;
-        SetWindowPos(Hwnd, HWND_TOPMOST, x, y, Math.Max(1, w), Math.Max(1, h), SWP_NOACTIVATE);
+        SetWindowPos(Hwnd, TopZ, x, y, Math.Max(1, w), Math.Max(1, h), SWP_NOACTIVATE);
         Window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             if (GetWindowRect(Hwnd, out var r) && (r.Left != x || r.Top != y || r.Right - r.Left != Math.Max(1, w) || r.Bottom - r.Top != Math.Max(1, h)))
@@ -190,5 +190,5 @@ public sealed class ShellWindow
         Visible = false;
     }
 
-    public void Raise() => SetWindowPos(Hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    public void Raise() => RaiseTop(Hwnd);
 }
