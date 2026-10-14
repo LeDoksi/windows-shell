@@ -92,22 +92,57 @@ public static partial class Win32
     public const int SC_CLOSE = 0xF060;
     public static readonly IntPtr HWND_TOPMOST = new(-1), HWND_NOTOPMOST = new(-2);
 
-    /// Открытое меню чужой программы (из трея). Наши окна «поверх всех» поднимаются только до
-    /// него: иначе любой подъём дока (смена активного окна, перестановка) закрывает меню собой.
-    public static IntPtr ForeignMenu;
+    /// Открыто меню чужой программы (из трея): наши окна опущены из слоя «поверх всех» и не
+    /// поднимаются, пока оно не закроется. Ставить свои окна прямо под чужое меню ненадёжно:
+    /// под окно программы, запущенной от администратора (Fan Control, MSI Afterburner), Windows
+    /// не пускает (ошибка 5), а любой подъём дока между проверками закрывал меню собой.
+    public static bool ForeignMenuOpen { get; private set; }
 
-    /// Куда ставить наше окно «поверх всех»: на самый верх или прямо под открытое чужое меню.
-    public static IntPtr TopZ
-    {
-        get
-        {
-            if (ForeignMenu != IntPtr.Zero && !IsWindowVisible(ForeignMenu)) ForeignMenu = IntPtr.Zero;
-            return ForeignMenu != IntPtr.Zero ? ForeignMenu : HWND_TOPMOST;
-        }
-    }
+    /// Куда ставить наше окно: на самый верх или, пока открыто чужое меню, под весь слой
+    /// «поверх всех» (выше обычных окон).
+    public static IntPtr TopZ => ForeignMenuOpen ? HWND_NOTOPMOST : HWND_TOPMOST;
 
     /// Поднять наше окно наверх (но не выше открытого чужого меню).
     public static void RaiseTop(IntPtr hwnd) => SetWindowPos(hwnd, TopZ, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    /// Наши видимые окна сверху вниз.
+    static List<IntPtr> OwnWindows()
+    {
+        var own = (uint)Environment.ProcessId;
+        var list = new List<IntPtr>();
+        for (var h = GetWindow(GetDesktopWindow(), 5 /* GW_CHILD */); h != IntPtr.Zero; h = GetWindow(h, 2 /* GW_HWNDNEXT */))
+            if (IsWindowVisible(h) && ProcessId(h) == own) list.Add(h);
+        return list;
+    }
+
+    /// Открылось чужое меню: все наши окна уходят под слой «поверх всех», порядок между ними
+    /// сохраняется (снизу вверх: каждое следующее встаёт над предыдущими). Повторный вызов
+    /// опускает окна, которые успели подняться.
+    public static int DemoteOwn()
+    {
+        ForeignMenuOpen = true;
+        var moved = 0;
+        var list = OwnWindows();
+        for (var i = list.Count - 1; i >= 0; i--)
+        {
+            if ((ExStyle(list[i]) & WS_EX_TOPMOST) == 0) continue;
+            SetWindowPos(list[i], HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            moved++;
+        }
+        return moved;
+    }
+
+    /// Чужое меню закрылось: наши окна снова «поверх всех», в прежнем порядке.
+    public static void RestoreOwn()
+    {
+        if (!ForeignMenuOpen) return;
+        ForeignMenuOpen = false;
+        var list = OwnWindows();
+        for (var i = list.Count - 1; i >= 0; i--)
+            SetWindowPos(list[i], HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+
+    [DllImport("user32.dll")] static extern IntPtr GetDesktopWindow();
     public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_FRAMECHANGED = 0x20, SWP_NOOWNERZORDER = 0x200, SWP_ASYNCWINDOWPOS = 0x4000;
     public const uint MONITOR_DEFAULTTONEAREST = 2, MONITOR_DEFAULTTOPRIMARY = 1;
     public const uint EVENT_SYSTEM_FOREGROUND = 0x3, EVENT_SYSTEM_MINIMIZESTART = 0x16, EVENT_SYSTEM_MINIMIZEEND = 0x17;
