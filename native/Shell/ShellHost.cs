@@ -63,6 +63,7 @@ public sealed class ShellHost
         AnnounceButtons();
         Sync();
         _tray = new TrayIcon(_s.Messages, _s.Menu, TrayMenu);
+        _s.TrayFlyout.ShellMenu = TrayMenu;
         _s.Config.Changed += OnConfigChanged;
         _s.Monitors.Changed += Sync;
         _s.Monitors.WorkAreaChanged += Sync;

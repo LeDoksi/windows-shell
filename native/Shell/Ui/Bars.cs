@@ -44,6 +44,9 @@ public sealed class Bars
         public long HoldUntil;
         public bool AtEdge;
         public bool Inside;
+        /// Окно бросили, когда курсор был у этого края (снап к верху экрана): край снова
+        /// вызывает полосу только после того, как курсор от него отойдёт.
+        public bool EdgeSpent;
         public bool AppBar;
         /// Показана клавишей (Win, Win+X, Win+T) поверх полноэкранного окна: стоит, пока нужна.
         public bool Forced;
@@ -64,11 +67,11 @@ public sealed class Bars
     bool _animating;
     long _lastFrame;
     bool _held;
-    // Окно тащат за заголовок (или меняют размер): край не вызывает полосу, пока тащат, и ещё
-    // секунду после (снап к верху экрана не должен выдвигать панель).
-    long _moveSizeUntil;
+    // Окно тащат за заголовок (или меняют размер): край не вызывает полосу, пока тащат. Раньше
+    // после броска край молчал ещё секунду по таймеру, а пересчёта по её концу не было: курсор,
+    // пришедший к краю в эту секунду, так и стоял у края без полосы до клика (WSH-94).
+    bool _moving;
     readonly WinEventProc _moveSizeProc;
-    const int MoveSizeCooldownMs = 1000;
 
     /// Кнопка мыши зажата над полосой (тащат иконку): полоса не уезжает, пока её не отпустят.
     public bool Held => _held;
@@ -84,7 +87,8 @@ public sealed class Bars
         t.Start();
         _moveSizeProc = (_, ev, _, _, _, _, _) =>
         {
-            _moveSizeUntil = ev == 0x000A /* EVENT_SYSTEM_MOVESIZESTART */ ? long.MaxValue : Environment.TickCount64 + MoveSizeCooldownMs;
+            if (ev == 0x000A /* EVENT_SYSTEM_MOVESIZESTART */) _moving = true;
+            else EndMove();
         };
         SetWinEventHook(0x000A, 0x000B, IntPtr.Zero, _moveSizeProc, 0, 0, WINEVENT_OUTOFCONTEXT);
     }
@@ -205,8 +209,18 @@ public sealed class Bars
         return false;
     }
 
+    /// Окно отпустили (или отпустили кнопку мыши — на случай, если конец перетаскивания не пришёл).
+    void EndMove()
+    {
+        if (!_moving) return;
+        _moving = false;
+        foreach (var s in _bars) s.EdgeSpent = s.AtEdge;
+        Evaluate();
+    }
+
     void OnHeld(bool held)
     {
+        if (!held) EndMove();
         // Зажали над полосой — держим её; отпустили — снова как обычно.
         if (held && !_held) _held = _bars.Any(b => b.Inside);
         if (!held) _held = false;
@@ -224,11 +238,15 @@ public sealed class Bars
         var screen = screens.FirstOrDefault(s => s.Contains((r.Left + r.Right) / 2, (r.Top + r.Bottom) / 2));
         if (screen is null) return set;
         SHQueryUserNotificationState(out var state);
-        // 2 — занят (полноэкранное), 3 — Direct3D на весь экран, 4 — презентация.
-        var busy = state is 2 or 3 or 4;
+        // 3 — Direct3D на весь экран, 4 — презентация.
+        var exclusive = state is 3 or 4;
         var covers = r.Left <= screen.Bounds.Left && r.Top <= screen.Bounds.Top && r.Right >= screen.Bounds.Right && r.Bottom >= screen.Bounds.Bottom;
-        // Развёрнутое окно тоже закрывает монитор, но это не игра (1.6): док выезжает над ним.
-        if (busy || (covers && !IsZoomed(fg))) set.Add(screen.Name);
+        // Развёрнутое окно тоже закрывает монитор (панель задач спрятана), но это не игра (1.6):
+        // док выезжает над ним (WSH-95), поэтому и «2 — занят» от Windows не в счёт. Chrome в F11
+        // остаётся развёрнутым, но без заголовка и рамки — по этому и отличаем полный экран.
+        const long WS_CAPTION = 0x00C00000;
+        var caption = ((long)GetWindowLongPtrW(fg, GWL_STYLE) & WS_CAPTION) == WS_CAPTION;
+        if (exclusive || (covers && (!IsZoomed(fg) || !caption))) set.Add(screen.Name);
         return set;
     }
 
@@ -243,6 +261,7 @@ public sealed class Bars
             var b = s.Bar;
             var full = IsFullscreen(b.Screen);
             var was = s.Shown;
+            if (!s.AtEdge) s.EdgeSpent = false;
             if (!s.Shown) s.Forced = false;
             if (full && !s.Forced) s.Shown = false;
             else if (b.Pinned) s.Shown = true;
@@ -252,7 +271,7 @@ public sealed class Bars
                 else if (s.AwaySince == 0) s.AwaySince = now;
                 else if (now - s.AwaySince >= HideDelayMs) { s.Shown = false; s.AwaySince = 0; s.Forced = false; }
             }
-            else if (s.AtEdge && now >= _moveSizeUntil) { s.Shown = true; s.AwaySince = 0; }
+            else if (s.AtEdge && !_moving && !s.EdgeSpent) { s.Shown = true; s.AwaySince = 0; }
             if (s.Shown != was || (s.Shown ? s.Progress < 1 : s.Progress > 0)) any = true;
             UpdateAppBar(s, b.Pinned && !full);
             if (full && s.Forced && !s.Shown) s.Forced = false;
