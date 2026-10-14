@@ -42,6 +42,7 @@ public sealed partial class Dock : IBar, IDropZone
     readonly DispatcherQueueTimer _listCloseTimer;
     readonly DispatcherQueueTimer _clockTimer;
     readonly DispatcherQueueTimer _volumeTipTimer;
+    readonly DispatcherQueueTimer _hoverCheck;
     readonly DispatcherQueueTimer _springLoad;
 
     Screen _screen;
@@ -170,6 +171,9 @@ public sealed partial class Dock : IBar, IDropZone
         _clockTimer = q.CreateTimer();
         _clockTimer.IsRepeating = false;
         _clockTimer.Tick += (_, _) => UpdateClock();
+        _hoverCheck = q.CreateTimer();
+        _hoverCheck.Interval = TimeSpan.FromMilliseconds(250);
+        _hoverCheck.Tick += (_, _) => LeaveIfOutside();
         _volumeTipTimer = q.CreateTimer();
         _volumeTipTimer.IsRepeating = false;
         _volumeTipTimer.Interval = TimeSpan.FromMilliseconds(1000);
@@ -184,7 +188,9 @@ public sealed partial class Dock : IBar, IDropZone
         };
 
         _strip.Root.PointerMoved += OnPointerMoved;
-        _strip.Root.PointerExited += (_, _) => { if (_drag is null) SetHover(false); };
+        // Смена региона окна под неподвижным курсором тоже присылает «мышь ушла»: веря ей, док
+        // гасил увеличение через долю секунды. Уход проверяем по настоящему курсору.
+        _strip.Root.PointerExited += (_, _) => { if (_drag is null) LeaveIfOutside(); };
         _strip.Root.PointerPressed += OnPointerPressed;
         _strip.Root.PointerReleased += OnPointerReleased;
         _strip.Root.PointerCaptureLost += (_, _) => { if (_drag != null) EndDrag(commit: false); _dragCandidate = null; };
@@ -730,6 +736,7 @@ public sealed partial class Dock : IBar, IDropZone
         _lastFrame = t;
         // Esc во время перетаскивания: иконка возвращается на место (1.5).
         if (_drag != null && (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0) EndDrag(commit: false);
+        else if (_drag != null && CursorOnCanvas(_dragPoint) is var cp && cp != _dragPoint) UpdateDrag(cp);
         if (!Frame(dt))
         {
             CompositionTarget.Rendering -= OnRendering;
@@ -938,15 +945,32 @@ public sealed partial class Dock : IBar, IDropZone
         Kick();
     }
 
+    void LeaveIfOutside()
+    {
+        if (_drag != null || !_hover) { _hoverCheck.Stop(); return; }
+        if (GetCursorPos(out var c) && InHot(c))
+        {
+            // Курсор ещё над доком: проверим снова, вдруг он уйдёт, не задев полосу.
+            if (!_hoverCheck.IsRunning) _hoverCheck.Start();
+            return;
+        }
+        _hoverCheck.Stop();
+        SetHover(false);
+    }
+
+    /// Где курсор в координатах полосы. Положение из события указателя при перетаскивании
+    /// иногда приходит не то (иконка улетала влево), а курсор знает точно.
+    Point CursorOnCanvas(Point fallback) => GetCursorPos(out var c) ? ToCanvas(c.X, c.Y) : fallback;
+
     void OnPointerMoved(object sender, PointerRoutedEventArgs e)
     {
         var p = e.GetCurrentPoint(_canvas).Position;
         if (_kb >= 0) EndKeyboard();
-        if (_drag != null) { UpdateDrag(p); return; }
+        if (_drag != null) { UpdateDrag(CursorOnCanvas(p)); return; }
         if (_dragCandidate != null && e.GetCurrentPoint(_canvas).Properties.IsLeftButtonPressed
             && Math.Abs(p.X - _pressPoint.X) + Math.Abs(p.Y - _pressPoint.Y) > 6)
         {
-            BeginDrag(_dragCandidate, p);
+            BeginDrag(_dragCandidate, CursorOnCanvas(p));
             return;
         }
         var pillW = PillWidth();
@@ -1102,7 +1126,7 @@ public sealed partial class Dock : IBar, IDropZone
         if (_drag != null)
         {
             e.Handled = true;
-            _dragPoint = p.Position;
+            _dragPoint = CursorOnCanvas(p.Position);
             EndDrag(commit: true);
             _strip.Root.ReleasePointerCaptures();
             _pressed = null;
