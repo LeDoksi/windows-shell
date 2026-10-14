@@ -18,6 +18,7 @@ public sealed class ShellHost
     readonly Dictionary<string, TopPanel> _panels = [];
     readonly Hotkeys _hotkeys;
     TrayIcon? _tray;
+    PathWatch? _pathWatch;
     string _hotkeysKey = "";
     bool _restarting;
     /// Панель задач вернули вручную (меню трея, Ctrl+Alt+Shift+T): не прячем до перезапуска.
@@ -64,6 +65,7 @@ public sealed class ShellHost
         Sync();
         _tray = new TrayIcon(_s.Messages, _s.Menu, TrayMenu);
         _s.TrayFlyout.ShellMenu = TrayMenu;
+        _pathWatch = new PathWatch(_s.Messages, _s.Config);
         _s.Config.Changed += OnConfigChanged;
         _s.Monitors.Changed += Sync;
         _s.Monitors.WorkAreaChanged += Sync;
