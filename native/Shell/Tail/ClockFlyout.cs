@@ -30,8 +30,8 @@ public sealed class ClockFlyout : Popup
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _month.Margin = new Thickness(4, 0, 0, 0);
         head.Children.Add(_month);
-        var prev = Arrow("", -1);
-        var next = Arrow("", 1);
+        var prev = Arrow("", -1);
+        var next = Arrow("", 1);
         Grid.SetColumn(prev, 1);
         Grid.SetColumn(next, 2);
         head.Children.Add(prev);
@@ -108,7 +108,7 @@ public sealed class ClockFlyout : Popup
         _days.RowDefinitions.Add(new RowDefinition { Height = new GridLength(28) });
         for (var i = 0; i < 7; i++)
         {
-            var name = culture.DateTimeFormat.GetShortestDayName((DayOfWeek)(((int)first + i) % 7));
+            var name = culture.DateTimeFormat.GetAbbreviatedDayName((DayOfWeek)(((int)first + i) % 7));
             if (name.Length > 0) name = char.ToUpper(name[0]) + name[1..];
             var t = Label(name, 12, secondary: true);
             t.HorizontalAlignment = HorizontalAlignment.Center;

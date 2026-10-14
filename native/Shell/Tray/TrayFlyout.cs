@@ -229,6 +229,18 @@ public sealed class TrayFlyout : Popup
 
     IntPtr _raisedMenu;
 
+    static void StepBelow(IntPtr menu)
+    {
+        var own = (uint)Environment.ProcessId;
+        var above = new List<IntPtr>();
+        for (var h = GetWindow(menu, 3 /* GW_HWNDPREV */); h != IntPtr.Zero; h = GetWindow(h, 3))
+            if (IsWindowVisible(h) && ProcessId(h) == own) above.Add(h);
+        // Снизу вверх: каждое окно встаёт прямо под меню, порядок между нашими сохраняется.
+        for (var i = above.Count - 1; i >= 0; i--)
+            SetWindowPos(above[i], menu, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        Log.Write($"трей: меню программы поверх наших окон ({above.Count})");
+    }
+
     void NoteClick(TrayItem it)
     {
         _clickedPid = ProcessId(it.Hwnd);
@@ -247,7 +259,7 @@ public sealed class TrayFlyout : Popup
         var menu = FindWindowW("#32768", null);
         var fgPid = fg == IntPtr.Zero ? 0 : ProcessId(fg);
         var programMenu = menu != IntPtr.Zero && IsWindowVisible(menu)
-            || _clickedPid != 0 && fgPid == _clickedPid && !IsRealWindow(fg);
+            || _clickedPid != 0 && fgPid == _clickedPid && (!IsRealWindow(fg) || (ExStyle(fg) & WS_EX_TOPMOST) != 0);
         if (programMenu)
         {
             _menuSeen = true;
@@ -256,18 +268,14 @@ public sealed class TrayFlyout : Popup
             if (shown != IntPtr.Zero && shown != _raisedMenu)
             {
                 _raisedMenu = shown;
-                // Поднять чужое меню над нашим окном Windows не даёт: опускаем своё окошко из
-                // «поверх всех», пока меню открыто.
-                SetWindowPos(Hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-                SetWindowPos(Hwnd, shown, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                // Поднять чужое меню над нашими окнами Windows не даёт, поэтому все наши окна,
+                // которые выше меню (это окошко, док), ставим сразу под него. Меню — Win32 (#32768)
+                // или своё у Chrome, Discord и прочих Electron-программ.
+                StepBelow(shown);
             }
             return;
         }
-        if (_raisedMenu != IntPtr.Zero)
-        {
-            _raisedMenu = IntPtr.Zero;
-            SetWindowPos(Hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        }
+        _raisedMenu = IntPtr.Zero;
         if (_menuSeen) { Close(restoreFocus: false); return; }
         // Только что кликнули: программа ещё выводит своё меню (её скрытое окно уже впереди).
         if (_clickedPid != 0 && Environment.TickCount64 - _clickedAt < 1500 && (fgPid == _clickedPid || fg == IntPtr.Zero) && !IsRealWindow(fg)) return;
