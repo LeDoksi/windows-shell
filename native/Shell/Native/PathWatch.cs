@@ -74,7 +74,15 @@ public sealed class PathWatch
                 foreach (var cat in c.Categories)
                 {
                     if (Moved(cat.SourceFolder ?? "", from, to) is { } sf) cat.SourceFolder = sf;
-                    foreach (var it in cat.Items) if (Moved(it.Target, from, to) is { } t) it.Target = t;
+                    foreach (var it in cat.Items)
+                    {
+                        if (Moved(it.Target, from, to) is not { } t) continue;
+                        // Плитка называлась по имени файла — переименовали файл, меняем и подпись.
+                        if (string.Equals(it.Target, from, StringComparison.OrdinalIgnoreCase) && it.Kind is "file" or "folder"
+                            && string.Equals(it.Title, Path.GetFileName(from), StringComparison.OrdinalIgnoreCase))
+                            it.Title = Path.GetFileName(to);
+                        it.Target = t;
+                    }
                 }
             });
             Log.Write($"пути: «{from}» → «{to}», плитки обновлены");
