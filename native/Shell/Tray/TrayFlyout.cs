@@ -256,11 +256,18 @@ public sealed class TrayFlyout : Popup
             if (shown != IntPtr.Zero && shown != _raisedMenu)
             {
                 _raisedMenu = shown;
-                SetWindowPos(shown, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                // Поднять чужое меню над нашим окном Windows не даёт: опускаем своё окошко из
+                // «поверх всех», пока меню открыто.
+                SetWindowPos(Hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                SetWindowPos(Hwnd, shown, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             }
             return;
         }
-        _raisedMenu = IntPtr.Zero;
+        if (_raisedMenu != IntPtr.Zero)
+        {
+            _raisedMenu = IntPtr.Zero;
+            SetWindowPos(Hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
         if (_menuSeen) { Close(restoreFocus: false); return; }
         // Только что кликнули: программа ещё выводит своё меню (её скрытое окно уже впереди).
         if (_clickedPid != 0 && Environment.TickCount64 - _clickedAt < 1500 && (fgPid == _clickedPid || fg == IntPtr.Zero) && !IsRealWindow(fg)) return;

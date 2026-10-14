@@ -36,6 +36,16 @@ public sealed class TrayHost
     Thread? _thread;
     IntPtr _tray, _notify, _band;
     long _seq;
+    // Место иконки в окошке: программы иногда удаляют и добавляют иконку заново (или
+    // перезапускаются), а порядок должен оставаться тем же. Ключ — GUID или класс окна + номер.
+    readonly Dictionary<string, long> _order = [];
+
+    long OrderOf(IntPtr hwnd, uint uid, Guid guid)
+    {
+        var key = guid != Guid.Empty ? guid.ToString() : $"{ClassName(hwnd)}|{uid}";
+        if (!_order.TryGetValue(key, out var seq)) _order[key] = seq = ++_seq;
+        return seq;
+    }
     uint _taskbarButtonCreated;
 
     /// Иконки поменялись (в потоке интерфейса).
@@ -249,7 +259,7 @@ public sealed class TrayHost
                     if (old is null && n.Hwnd == IntPtr.Zero) return;
                     var guid = (n.Flags & TrayData.NIF_GUID) != 0 ? n.Guid : old?.Guid ?? Guid.Empty;
                     if (OwnSystem.Contains(guid)) return;
-                    var item = old ?? new TrayItem(n.Hwnd, n.Uid, guid, 0, 0, "", null, false, ++_seq);
+                    var item = old ?? new TrayItem(n.Hwnd, n.Uid, guid, 0, 0, "", null, false, OrderOf(n.Hwnd, n.Uid, guid));
                     if ((n.Flags & TrayData.NIF_MESSAGE) != 0) item = item with { Callback = n.Callback };
                     if ((n.Flags & TrayData.NIF_TIP) != 0) item = item with { Tip = n.Tip };
                     if ((n.Flags & TrayData.NIF_ICON) != 0) item = item with { Icon = n.Icon == IntPtr.Zero ? null : IconPixels.From(n.Icon) ?? item.Icon };
