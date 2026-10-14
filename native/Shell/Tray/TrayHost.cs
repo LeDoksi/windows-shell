@@ -43,8 +43,28 @@ public sealed class TrayHost
     long OrderOf(IntPtr hwnd, uint uid, Guid guid)
     {
         var key = guid != Guid.Empty ? guid.ToString() : $"{ClassName(hwnd)}|{uid}";
-        if (!_order.TryGetValue(key, out var seq)) _order[key] = seq = ++_seq;
+        if (_order.Count == 0) LoadOrder();
+        if (!_order.TryGetValue(key, out var seq))
+        {
+            _order[key] = seq = ++_seq;
+            // Порядок помним и между запусками оболочки.
+            try { File.AppendAllText(OrderFile, key + "\n"); } catch { }
+        }
         return seq;
+    }
+
+    static readonly string OrderFile = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WindowsShell", "tray-order.txt");
+
+    void LoadOrder()
+    {
+        try
+        {
+            if (!File.Exists(OrderFile)) return;
+            foreach (var line in File.ReadAllLines(OrderFile))
+                if (line.Length > 0 && !_order.ContainsKey(line)) _order[line] = ++_seq;
+        }
+        catch { }
     }
     uint _taskbarButtonCreated;
 
@@ -334,6 +354,10 @@ public sealed class TrayHost
                 if (it.Version >= 3) Send(it, NIN_SELECT, x, y);
                 break;
             case Button.Right:
+                // Классические программы (Безопасность Windows, Bluetooth) выводят меню через
+                // TrackPopupMenu, а оно сразу закрывается, если окно программы не впереди. Мы сейчас
+                // впереди, значит можем отдать первенство окну иконки — как это делает Проводник.
+                SetForegroundWindow(it.Hwnd);
                 Send(it, WM_RBUTTONUP, x, y);
                 if (it.Version >= 3) Send(it, WM_CONTEXTMENU, x, y);
                 break;

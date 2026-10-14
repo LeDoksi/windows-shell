@@ -260,14 +260,21 @@ public sealed class TrayFlyout : Popup
         var fgPid = fg == IntPtr.Zero ? 0 : ProcessId(fg);
         var programMenu = menu != IntPtr.Zero && IsWindowVisible(menu)
             || _clickedPid != 0 && fgPid == _clickedPid && (!IsRealWindow(fg) || (ExStyle(fg) & WS_EX_TOPMOST) != 0);
+        // Видимое меню: #32768 или «поверх всех» окно программы (Chrome, Discord рисуют меню сами).
+        var visibleMenu = menu != IntPtr.Zero && IsWindowVisible(menu) ? menu
+            : _clickedPid != 0 && fgPid == _clickedPid && IsWindowVisible(fg) && (ExStyle(fg) & WS_EX_TOPMOST) != 0 ? fg
+            : IntPtr.Zero;
         if (programMenu)
         {
             _menuSeen = true;
             // Наше окошко тоже поверх всех: меню программы поднимаем над ним, иначе оно под нами.
-            var shown = menu != IntPtr.Zero && IsWindowVisible(menu) ? menu : fg;
+            var shown = visibleMenu;
             if (shown != IntPtr.Zero && shown != _raisedMenu)
             {
                 _raisedMenu = shown;
+                // Само окошко прячем, пока открыто меню: оно всё равно закроется вместе с меню,
+                // а «поверх всех» его иначе не опустить.
+                ShowWindowAsync(Hwnd, 0 /* SW_HIDE */);
                 // Поднять чужое меню над нашими окнами Windows не даёт, поэтому все наши окна,
                 // которые выше меню (это окошко, док), ставим сразу под него. Меню — Win32 (#32768)
                 // или своё у Chrome, Discord и прочих Electron-программ.
