@@ -75,6 +75,20 @@ public sealed class KeysSection
     public bool DockKeys { get; set; } = true;
 }
 
+/// Системный хвост и панель задач Windows (WSH-E9). Часы видны всегда.
+public sealed class TailSection
+{
+    /// Прятать панель задач Windows (её работу делают док и хвост).
+    public bool HideTaskbar { get; set; } = true;
+    /// ⌃ Фоновые приложения (свой трей).
+    public bool Tray { get; set; } = true;
+    public bool Network { get; set; } = true;
+    /// Только на ноутбуке: на ПК без батареи значка нет в любом случае.
+    public bool Battery { get; set; } = true;
+    public bool Language { get; set; } = true;
+    public bool Notifications { get; set; } = true;
+}
+
 public sealed class WidgetEntry
 {
     public string Id { get; set; } = "";
@@ -92,6 +106,7 @@ public sealed class ConfigData
     public List<WidgetEntry> Widgets { get; set; } = [];
     public StartSection Start { get; set; } = new();
     public KeysSection Keys { get; set; } = new();
+    public TailSection Tail { get; set; } = new();
 }
 
 /// Конфиг оболочки на диске: `%APPDATA%\WindowsShellNative\config.json`. Запись атомарная,
@@ -125,6 +140,7 @@ public sealed class ShellConfig
     public bool Tint => Data.Appearance.Glass == "tint";
     public StartSection Start => Data.Start;
     public KeysSection Keys => Data.Keys;
+    public TailSection Tail => Data.Tail;
 
     public static ShellConfig Load()
     {
@@ -200,6 +216,7 @@ public sealed class ShellConfig
         Data.Widgets ??= [];
         Data.Start ??= new();
         Data.Keys ??= new();
+        Data.Tail ??= new();
         Data.Start.Folders ??= ["explorer", "downloads", "settings"];
         Data.Start.Launches ??= [];
         var seen = new HashSet<string>();

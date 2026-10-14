@@ -22,6 +22,8 @@ public sealed class App : Application, IXamlMetadataProvider
     [STAThread]
     public static void Main(string[] args)
     {
+        // Сторож панели задач и аварийный возврат: без окон и без интерфейса.
+        if (Native.Taskbar.Cli(args)) return;
         Log.Write(args.Contains(Native.Autostart.Arg) ? "---- запуск вместе с Windows" : "---- запуск");
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Write($"ОШИБКА (домен): {e.ExceptionObject}");
         TaskScheduler.UnobservedTaskException += (_, e) => Log.Error("задача", e.Exception);
@@ -87,6 +89,11 @@ public sealed class App : Application, IXamlMetadataProvider
                 Icons = new Icons(queue),
                 Keys = new WinKeys(queue),
                 Catalog = new Start.Catalog(queue),
+                Tray = new Tray.TrayHost(queue),
+                Network = new Tail.NetworkService(queue),
+                Battery = new Tail.BatteryService(queue, messages),
+                Language = new Tail.InputLanguage(queue),
+                Notifications = new Tail.Notifications(queue),
             };
             Ui.Popup.RestoreForeground = tracker.RestoreForeground;
             tracker.Start();

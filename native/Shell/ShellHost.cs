@@ -19,6 +19,10 @@ public sealed class ShellHost
     readonly Hotkeys _hotkeys;
     TrayIcon? _tray;
     string _hotkeysKey = "";
+    bool _restarting;
+    /// Панель задач вернули вручную (меню трея, Ctrl+Alt+Shift+T): не прячем до перезапуска.
+    bool _taskbarReturned;
+    readonly HashSet<IntPtr> _announced = [];
 
     public ShellHost(Services services)
     {
@@ -28,6 +32,12 @@ public sealed class ShellHost
         _s.ToggleTools = ToggleTools;
         _s.OpenSettings = page => Settings.SettingsWindow.Open(_s, page);
         _s.Restart = Restart;
+        _s.RestoreTaskbar = () =>
+        {
+            _taskbarReturned = true;
+            Taskbar.Restore("вручную");
+            foreach (var d in _docks.Values) d.Move(d.Screen, d.FullTail, force: true);
+        };
         _s.RenameCategory = id =>
         {
             // Поле появляется под пилюлей на мониторе, где курсор.
@@ -44,6 +54,13 @@ public sealed class ShellHost
     public void Start()
     {
         Glass.Set(_s.Config.Tint);
+        // Свой трей и скрытие панели задач (WSH-E9) — до доков: док сразу встаёт к нижнему краю.
+        _s.Tray.Start();
+        ApplyTaskbar();
+        _s.Tray.Balloon += () => { _s.TrayAttention = true; _s.Notifications.NoteBalloon(); foreach (var d in _docks.Values) d.UpdateTail(); };
+        _s.Messages.TaskbarCreated += Taskbar.OnTaskbarCreated;
+        _s.Tracker.Changed += AnnounceButtons;
+        AnnounceButtons();
         Sync();
         _tray = new TrayIcon(_s.Messages, _s.Menu, TrayMenu);
         _s.Config.Changed += OnConfigChanged;
@@ -112,9 +129,27 @@ public sealed class ShellHost
         _s.Bars.Publish();
     }
 
+    /// Прятать панель задач Windows или нет (настройки → «Система»).
+    void ApplyTaskbar()
+    {
+        if (_s.Config.Tail.HideTaskbar && !_taskbarReturned) Taskbar.Hide(tray: _s.Tray.Running);
+        else if (Taskbar.Hidden) Taskbar.Restore("выключено в настройках");
+    }
+
+    /// Новым окнам говорим «у тебя есть кнопка на панели задач»: тогда программы шлют нам
+    /// полоску загрузки и значки поверх иконки (как Проводнику).
+    void AnnounceButtons()
+    {
+        var windows = _s.Tracker.Windows.Select(w => w.Hwnd).ToList();
+        _announced.IntersectWith(windows);
+        var fresh = windows.Where(_announced.Add).ToList();
+        if (fresh.Count > 0) _s.Tray.AnnounceButtons(fresh);
+    }
+
     void OnConfigChanged()
     {
         Glass.Set(_s.Config.Tint);
+        ApplyTaskbar();
         ApplyKeys();
         // Сменили монитор хвоста — хвост переезжает; закрепили док или панель — резерв места.
         Sync();
@@ -150,6 +185,8 @@ public sealed class ShellHost
                 if (!string.IsNullOrEmpty(p.Hotkey)) { var profile = p; keys.Add((p.Hotkey, () => SoundFlyout.ApplyProfile(_s.Audio, profile))); }
             if (!string.IsNullOrEmpty(settings.NextOutputHotkey)) keys.Add((settings.NextOutputHotkey, _s.Audio.NextOutput));
         }
+        // Аварийно вернуть панель задач Windows (раздел 6) — всегда.
+        keys.Add(("Ctrl+Alt+Shift+T", () => _s.RestoreTaskbar()));
         var key = string.Join("|", keys.Select(k => k.Item1));
         if (key == _hotkeysKey) return;
         _hotkeysKey = key;
@@ -190,7 +227,7 @@ public sealed class ShellHost
     {
         foreach (var d in _docks.Values) d.EndKeyboard();
         // Док выезжает и стоит, пока Пуск открыт (3.1).
-        _s.Bars.Reveal(dock);
+        _s.Bars.Reveal(dock, force: true);
         _s.StartMenu.Show(("start", dock), dock.PillPx, dock);
     }
 
@@ -201,7 +238,7 @@ public sealed class ShellHost
         var key = ("tools", dock);
         Popups.Toggle(key, () =>
         {
-            _s.Bars.Reveal(dock);
+            _s.Bars.Reveal(dock, force: true);
             _s.Menu.Show(key, dock.StartButtonPx, ToolsMenu(), owner: dock);
         });
     }
@@ -300,6 +337,10 @@ public sealed class ShellHost
         Popups.CloseAll();
         _s.Bars.Shutdown();
         _tray?.Remove();
+        // Сначала закрываем свой трей, потом возвращаем панель: программы отдадут иконки Проводнику.
+        _s.Tray.Stop();
+        // При перезапуске панель остаётся спрятанной: новый процесс сразу забирает её себе.
+        if (!_restarting) Taskbar.Restore(_s.Config.Tail.HideTaskbar ? "выход" : "выход (не пряталась)");
     }
 
     /// Выход: резерв места и значок убираются, процесс завершается (Application.Exit оставлял
@@ -313,6 +354,7 @@ public sealed class ShellHost
 
     void Restart()
     {
+        _restarting = Taskbar.Hidden;
         Shutdown();
         Log.Write("перезапуск");
         try { Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--restart") { UseShellExecute = false }); }

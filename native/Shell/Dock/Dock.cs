@@ -20,12 +20,12 @@ namespace WindowsShell.Dock;
 /// разделитель и хвост (звук и часы на мониторе хвоста, на остальных только часы). Два окна:
 /// снизу таблетка с настоящим стеклом, сверху прозрачное окно с иконками. Увеличение волной,
 /// перетаскивание и выезд считаются каждый кадр и двигают только визуалы (без раскладки).
-public sealed class Dock : IBar, IDropZone
+public sealed partial class Dock : IBar, IDropZone
 {
     // Размеры в DIP.
     const double Icon = 48, Gap = 6, Pad = 10, TopPad = 9, PillH = 68, Headroom = 96, Bottom = 8;
     const double MaxScale = 1.6, Reach = 3.0, ElementSize = Icon * MaxScale;
-    const double SepW = 21, SoundW = 40, ClockW = 74, TailGap = 2;
+    const double SepW = 21, TailGap = 2;
     /// Потянул иконку выше таблетки на столько — «Убрать».
     const double RemoveDistance = 80;
 
@@ -35,11 +35,6 @@ public sealed class Dock : IBar, IDropZone
     readonly Canvas _canvas = new();
     readonly List<Item> _items = [];
     readonly Rectangle _separator;
-    readonly Grid _sound;
-    readonly FontIcon _soundIcon;
-    readonly StackPanel _clock;
-    readonly TextBlock _time;
-    readonly TextBlock _date;
     readonly Border _tooltip;
     readonly TextBlock _tooltipText;
     readonly Border _removeLabel;
@@ -51,7 +46,6 @@ public sealed class Dock : IBar, IDropZone
 
     Screen _screen;
     bool _fullTail;
-    bool _showSound;
 
     // Положение окна-полосы на экране (физические пиксели), масштаб монитора и выезд.
     int _stripX, _stripY, _stripW, _stripH;
@@ -126,21 +120,7 @@ public sealed class Dock : IBar, IDropZone
         _separator = new Rectangle { Width = 1, Height = 34, Fill = Theme.Brush(Theme.Stroke) };
         _canvas.Children.Add(_separator);
 
-        _soundIcon = new FontIcon { Glyph = "", FontFamily = Theme.Icons, FontSize = 18, Foreground = Theme.Brush(Theme.Text) };
-        _sound = new Grid
-        {
-            Width = SoundW,
-            Height = 40,
-            CornerRadius = new CornerRadius(6),
-            Background = Theme.Brush(Microsoft.UI.Colors.Transparent),
-            Children = { _soundIcon },
-        };
-        _canvas.Children.Add(_sound);
-
-        _time = new TextBlock { FontFamily = Theme.Font, FontSize = 13, Foreground = Theme.Brush(Theme.Text), HorizontalAlignment = HorizontalAlignment.Right };
-        _date = new TextBlock { FontFamily = Theme.Font, FontSize = 12, Foreground = Theme.Brush(Theme.TextSecondary), HorizontalAlignment = HorizontalAlignment.Right };
-        _clock = new StackPanel { Width = ClockW, Padding = new Thickness(0, 0, 6, 0), Children = { _time, _date } };
-        _canvas.Children.Add(_clock);
+        CreateTail();
 
         _tooltipText = new TextBlock { FontFamily = Theme.Font, FontSize = 12, Foreground = Theme.Brush(Theme.Text) };
         _tooltip = new Border
@@ -225,7 +205,7 @@ public sealed class Dock : IBar, IDropZone
         _s.Tracker.Changed += Rebuild;
         _s.Tracker.ForegroundChanged += OnForeground;
         _s.Tracker.AttentionChanged += UpdateDots;
-        _s.Audio.Changed += UpdateSound;
+        SubscribeTail();
         _s.Config.Changed += OnConfigChanged;
         _s.Launched += OnLaunched;
         Popups.CurrentChanged += OnPopupsChanged;
@@ -247,8 +227,7 @@ public sealed class Dock : IBar, IDropZone
 
     void OnConfigChanged()
     {
-        var sound = _fullTail && _s.Config.WidgetEnabled("audio");
-        if (sound != _showSound) { _showSound = sound; Relayout(); }
+        if (UpdateTail()) Relayout();
         Rebuild();
     }
 
@@ -293,7 +272,7 @@ public sealed class Dock : IBar, IDropZone
         var apps = _items.Where(i => !i.IsStart && !i.Removing && i.Entry != null).ToList();
         if (n < 1 || n > apps.Count) return;
         var it = apps[n - 1];
-        _s.Bars.Reveal(this, holdMs: 800);
+        _s.Bars.Reveal(this, holdMs: 800, force: true);
         if (admin) Launch(it, admin: true);
         else if (newWindow) Launch(it);
         else LeftClick(it);
@@ -302,8 +281,7 @@ public sealed class Dock : IBar, IDropZone
     List<object> KeyboardTargets()
     {
         var list = _items.Where(i => !i.Removing).Cast<object>().ToList();
-        if (_showSound) list.Add(_sound);
-        list.Add(_clock);
+        list.AddRange(_slots.Where(t => t.Shown));
         return list;
     }
 
@@ -314,7 +292,7 @@ public sealed class Dock : IBar, IDropZone
         var targets = KeyboardTargets();
         _kb = tail ? Math.Max(0, targets.FindIndex(t => t is not Item)) : Math.Min(1, targets.Count - 1);
         _s.Keys.Capturing = true;
-        _s.Bars.Reveal(this);
+        _s.Bars.Reveal(this, force: true);
         ShowKeyboard();
     }
 
@@ -358,7 +336,7 @@ public sealed class Dock : IBar, IDropZone
         var targets = KeyboardTargets();
         if (_kb < 0 || _kb >= targets.Count) return;
         var t = targets[_kb];
-        _sound.Background = Theme.Brush(ReferenceEquals(t, _sound) ? Theme.Hover : Microsoft.UI.Colors.Transparent);
+        HighlightSlot(t as Slot);
         if (t is Item it)
         {
             // Выделенная иконка увеличена, как под курсором.
@@ -377,7 +355,7 @@ public sealed class Dock : IBar, IDropZone
         _kb = -1;
         _s.Keys.Capturing = false;
         HideTooltip();
-        _sound.Background = Theme.Brush(Microsoft.UI.Colors.Transparent);
+        HighlightSlot(null);
         SetHover(false);
     }
 
@@ -451,25 +429,25 @@ public sealed class Dock : IBar, IDropZone
 
     public void Show()
     {
-        _showSound = _fullTail && _s.Config.WidgetEnabled("audio");
+        UpdateTail();
         Relayout();
         Rebuild(initial: true);
-        UpdateSound();
         UpdateClock();
         Frame(0);
         _s.Bars.Add(this);
     }
 
     /// Монитор поменялся (размер, масштаб, панель задач) или он стал/перестал быть монитором хвоста.
-    public void Move(Screen screen, bool fullTail)
+    public bool FullTail => _fullTail;
+
+    public void Move(Screen screen, bool fullTail, bool force = false)
     {
-        var sound = fullTail && _s.Config.WidgetEnabled("audio");
         // Ничего не поменялось (конфиг сохранили по другому поводу) — окна не трогаем.
-        if (screen.SameAs(_screen) && screen.Work.Bottom == _screen.Work.Bottom && fullTail == _fullTail && sound == _showSound && BaseBottom() - _stripH == _stripY) return;
+        if (!force && screen.SameAs(_screen) && screen.Work.Bottom == _screen.Work.Bottom && fullTail == _fullTail && BaseBottom() - _stripH == _stripY) return;
         var tailChanged = fullTail != _fullTail;
         _screen = screen;
         _fullTail = fullTail;
-        _showSound = _fullTail && _s.Config.WidgetEnabled("audio");
+        UpdateTail();
         Relayout();
         if (tailChanged) Kick();
         _s.Bars.Publish();
@@ -484,7 +462,6 @@ public sealed class Dock : IBar, IDropZone
         _stripX = _screen.Bounds.Left;
         _stripY = BaseBottom() - _stripH;
         _widthDip = _stripW / _scale;
-        _sound.Visibility = _showSound ? Visibility.Visible : Visibility.Collapsed;
         // Иконки нужны в пикселях нового масштаба.
         if (Math.Abs(oldScale - _scale) > 0.001) foreach (var it in _items) { var src = it.IconSource; it.IconSource = null; if (src != null && it.Entry != null) SetIcon(it, src, null); }
         _pillPx = (-1, -1, -1);
@@ -511,7 +488,7 @@ public sealed class Dock : IBar, IDropZone
         _s.Tracker.Changed -= Rebuild;
         _s.Tracker.ForegroundChanged -= OnForeground;
         _s.Tracker.AttentionChanged -= UpdateDots;
-        _s.Audio.Changed -= UpdateSound;
+        UnsubscribeTail();
         _s.Config.Changed -= OnConfigChanged;
         _s.Launched -= OnLaunched;
         EndKeyboard();
@@ -730,7 +707,7 @@ public sealed class Dock : IBar, IDropZone
         return true;
     }
 
-    double TailW() => SepW + (_showSound ? SoundW + TailGap : 0) + ClockW;
+    double TailW() => SepW + _slots.Where(t => t.Shown).Sum(t => t.W + TailGap) - TailGap;
 
     double BaseTotal() => Pad + _items.Sum(i => i.Base + Gap * i.Base / Icon) - (_items.Count > 0 ? Gap : 0) + _gapW + TailW() + Pad;
 
@@ -847,16 +824,17 @@ public sealed class Dock : IBar, IDropZone
             _removeLabel.Translation = new Vector3((float)(_drag.X + _drag.Base / 2 - lw / 2), (float)(_drag.Top + _drag.Base + 4), 0);
         }
 
-        // Хвост: разделитель, звук, часы.
+        // Хвост: разделитель, ⌃ трей, сеть, звук, батарея, язык, уведомления, часы.
         var tailY = Headroom + PillH / 2;
         _separator.Translation = new Vector3((float)(x + 10), (float)(tailY - 17), 0);
         x += SepW;
-        if (_showSound)
+        foreach (var t in _slots)
         {
-            _sound.Translation = new Vector3((float)x, (float)(tailY - 20), 0);
-            x += SoundW + TailGap;
+            if (!t.Shown) continue;
+            t.X = x;
+            t.Visual.Translation = new Vector3((float)x, (float)(tailY - 20), 0);
+            x += t.W + TailGap;
         }
-        _clock.Translation = new Vector3((float)x, (float)(tailY - 18), 0);
 
         // Подсказка едет за своей иконкой.
         if (_tooltip.Visibility == Visibility.Visible) PlaceTooltip();
@@ -921,7 +899,10 @@ public sealed class Dock : IBar, IDropZone
             return;
         }
         var pillW = PillWidth();
-        var inside = p.X >= PillLeft && p.X <= PillLeft + pillW && p.Y >= Headroom - Icon * (MaxScale - 1) - 2;
+        // Пока курсор над доком, край считается чуть шире: таблетка растёт и сжимается вслед за
+        // курсором, и без запаса у её краёв увеличение мигало бы «включено — выключено».
+        var slack = _hover ? 8 : 0;
+        var inside = p.X >= PillLeft - slack && p.X <= PillLeft + pillW + slack && p.Y >= Headroom - Icon * (MaxScale - 1) - 2 - slack;
         if (inside) _cursorX = p.X;
         SetHover(inside);
         SetHovered(inside ? HitTest(p) : null);
@@ -935,13 +916,8 @@ public sealed class Dock : IBar, IDropZone
             if (it.Removing) continue;
             if (p.X >= it.X - Gap / 2 && p.X < it.X + it.Size + Gap / 2 && p.Y >= it.Top - 4) return it;
         }
-        if (_showSound)
-        {
-            var s = _sound.Translation;
-            if (p.X >= s.X && p.X < s.X + SoundW && p.Y >= Headroom) return _sound;
-        }
-        var c = _clock.Translation;
-        if (p.X >= c.X && p.X < c.X + ClockW && p.Y >= Headroom) return _clock;
+        foreach (var t in _slots)
+            if (t.Shown && p.X >= t.X && p.X < t.X + t.W && p.Y >= Headroom) return t;
         return null;
     }
 
@@ -951,7 +927,7 @@ public sealed class Dock : IBar, IDropZone
         var hadTooltip = _tooltip.Visibility == Visibility.Visible && !Equals(_tooltipFor, "volume");
         _hovered = target;
         _hoverTimer.Stop();
-        _sound.Background = Theme.Brush(ReferenceEquals(target, _sound) ? Theme.Hover : Microsoft.UI.Colors.Transparent);
+        HighlightSlot(target as Slot);
         if (!Equals(_tooltipFor, "volume")) HideTooltip();
         var list = _s.WindowList;
         var listOpen = list.IsOpen && ReferenceEquals(list.Owner, this);
@@ -989,8 +965,7 @@ public sealed class Dock : IBar, IDropZone
         Item { Entry: { Missing: true } } => "Не найдено",
         Item { Entry: { Windows.Count: 1 } e } => e.Windows[0].Title,
         Item { Entry: { } e } => e.Title,
-        _ when ReferenceEquals(target, _sound) => _s.Audio.Muted ? "Звук выключен" : $"Громкость {_s.Audio.Volume} %",
-        _ when ReferenceEquals(target, _clock) => DateTime.Now.ToString("dddd, d MMMM yyyy"),
+        Slot t => SlotTooltip(t),
         _ => "",
     };
 
@@ -1011,9 +986,9 @@ public sealed class Dock : IBar, IDropZone
         switch (_tooltipFor)
         {
             case Item it: cx = it.X + it.Size / 2; top = it.Top; break;
-            case "volume": cx = _sound.Translation.X + SoundW / 2; top = Headroom; break;
-            case Grid g when ReferenceEquals(g, _sound): cx = _sound.Translation.X + SoundW / 2; top = Headroom; break;
-            default: cx = _clock.Translation.X + ClockW / 2; top = Headroom; break;
+            case "volume": cx = _soundSlot.X + _soundSlot.W / 2; top = Headroom; break;
+            case Slot t: cx = t.X + t.W / 2; top = Headroom; break;
+            default: cx = _clockSlot.X + _clockSlot.W / 2; top = Headroom; break;
         }
         var x = Math.Clamp(cx - size.Width / 2, 2, _widthDip - size.Width - 2);
         _tooltip.Translation = new Vector3((float)x, (float)Math.Max(0, top - 8 - size.Height), 0);
@@ -1034,8 +1009,8 @@ public sealed class Dock : IBar, IDropZone
         {
             // Над увеличенной иконкой, как у Mac.
             case Item it: return new Rect(_stripX + it.X * _scale, y + it.Top * _scale, it.Size * _scale, (Headroom + PillH - it.Top) * _scale);
-            case Grid g when ReferenceEquals(g, _sound): x = _sound.Translation.X; w = SoundW; break;
-            default: x = _clock.Translation.X; w = ClockW; break;
+            case Slot t: x = t.X; w = t.W; break;
+            default: x = _clockSlot.X; w = _clockSlot.W; break;
         }
         return new Rect(_stripX + x * _scale, y + Headroom * _scale, w * _scale, PillH * _scale);
     }
@@ -1111,7 +1086,7 @@ public sealed class Dock : IBar, IDropZone
     {
         e.Handled = true;
         var p = e.GetCurrentPoint(_canvas);
-        if (!ReferenceEquals(HitTest(p.Position), _sound)) return;
+        if (!ReferenceEquals(HitTest(p.Position), _soundSlot)) return;
         var delta = p.Properties.MouseWheelDelta;
         if (delta == 0) return;
         var step = _s.AudioSettings.Step;
@@ -1349,11 +1324,7 @@ public sealed class Dock : IBar, IDropZone
     void LeftClick(object target)
     {
         CloseWindowList();
-        if (ReferenceEquals(target, _sound))
-        {
-            Popups.Toggle(_sound, () => _s.SoundFlyout.Show(_sound, AnchorPx(_sound), this));
-            return;
-        }
+        if (target is Slot slot) { SlotClick(slot); return; }
         if (target is not Item it) return;
         // Пуск: повторный клик закрывает его, клик по Пуску другого монитора переносит.
         if (it.IsStart) { _s.ToggleStart(this); return; }
@@ -1392,7 +1363,7 @@ public sealed class Dock : IBar, IDropZone
 
     void MiddleClick(object target)
     {
-        if (ReferenceEquals(target, _sound)) { _s.Audio.Muted = !_s.Audio.Muted; return; }
+        if (ReferenceEquals(target, _soundSlot)) { _s.Audio.Muted = !_s.Audio.Muted; return; }
         if (target is Item { IsStart: false, Entry.Missing: false } it) Launch(it);
     }
 
@@ -1400,19 +1371,7 @@ public sealed class Dock : IBar, IDropZone
     {
         CloseWindowList();
         HideTooltip();
-        if (ReferenceEquals(target, _sound))
-        {
-            var sk = ("menu", this, "sound");
-            Popups.Toggle(sk, () => _s.Menu.Show(sk, AnchorPx(_sound), SoundMenu(), owner: this));
-            return;
-        }
-        if (ReferenceEquals(target, _clock))
-        {
-            var ck = ("menu", this, "clock");
-            Popups.Toggle(ck, () => _s.Menu.Show(ck, AnchorPx(_clock),
-                [new() { Text = "Настроить дату и время", Glyph = "", Invoke = () => Launcher.Open("ms-settings:dateandtime") }], owner: this));
-            return;
-        }
+        if (target is Slot slot) { SlotRightClick(slot); return; }
         if (target is not Item it) return;
         // Правый клик по Пуску — служебное меню, то же, что Win+X (3.7).
         if (it.IsStart) { _s.ToggleTools(this); return; }
@@ -1500,24 +1459,6 @@ public sealed class Dock : IBar, IDropZone
         var existing = cat.Items.FirstOrDefault(i => string.Equals(i.Target, e.Target, StringComparison.OrdinalIgnoreCase));
         if (existing != null) _s.Config.Update(_ => cat.Items.Remove(existing));
         else _s.AddToCategory(categoryId, [new LauncherItem { Kind = "app", Title = e.Title, Target = e.Target, Meta = "Приложение" }]);
-    }
-
-    // ---------- хвост ----------
-
-    void UpdateSound()
-    {
-        var v = _s.Audio.Volume;
-        _soundIcon.Glyph = !_s.Audio.HasOutput ? "" : _s.Audio.Muted ? "" : v == 0 ? "" : v < 34 ? "" : v < 67 ? "" : "";
-        if (Equals(_tooltipFor, "volume")) { _tooltipText.Text = $"{v} %"; PlaceTooltip(); }
-    }
-
-    public void UpdateClock()
-    {
-        var now = DateTime.Now;
-        _time.Text = now.ToString("HH:mm");
-        _date.Text = now.ToString("dd.MM.yyyy");
-        _clockTimer.Interval = TimeSpan.FromSeconds(60 - now.Second + 0.05);
-        _clockTimer.Start();
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
