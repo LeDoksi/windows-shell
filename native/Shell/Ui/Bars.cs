@@ -45,6 +45,8 @@ public sealed class Bars
         public bool AtEdge;
         public bool Inside;
         public bool AppBar;
+        /// Показана клавишей (Win, Win+X, Win+T) поверх полноэкранного окна: стоит, пока нужна.
+        public bool Forced;
         public RECT AppBarRect;
         public int AppBarReserve;
         // Снимок для фонового потока.
@@ -62,6 +64,11 @@ public sealed class Bars
     bool _animating;
     long _lastFrame;
     bool _held;
+    // Окно тащат за заголовок (или меняют размер): край не вызывает полосу, пока тащат, и ещё
+    // секунду после (снап к верху экрана не должен выдвигать панель).
+    long _moveSizeUntil;
+    readonly WinEventProc _moveSizeProc;
+    const int MoveSizeCooldownMs = 1000;
 
     /// Кнопка мыши зажата над полосой (тащат иконку): полоса не уезжает, пока её не отпустят.
     public bool Held => _held;
@@ -75,6 +82,11 @@ public sealed class Bars
         _tick.Tick += (_, _) => Evaluate();
         var t = new Thread(Poll) { IsBackground = true, Name = "bars" };
         t.Start();
+        _moveSizeProc = (_, ev, _, _, _, _, _) =>
+        {
+            _moveSizeUntil = ev == 0x000A /* EVENT_SYSTEM_MOVESIZESTART */ ? long.MaxValue : Environment.TickCount64 + MoveSizeCooldownMs;
+        };
+        SetWinEventHook(0x000A, 0x000B, IntPtr.Zero, _moveSizeProc, 0, 0, WINEVENT_OUTOFCONTEXT);
     }
 
     public void Add(IBar bar)
@@ -116,10 +128,13 @@ public sealed class Bars
 
     /// Показать полосу сразу (переименование, запуск) — уедет как обычно, когда курсор уйдёт,
     /// но не раньше чем через `holdMs`.
-    public void Reveal(IBar bar, int holdMs = 0)
+    /// <param name="force">Вызвали клавишей (Пуск, Win+X, Win+T): выезжает и над полноэкранным окном.</param>
+    public void Reveal(IBar bar, int holdMs = 0, bool force = false)
     {
         var s = _bars.FirstOrDefault(b => b.Bar == bar);
-        if (s is null || IsFullscreen(bar.Screen)) return;
+        if (s is null) return;
+        if (IsFullscreen(bar.Screen) && !force) return;
+        if (force) s.Forced = true;
         s.Shown = true;
         s.AwaySince = 0;
         s.HoldUntil = Environment.TickCount64 + holdMs;
@@ -228,17 +243,19 @@ public sealed class Bars
             var b = s.Bar;
             var full = IsFullscreen(b.Screen);
             var was = s.Shown;
-            if (full) s.Shown = false;
+            if (!s.Shown) s.Forced = false;
+            if (full && !s.Forced) s.Shown = false;
             else if (b.Pinned) s.Shown = true;
             else if (s.Shown)
             {
                 if (s.Inside || b.Busy || _held || s.AtEdge || now < s.HoldUntil) s.AwaySince = 0;
                 else if (s.AwaySince == 0) s.AwaySince = now;
-                else if (now - s.AwaySince >= HideDelayMs) { s.Shown = false; s.AwaySince = 0; }
+                else if (now - s.AwaySince >= HideDelayMs) { s.Shown = false; s.AwaySince = 0; s.Forced = false; }
             }
-            else if (s.AtEdge) { s.Shown = true; s.AwaySince = 0; }
+            else if (s.AtEdge && now >= _moveSizeUntil) { s.Shown = true; s.AwaySince = 0; }
             if (s.Shown != was || (s.Shown ? s.Progress < 1 : s.Progress > 0)) any = true;
             UpdateAppBar(s, b.Pinned && !full);
+            if (full && s.Forced && !s.Shown) s.Forced = false;
         }
         var waiting = _bars.Any(s => s.Shown && !s.Bar.Pinned);
         if (waiting) { if (!_tick.IsRunning) _tick.Start(); }

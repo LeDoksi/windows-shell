@@ -75,6 +75,20 @@ public sealed class KeysSection
     public bool DockKeys { get; set; } = true;
 }
 
+/// Системный хвост и панель задач Windows (WSH-E9). Часы видны всегда.
+public sealed class TailSection
+{
+    /// Прятать панель задач Windows (её работу делают док и хвост).
+    public bool HideTaskbar { get; set; } = true;
+    /// ⌃ Фоновые приложения (свой трей).
+    public bool Tray { get; set; } = true;
+    public bool Network { get; set; } = true;
+    /// Только на ноутбуке: на ПК без батареи значка нет в любом случае.
+    public bool Battery { get; set; } = true;
+    public bool Language { get; set; } = true;
+    public bool Notifications { get; set; } = true;
+}
+
 public sealed class WidgetEntry
 {
     public string Id { get; set; } = "";
@@ -92,6 +106,7 @@ public sealed class ConfigData
     public List<WidgetEntry> Widgets { get; set; } = [];
     public StartSection Start { get; set; } = new();
     public KeysSection Keys { get; set; } = new();
+    public TailSection Tail { get; set; } = new();
 }
 
 /// Конфиг оболочки на диске: `%APPDATA%\WindowsShellNative\config.json`. Запись атомарная,
@@ -125,6 +140,7 @@ public sealed class ShellConfig
     public bool Tint => Data.Appearance.Glass == "tint";
     public StartSection Start => Data.Start;
     public KeysSection Keys => Data.Keys;
+    public TailSection Tail => Data.Tail;
 
     public static ShellConfig Load()
     {
@@ -137,8 +153,10 @@ public sealed class ShellConfig
             if (c.TryRead(FilePath + ".bak") is { } bak) { c.Data = bak; c.Normalize(); c.Save(); return c; }
         }
         // Первый запуск: переезд с версии на Tauri.
-        c.Data = c.TryRead(Path.Combine(TauriDir, "config.json")) ?? Defaults();
+        var tauri = c.TryRead(Path.Combine(TauriDir, "config.json"));
+        c.Data = tauri ?? Defaults();
         c.ImportPrototypePins();
+        if (tauri is null && !File.Exists(PrototypeFile)) c.ImportTaskbarPins();
         c.Normalize();
         c.Save();
         Log.Write($"конфиг создан: {c.Pins.Count} в доке, {c.Categories.Count} категорий");
@@ -178,6 +196,36 @@ public sealed class ShellConfig
         catch { }
     }
 
+    /// Совсем первый запуск (раздел 8): в док — то, что закреплено в панели задач Windows, в
+    /// том же порядке. Ярлыки закреплённого лежат в «User Pinned\TaskBar», а порядок Windows
+    /// хранит в Taskband\Favorites, где встречаются имена этих ярлыков.
+    void ImportTaskbarPins()
+    {
+        try
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar");
+            if (!Directory.Exists(dir)) return;
+            var order = "";
+            using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Taskband"))
+                if (key?.GetValue("Favorites") is byte[] blob) order = System.Text.Encoding.Unicode.GetString(blob);
+            var links = Directory.GetFiles(dir, "*.lnk")
+                .Select(f => (Path: f, At: order.IndexOf(Path.GetFileName(f), StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(x => x.At < 0 ? int.MaxValue : x.At)
+                .ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
+                .Select(x => x.Path);
+            var pins = Data.Dock.Pinned;
+            foreach (var link in links)
+            {
+                var title = Path.GetFileNameWithoutExtension(link);
+                // Проводник в доке уже есть.
+                if (title.Contains("Explorer", StringComparison.OrdinalIgnoreCase) || title.Contains("Проводник", StringComparison.OrdinalIgnoreCase)) continue;
+                pins.Add(new Pin(NewId(title), title, KeepShortcut(link)));
+            }
+            Log.Write($"первый запуск: из панели задач взято {pins.Count - 1}");
+        }
+        catch (Exception e) { Log.Write($"первый запуск: закреплённое из панели задач не прочитано ({e.Message})"); }
+    }
+
     static ConfigData Defaults() => new()
     {
         Categories =
@@ -200,6 +248,7 @@ public sealed class ShellConfig
         Data.Widgets ??= [];
         Data.Start ??= new();
         Data.Keys ??= new();
+        Data.Tail ??= new();
         Data.Start.Folders ??= ["explorer", "downloads", "settings"];
         Data.Start.Launches ??= [];
         var seen = new HashSet<string>();

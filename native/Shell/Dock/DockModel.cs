@@ -36,7 +36,25 @@ public static partial class DockModel
         var exe = Norm(w.Exe);
         if (exe == "") return false;
         if (ExeOfAumid.TryGetValue(t, out var tail) && exe.EndsWith(tail)) return true;
+        if (InPackage(exe, t)) return true;
         return exe == t || exe == Norm(target.Exe);
+    }
+
+    /// Закреплено из «Пуска» как приложение из Store («Claude_pzs8sxrjxfjjc!Claude»), а окно задаёт
+    /// себе свой AUMID (Electron): узнаём его по папке пакета WindowsApps\Имя_версия_…__издатель.
+    static bool InPackage(string exe, string pinTarget)
+    {
+        var bang = pinTarget.IndexOf('!');
+        if (bang <= 0) return false;
+        var family = pinTarget[..bang];
+        var us = family.LastIndexOf('_');
+        if (us <= 0) return false;
+        var name = family[..us];
+        var publisher = family[(us + 1)..];
+        var i = exe.IndexOf("\\windowsapps\\" + name + "_", StringComparison.Ordinal);
+        if (i < 0) return false;
+        var end = exe.IndexOf('\\', i + 14);
+        return end > 0 && exe[i..end].EndsWith("__" + publisher);
     }
 
     static readonly string WindowsDir = Norm(Environment.GetFolderPath(Environment.SpecialFolder.Windows));
@@ -81,7 +99,7 @@ public static partial class DockModel
                 if (owner.ContainsKey(w.Hwnd)) continue;
                 var pin = pins.FirstOrDefault(p => pass switch
                 {
-                    "aumid" => w.Aumid != null && Norm(w.Aumid) == Norm(p.Target),
+                    "aumid" => w.Aumid != null && Norm(w.Aumid) == Norm(p.Target) || w.PackageAumid != null && Norm(w.PackageAumid) == Norm(p.Target),
                     "exe" => MatchesPin(w, p, targets[p.Id]),
                     _ => InPinFolder(w, targets[p.Id]),
                 });

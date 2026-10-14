@@ -37,6 +37,12 @@ public sealed class Services
     public required Icons Icons { get; init; }
     public required WinKeys Keys { get; init; }
     public required Start.Catalog Catalog { get; init; }
+    public required Tray.TrayHost Tray { get; init; }
+    public required Tray.TaskbarButtons Buttons { get; init; }
+    public required Tail.NetworkService Network { get; init; }
+    public required Tail.BatteryService Battery { get; init; }
+    public required Tail.InputLanguage Language { get; init; }
+    public required Tail.Notifications Notifications { get; init; }
 
     MenuPopup? _menu;
     SoundFlyout? _sound;
@@ -45,6 +51,10 @@ public sealed class Services
     Panel.NameFlyout? _name;
     Panel.MediaFlyout? _mediaFlyout;
     Start.StartMenu? _start;
+    Tray.TrayFlyout? _trayFlyout;
+    Tail.NetworkFlyout? _netFlyout;
+    Tail.BatteryFlyout? _batFlyout;
+    Tail.ClockFlyout? _clockFlyout;
 
     public MenuPopup Menu => _menu ??= new MenuPopup();
     public SoundFlyout SoundFlyout => _sound ??= new SoundFlyout(Audio, Icons, Config);
@@ -53,6 +63,16 @@ public sealed class Services
     public Panel.NameFlyout NameFlyout => _name ??= new Panel.NameFlyout();
     public Panel.MediaFlyout MediaFlyout => _mediaFlyout ??= new Panel.MediaFlyout(Media);
     public Start.StartMenu StartMenu => _start ??= new Start.StartMenu(this, Catalog);
+    public Tray.TrayFlyout TrayFlyout => _trayFlyout ??= new Tray.TrayFlyout(Tray);
+    public Tail.NetworkFlyout NetworkFlyout => _netFlyout ??= new Tail.NetworkFlyout(Network);
+    public Tail.BatteryFlyout BatteryFlyout => _batFlyout ??= new Tail.BatteryFlyout(Battery);
+    public Tail.ClockFlyout ClockFlyout => _clockFlyout ??= new Tail.ClockFlyout();
+
+    /// На ⌃ точка: программа из трея что-то сообщила, а окошко трея ещё не открывали.
+    public bool TrayAttention { get; set; }
+
+    /// Вернуть панель задач Windows до перезапуска оболочки (меню трея, Ctrl+Alt+Shift+T).
+    public Action RestoreTaskbar { get; set; } = () => { };
 
     public List<IDropZone> DropZones { get; } = [];
 

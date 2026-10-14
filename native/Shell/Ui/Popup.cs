@@ -78,6 +78,10 @@ public abstract class Popup
     public bool Activating => _activating;
     public IntPtr Hwnd => Win.Hwnd;
 
+    /// Не закрываться, когда окошко перестало быть активным: окошко трея ждёт, пока закроется
+    /// меню чужой программы, и закрывается само.
+    protected virtual bool KeepOpenWhenDeactivated => false;
+
     /// Отступ окошка от кнопки (DIP).
     protected virtual double Gap => 10;
     protected virtual double Width => 0;
@@ -112,7 +116,7 @@ public abstract class Popup
             // Клик мимо: окошко закрывается, а клик срабатывает там, куда нажали (0.4).
             // Внутреннее меню ещё открывается (его окно только что стало активным) или открыто.
             if (_child != null) return;
-            if (_activating && _wasActive && IsOpen) Close(restoreFocus: false);
+            if (_activating && _wasActive && IsOpen && !KeepOpenWhenDeactivated) Close(restoreFocus: false);
         };
     }
 

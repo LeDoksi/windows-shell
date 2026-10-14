@@ -216,12 +216,17 @@ public sealed class SettingsWindow
                 Change(c => c.Bars.Monitor = name);
             }
         };
+        var tailCfg = _s.Config.Tail;
         Add(Card(
-            Row("Монитор для хвоста", "Звук и часы справа в доке. На остальных мониторах в доке только часы.", combo),
-            Switch("Звук", "Значок громкости в хвосте: колесо меняет громкость, клик открывает окошко звука.",
+            Row("Монитор для хвоста", "Полный хвост справа в доке. На остальных мониторах в доке только часы.", combo),
+            Switch("Фоновые приложения", "Стрелка ⌃ с иконками программ из трея.", tailCfg.Tray, on => Change(c => c.Tail.Tray = on)),
+            Switch("Сеть", "Значок сети: клик открывает список Wi-Fi.", tailCfg.Network, on => Change(c => c.Tail.Network = on)),
+            Switch("Звук", "Значок громкости: колесо меняет громкость, клик открывает окошко звука.",
                 _s.Config.WidgetEnabled("audio"), on => Change(_ => _s.Config.Widget("audio").Enabled = on)),
+            Switch("Батарея", "Только на ноутбуке: на компьютере без батареи значка нет.", tailCfg.Battery, on => Change(c => c.Tail.Battery = on)),
+            Switch("Язык ввода", "RU / EN, клик — выбор раскладки.", tailCfg.Language, on => Change(c => c.Tail.Language = on)),
+            Switch("Уведомления", "Колокольчик: клик открывает центр уведомлений Windows.", tailCfg.Notifications, on => Change(c => c.Tail.Notifications = on)),
             Row("Часы", "Видны всегда.", null)));
-        Add(Note("Трей, сеть, язык ввода и уведомления появятся в хвосте на следующем этапе, их тоже можно будет скрыть здесь."));
     }
 
     void BuildPanel()
@@ -367,6 +372,11 @@ public sealed class SettingsWindow
 
     void BuildSystem()
     {
+        Add(Card(
+            Switch("Прятать панель задач Windows", "Её работу делают док и хвост. Вернуть на время: Ctrl+Alt+Shift+T или меню значка оболочки.",
+                _s.Config.Tail.HideTaskbar, on => Change(c => c.Tail.HideTaskbar = on))));
+        Add(Note("Если оболочка закроется или упадёт, панель задач Windows вернётся сама."));
+
         Add(Card(
             Switch("Запускать вместе с Windows", "Оболочка появляется сама после входа в систему.", Autostart.IsOn, on =>
             {

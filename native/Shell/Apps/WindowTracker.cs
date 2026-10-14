@@ -14,7 +14,8 @@ public sealed record WindowInfo(
     string AppName,
     bool Minimized,
     long Seq,
-    long Focused);
+    long Focused,
+    string? PackageAumid = null);
 
 /// Следит за окнами верхнего уровня, как трекер версии на Tauri (`apps.rs`): события Windows
 /// ставят пересчёт через 60 мс, страховочный пересчёт раз в 2 с. Всё в потоке интерфейса.
@@ -192,7 +193,7 @@ public sealed class WindowTracker
             var aumid = WindowAumid(h) ?? proc.Aumid;
             if (!_seq.TryGetValue(h, out var seq)) _seq[h] = seq = ++_tick;
             _focused.TryGetValue(h, out var focused);
-            list.Add(new WindowInfo(h, title, aumid, proc.Exe, NameOf(aumid, proc.Exe, title), IsIconic(h), seq, focused));
+            list.Add(new WindowInfo(h, title, aumid, proc.Exe, NameOf(aumid, proc.Exe, title), IsIconic(h), seq, focused, proc.Aumid));
         }
         // Закрытые окна забываем.
         var alive = list.Select(w => w.Hwnd).ToHashSet();

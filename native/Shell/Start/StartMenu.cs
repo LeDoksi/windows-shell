@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -20,7 +21,7 @@ namespace WindowsShell.Start;
 /// с клавиатуры). Иконки можно перетащить на док (закрепить) и на другую вкладку.
 public sealed class StartMenu : Popup
 {
-    const double W = 680, TileW = 100, TileH = 92, Cols = 6, Spacing = 8, Pad = 20, RowH = 40;
+    const double W = 760, Side = 196, TileW = 100, TileH = 92, Cols = 5, Spacing = 8, Pad = 20, RowH = 40;
     const string All = "all";
 
     enum Zone { Tabs, Main, Recent, Bottom, Results, Card }
@@ -43,10 +44,11 @@ public sealed class StartMenu : Popup
     readonly Catalog _catalog;
     readonly Grid _root = new();
     readonly TextBox _search;
-    readonly StackPanel _tabsPanel = new() { Orientation = Orientation.Horizontal, Spacing = 4 };
+    readonly StackPanel _tabsPanel = new() { Spacing = 2 };
     readonly Grid _main = new();
     readonly Grid _grid = new() { ColumnSpacing = Spacing, RowSpacing = Spacing };
     readonly ScrollViewer _gridScroll;
+    readonly ScrollViewer _tabsScroll;
     readonly StackPanel _allList = new();
     readonly ScrollViewer _allScroll;
     readonly Grid _letters = new() { Visibility = Visibility.Collapsed };
@@ -101,22 +103,22 @@ public sealed class StartMenu : Popup
         var searchIcon = new FontIcon { Glyph = "", FontFamily = Theme.Icons, FontSize = 14, Foreground = Theme.Brush(Theme.TextSecondary), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(14, 0, 0, 0), IsHitTestVisible = false };
         var searchBox = new Grid { Margin = new Thickness(Pad, Pad, Pad, 14), Children = { _search, searchIcon } };
 
-        var tabsScroll = new ScrollViewer
+        // Вкладки — столбиком слева (WSH-89): помещается много, крутить колесом не нужно.
+        _tabsScroll = new ScrollViewer
         {
             Content = _tabsPanel,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            HorizontalScrollMode = ScrollMode.Enabled,
-            VerticalScrollMode = ScrollMode.Disabled,
-            Margin = new Thickness(Pad, 0, Pad, 12),
+            Width = Side,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Padding = new Thickness(Pad - 8, 0, 12, 12),
         };
 
         for (var i = 0; i < Cols; i++) _grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TileW) });
-        _gridScroll = new ScrollViewer { Content = _grid, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(Pad, 0, Pad, 0) };
-        _allScroll = new ScrollViewer { Content = _allList, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(Pad - 8, 0, Pad - 8, 0), Visibility = Visibility.Collapsed };
+        _gridScroll = new ScrollViewer { Content = _grid, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, Pad, 0) };
+        _allScroll = new ScrollViewer { Content = _allList, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, Pad - 8, 0), Visibility = Visibility.Collapsed };
         _empty = new TextBlock { FontFamily = Theme.Font, FontSize = 13, Foreground = Theme.Brush(Theme.TextSecondary), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxWidth = 420, Visibility = Visibility.Collapsed };
         _letters.Background = Theme.Brush(Windows.UI.Color.FromArgb(0xF2, 0x24, 0x24, 0x24));
-        _letters.Margin = new Thickness(Pad - 8, 0, Pad - 8, 0);
+        _letters.Margin = new Thickness(0, 0, Pad - 8, 0);
         _letters.CornerRadius = new CornerRadius(8);
         _main.Children.Add(_gridScroll);
         _main.Children.Add(_allScroll);
@@ -141,7 +143,7 @@ public sealed class StartMenu : Popup
 
         _recentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         _recentGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        _recentBox.Margin = new Thickness(Pad - 8, 10, Pad - 8, 12);
+        _recentBox.Margin = new Thickness(-8, 10, Pad - 8, 12);
         _recentBox.Children.Add(new TextBlock { Text = "Недавние файлы", FontFamily = Theme.Font, FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = Theme.Brush(Theme.Text), Margin = new Thickness(8, 0, 0, 0) });
         _recentBox.Children.Add(_recentGrid);
 
@@ -154,19 +156,27 @@ public sealed class StartMenu : Popup
             Child = _bottom,
         };
 
-        _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        // Строки: поиск · содержимое · недавние · низ. Столбцы: вкладки · содержимое.
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        Grid.SetRow(tabsScroll, 1);
-        Grid.SetRow(_main, 2);
-        Grid.SetRow(_results, 2);
+        _root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumnSpan(searchBox, 2);
+        Grid.SetRow(_tabsScroll, 1);
+        Grid.SetRowSpan(_tabsScroll, 2);
+        Grid.SetRow(_main, 1);
+        Grid.SetColumn(_main, 1);
+        Grid.SetRow(_results, 1);
         Grid.SetRowSpan(_results, 2);
-        Grid.SetRow(_recentBox, 3);
-        Grid.SetRow(bottomBox, 4);
+        Grid.SetColumnSpan(_results, 2);
+        Grid.SetRow(_recentBox, 2);
+        Grid.SetColumn(_recentBox, 1);
+        Grid.SetRow(bottomBox, 3);
+        Grid.SetColumnSpan(bottomBox, 2);
         _root.Children.Add(searchBox);
-        _root.Children.Add(tabsScroll);
+        _root.Children.Add(_tabsScroll);
         _root.Children.Add(_main);
         _root.Children.Add(_results);
         _root.Children.Add(_recentBox);
@@ -277,16 +287,20 @@ public sealed class StartMenu : Popup
             cells.Add(TabCell(cat.Id, cat.Name, Theme.Parse(cat.Color)));
         cells.Add(TabCell(All, "Все приложения", null));
         foreach (var c in cells) _tabsPanel.Children.Add(c.Visual);
-        SetCells(Zone.Tabs, cells, cols: cells.Count);
+        SetCells(Zone.Tabs, cells, cols: 1);
     }
 
     Cell TabCell(string id, string name, Windows.UI.Color? color)
     {
-        var content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 7, VerticalAlignment = VerticalAlignment.Center };
-        if (color is { } c) content.Children.Add(new Ellipse { Width = 8, Height = 8, Fill = Theme.Brush(c), VerticalAlignment = VerticalAlignment.Center });
+        var content = new Grid { ColumnSpacing = 10, VerticalAlignment = VerticalAlignment.Center };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        if (color is { } c) content.Children.Add(new Ellipse { Width = 8, Height = 8, Fill = Theme.Brush(c), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
         else content.Children.Add(new FontIcon { Glyph = "", FontFamily = Theme.Icons, FontSize = 12, Foreground = Theme.Brush(Theme.TextSecondary) });
-        content.Children.Add(new TextBlock { Text = name, FontFamily = Theme.Font, FontSize = 13, Foreground = Theme.Brush(Theme.Text), VerticalAlignment = VerticalAlignment.Center });
-        var border = new Border { Height = 32, Padding = new Thickness(12, 0, 14, 0), CornerRadius = new CornerRadius(16), Child = content };
+        var text = new TextBlock { Text = name, FontFamily = Theme.Font, FontSize = 13, Foreground = Theme.Brush(Theme.Text), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
+        Grid.SetColumn(text, 1);
+        content.Children.Add(text);
+        var border = new Border { Height = 36, Padding = new Thickness(10, 0, 10, 0), CornerRadius = new CornerRadius(6), Child = content, HorizontalAlignment = HorizontalAlignment.Stretch };
         var cell = new Cell { Visual = border, Invoke = () => SelectTab(id), Tab = id };
         Wire(cell);
         return cell;
@@ -577,16 +591,14 @@ public sealed class StartMenu : Popup
         // Пользователь.
         var name = UserInfo.Name;
         var avatar = new Grid { Width = 32, Height = 32 };
-        var circle = new Ellipse { Width = 32, Height = 32, Fill = Theme.Brush(Theme.Accent) };
-        avatar.Children.Add(circle);
+        // Буква на цветном круге всегда под картинкой: если картинка не загрузится, видна буква.
+        avatar.Children.Add(new Ellipse { Width = 32, Height = 32, Fill = Theme.Brush(Theme.Accent) });
+        avatar.Children.Add(new TextBlock { Text = name.Length > 0 ? char.ToUpper(name[0]).ToString() : "?", FontFamily = Theme.Font, FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = Theme.Brush(Windows.UI.Color.FromArgb(255, 0, 0, 0)), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
         if (UserInfo.Picture is { } pic)
         {
-            try { circle.Fill = new ImageBrush { ImageSource = new BitmapImage(new Uri(pic)), Stretch = Stretch.UniformToFill }; }
-            catch { }
-        }
-        else
-        {
-            avatar.Children.Add(new TextBlock { Text = name.Length > 0 ? char.ToUpper(name[0]).ToString() : "?", FontFamily = Theme.Font, FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = Theme.Brush(Windows.UI.Color.FromArgb(255, 0, 0, 0)), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
+            var photo = new Ellipse { Width = 32, Height = 32 };
+            avatar.Children.Add(photo);
+            _ = LoadAvatar(photo, pic);
         }
         var user = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
         user.Children.Add(avatar);
@@ -672,6 +684,7 @@ public sealed class StartMenu : Popup
         var searching = Searching;
         _results.Visibility = searching ? Visibility.Visible : Visibility.Collapsed;
         _main.Visibility = searching ? Visibility.Collapsed : Visibility.Visible;
+        _tabsScroll.Visibility = _main.Visibility;
         _recentBox.Visibility = !searching && _s.Config.Start.RecentFiles && _recent.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (!searching)
         {
@@ -1086,6 +1099,18 @@ public sealed class StartMenu : Popup
             return;
         }
         var cols = _cols[_zone];
+        var tabIndex = Math.Max(0, Cells(Zone.Tabs).FindIndex(c => c.Tab == _tab));
+        // Вкладки слева: вправо от них — в содержимое, влево от первого столбца — на вкладки.
+        if (dx > 0 && _zone == Zone.Tabs) { if (Usable(Zone.Main)) Go(Zone.Main, 0); return; }
+        if (dx < 0 && _zone is Zone.Main or Zone.Recent && _sel % cols == 0 && Usable(Zone.Tabs)) { Go(Zone.Tabs, tabIndex); return; }
+        if (dx < 0 && _zone == Zone.Tabs) return;
+        if (_zone == Zone.Tabs && dy != 0)
+        {
+            var t = _sel + dy;
+            if (t >= 0 && t < cells.Count) Go(Zone.Tabs, t);
+            else if (dy > 0 && Usable(Zone.Bottom)) Go(Zone.Bottom, 0);
+            return;
+        }
         if (dx != 0)
         {
             var next = _sel + dx;
@@ -1101,12 +1126,12 @@ public sealed class StartMenu : Popup
         var i = Array.IndexOf(order, _zone);
         for (i += dy; i >= 0 && i < order.Length; i += dy)
         {
-            if (order[i] == Zone.Card || !Usable(order[i])) continue;
+            // Вкладки сбоку, сверху над содержимым их нет.
+            if (order[i] is Zone.Card or Zone.Tabs || !Usable(order[i])) continue;
             var z = order[i];
             var count = Cells(z).Count;
-            var col = _zone == Zone.Tabs ? 0 : _sel % cols;
-            var index = z == Zone.Tabs ? Cells(Zone.Tabs).FindIndex(c => c.Tab == _tab)
-                : dy > 0 ? Math.Min(col, count - 1) : Math.Min(count - 1, (count - 1) / _cols[z] * _cols[z] + Math.Min(col, _cols[z] - 1));
+            var col = _sel % cols;
+            var index = dy > 0 ? Math.Min(col, count - 1) : Math.Min(count - 1, (count - 1) / _cols[z] * _cols[z] + Math.Min(col, _cols[z] - 1));
             Go(z, index);
             return;
         }
@@ -1318,6 +1343,23 @@ public sealed class StartMenu : Popup
     }
 
     // ---------- общее ----------
+
+    /// Картинку учётной записи читаем сами: по пути file:// WinUI в распакованном приложении
+    /// её иногда молча не показывает.
+    static async Task LoadAvatar(Ellipse target, string path)
+    {
+        try
+        {
+            var bytes = await File.ReadAllBytesAsync(path);
+            using var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+            await stream.WriteAsync(bytes.AsBuffer());
+            stream.Seek(0);
+            var bmp = new BitmapImage { DecodePixelWidth = 64 };
+            await bmp.SetSourceAsync(stream);
+            target.Fill = new ImageBrush { ImageSource = bmp, Stretch = Stretch.UniformToFill };
+        }
+        catch (Exception e) { Log.Write($"Пуск: картинка учётной записи не загрузилась ({e.Message})"); }
+    }
 
     /// Иконка от Проводника, пока её нет — значок.
     FrameworkElement Icon(string? source, string glyph, double size)
