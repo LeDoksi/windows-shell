@@ -253,8 +253,26 @@ public sealed class TrayFlyout : Popup
         Log.Write($"трей: меню программы поверх наших окон ({above.Count})");
     }
 
+    POINT _clickPoint;
+
+    /// Значки самого Проводника (Bluetooth) ставят меню по месту его спрятанной панели задач —
+    /// в угол экрана. Такое меню переносим к иконке, на которую нажали.
+    void PlaceStrayMenu(IntPtr menu)
+    {
+        if (ClassName(menu) != "#32768" || !GetWindowRect(menu, out var r)) return;
+        var mon = MonitorInfo(MonitorFromPoint(_clickPoint, MONITOR_DEFAULTTONEAREST)).rcWork;
+        var near = Math.Abs(r.Left - _clickPoint.X) < 600 && Math.Abs(r.Bottom - _clickPoint.Y) < 600;
+        if (near) return;
+        int w = r.Right - r.Left, h = r.Bottom - r.Top;
+        var x = Math.Clamp(_clickPoint.X, mon.Left, mon.Right - w);
+        var y = Math.Clamp(_clickPoint.Y - h, mon.Top, mon.Bottom - h);
+        SetWindowPos(menu, IntPtr.Zero, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        Log.Write($"трей: меню перенесено из {r.Left},{r.Top} к иконке");
+    }
+
     void NoteClick(TrayItem it)
     {
+        GetCursorPos(out _clickPoint);
         _clickedPid = ProcessId(it.Hwnd);
         _clickedAt = Environment.TickCount64;
         _menuSeen = false;
@@ -276,6 +294,9 @@ public sealed class TrayFlyout : Popup
         // и впереди у них бывает скрытое служебное окно, а не меню).
         var visibleMenu = menu != IntPtr.Zero && IsWindowVisible(menu) ? menu : TopmostOf(_clickedPid);
         if (visibleMenu != IntPtr.Zero) programMenu = true;
+        // Меню было видно и пропало (Esc, выбор пункта): закрываемся, даже если впереди осталось
+        // скрытое окно программы — иначе следующий клик по ⌃ уйдёт на закрытие невидимого окошка.
+        else if (_raisedMenu != IntPtr.Zero) { _raisedMenu = IntPtr.Zero; Close(restoreFocus: false); return; }
         if (programMenu)
         {
             _menuSeen = true;
@@ -287,6 +308,7 @@ public sealed class TrayFlyout : Popup
                 // Само окошко прячем, пока открыто меню: оно всё равно закроется вместе с меню,
                 // а «поверх всех» его иначе не опустить.
                 ShowWindowAsync(Hwnd, 0 /* SW_HIDE */);
+                PlaceStrayMenu(shown);
                 // Поднять чужое меню над нашими окнами Windows не даёт, поэтому все наши окна,
                 // которые выше меню (это окошко, док), ставим сразу под него. Меню — Win32 (#32768)
                 // или своё у Chrome, Discord и прочих Electron-программ.
