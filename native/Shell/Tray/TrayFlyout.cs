@@ -229,15 +229,24 @@ public sealed class TrayFlyout : Popup
 
     IntPtr _raisedMenu;
 
-    /// Видимое окно «поверх всех» этой программы (её меню), если есть.
-    static IntPtr TopmostOf(uint pid)
+    /// Окна «поверх всех» программы, которые были до клика (у Проводника их много, и это не меню).
+    readonly HashSet<IntPtr> _before = [];
+
+    static IEnumerable<IntPtr> TopmostWindows(uint pid)
     {
-        if (pid == 0) return IntPtr.Zero;
         for (var h = GetWindow(GetDesktopWindow(), 5 /* GW_CHILD */); h != IntPtr.Zero; h = GetWindow(h, 2 /* GW_HWNDNEXT */))
         {
-            if ((ExStyle(h) & WS_EX_TOPMOST) == 0) break;
-            if (IsWindowVisible(h) && ProcessId(h) == pid && !IsRealWindow(h) && ClassName(h) != "tooltips_class32") return h;
+            if ((ExStyle(h) & WS_EX_TOPMOST) == 0) yield break;
+            if (IsWindowVisible(h) && ProcessId(h) == pid) yield return h;
         }
+    }
+
+    /// Видимое окно «поверх всех» этой программы, появившееся после клика (её меню), если есть.
+    IntPtr TopmostOf(uint pid)
+    {
+        if (pid == 0) return IntPtr.Zero;
+        foreach (var h in TopmostWindows(pid))
+            if (!_before.Contains(h) && !IsRealWindow(h) && ClassName(h) != "tooltips_class32") return h;
         return IntPtr.Zero;
     }
 
@@ -275,6 +284,8 @@ public sealed class TrayFlyout : Popup
     void NoteClick(TrayItem it)
     {
         _clickedHwnd = it.Hwnd;
+        _before.Clear();
+        foreach (var h in TopmostWindows(ProcessId(it.Hwnd))) _before.Add(h);
         GetCursorPos(out _clickPoint);
         _clickedPid = ProcessId(it.Hwnd);
         _clickedAt = Environment.TickCount64;
