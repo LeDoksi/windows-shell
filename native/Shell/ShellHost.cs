@@ -144,6 +144,7 @@ public sealed class ShellHost
         _announced.IntersectWith(windows);
         var fresh = windows.Where(_announced.Add).ToList();
         if (fresh.Count > 0) _s.Tray.AnnounceButtons(fresh);
+        _s.Buttons.Prune(_announced);
     }
 
     void OnConfigChanged()

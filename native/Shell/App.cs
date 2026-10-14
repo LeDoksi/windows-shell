@@ -76,6 +76,7 @@ public sealed class App : Application, IXamlMetadataProvider
             var tracker = new WindowTracker(queue);
             step = "звук";
             var audio = new AudioService(queue);
+            var tray = new Tray.TrayHost(queue);
             var services = new Services
             {
                 Queue = queue,
@@ -89,7 +90,8 @@ public sealed class App : Application, IXamlMetadataProvider
                 Icons = new Icons(queue),
                 Keys = new WinKeys(queue),
                 Catalog = new Start.Catalog(queue),
-                Tray = new Tray.TrayHost(queue),
+                Tray = tray,
+                Buttons = new Tray.TaskbarButtons(tray),
                 Network = new Tail.NetworkService(queue),
                 Battery = new Tail.BatteryService(queue, messages),
                 Language = new Tail.InputLanguage(queue),

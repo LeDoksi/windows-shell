@@ -153,8 +153,10 @@ public sealed class ShellConfig
             if (c.TryRead(FilePath + ".bak") is { } bak) { c.Data = bak; c.Normalize(); c.Save(); return c; }
         }
         // Первый запуск: переезд с версии на Tauri.
-        c.Data = c.TryRead(Path.Combine(TauriDir, "config.json")) ?? Defaults();
+        var tauri = c.TryRead(Path.Combine(TauriDir, "config.json"));
+        c.Data = tauri ?? Defaults();
         c.ImportPrototypePins();
+        if (tauri is null && !File.Exists(PrototypeFile)) c.ImportTaskbarPins();
         c.Normalize();
         c.Save();
         Log.Write($"конфиг создан: {c.Pins.Count} в доке, {c.Categories.Count} категорий");
@@ -192,6 +194,36 @@ public sealed class ShellConfig
             if (pins.Count > 0) Data.Dock.Pinned = pins;
         }
         catch { }
+    }
+
+    /// Совсем первый запуск (раздел 8): в док — то, что закреплено в панели задач Windows, в
+    /// том же порядке. Ярлыки закреплённого лежат в «User Pinned\TaskBar», а порядок Windows
+    /// хранит в Taskband\Favorites, где встречаются имена этих ярлыков.
+    void ImportTaskbarPins()
+    {
+        try
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), @"Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar");
+            if (!Directory.Exists(dir)) return;
+            var order = "";
+            using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Taskband"))
+                if (key?.GetValue("Favorites") is byte[] blob) order = System.Text.Encoding.Unicode.GetString(blob);
+            var links = Directory.GetFiles(dir, "*.lnk")
+                .Select(f => (Path: f, At: order.IndexOf(Path.GetFileName(f), StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(x => x.At < 0 ? int.MaxValue : x.At)
+                .ThenBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
+                .Select(x => x.Path);
+            var pins = Data.Dock.Pinned;
+            foreach (var link in links)
+            {
+                var title = Path.GetFileNameWithoutExtension(link);
+                // Проводник в доке уже есть.
+                if (title.Contains("Explorer", StringComparison.OrdinalIgnoreCase) || title.Contains("Проводник", StringComparison.OrdinalIgnoreCase)) continue;
+                pins.Add(new Pin(NewId(title), title, KeepShortcut(link)));
+            }
+            Log.Write($"первый запуск: из панели задач взято {pins.Count - 1}");
+        }
+        catch (Exception e) { Log.Write($"первый запуск: закреплённое из панели задач не прочитано ({e.Message})"); }
     }
 
     static ConfigData Defaults() => new()

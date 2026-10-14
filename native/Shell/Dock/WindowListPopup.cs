@@ -21,13 +21,18 @@ public sealed class WindowListPopup : Popup
     readonly StackPanel _cards = new() { Orientation = Orientation.Horizontal, Spacing = CardGap, Padding = new Thickness(Pad) };
     readonly List<IntPtr> _thumbs = [];
     IReadOnlyList<WindowInfo> _windows = [];
+    // Подсмотреть окно (раздел 8): наведение на миниатюру на 400 мс показывает окно на месте,
+    // остальные становятся прозрачными — как в панели задач Windows.
+    readonly DispatcherTimer _peekDelay = new() { Interval = TimeSpan.FromMilliseconds(400) };
+    IntPtr _peekWanted, _peeking;
 
     public WindowListPopup(WindowTracker tracker, Icons icons) : base(activating: false)
     {
         _tracker = tracker;
         _icons = icons;
         SetContent(_cards);
-        Win.Root.PointerExited += (_, _) => PointerLeft?.Invoke();
+        Win.Root.PointerExited += (_, _) => { EndPeek(); PointerLeft?.Invoke(); };
+        _peekDelay.Tick += (_, _) => { _peekDelay.Stop(); Peek(_peekWanted); };
     }
 
     /// Курсор ушёл со списка.
@@ -94,8 +99,21 @@ public sealed class WindowListPopup : Popup
             card.Children.Add(head);
 
             var hwnd = w.Hwnd;
-            card.PointerEntered += (_, _) => { card.Background = Theme.Brush(Theme.Hover); close.Opacity = 1; };
-            card.PointerExited += (_, _) => { card.Background = Theme.Brush(Theme.Card); close.Opacity = 0; };
+            card.PointerEntered += (_, _) =>
+            {
+                card.Background = Theme.Brush(Theme.Hover);
+                close.Opacity = 1;
+                _peekWanted = hwnd;
+                // Уже подсматриваем — соседнее окно показываем сразу, без новой паузы.
+                if (_peeking != IntPtr.Zero) Peek(hwnd);
+                else { _peekDelay.Stop(); _peekDelay.Start(); }
+            };
+            card.PointerExited += (_, _) =>
+            {
+                card.Background = Theme.Brush(Theme.Card);
+                close.Opacity = 0;
+                if (_peekWanted == hwnd) { _peekWanted = IntPtr.Zero; _peekDelay.Stop(); }
+            };
             close.PointerEntered += (_, _) => close.Background = Theme.Brush(global::Windows.UI.Color.FromArgb(255, 0xC4, 0x2B, 0x1C));
             close.PointerExited += (_, _) => close.Background = Theme.Brush(Microsoft.UI.Colors.Transparent);
             close.PointerReleased += (_, e) => { e.Handled = true; _tracker.Close(hwnd); };
@@ -105,6 +123,7 @@ public sealed class WindowListPopup : Popup
                 var kind = e.GetCurrentPoint(card).Properties.PointerUpdateKind;
                 if (kind == PointerUpdateKind.MiddleButtonReleased) { _tracker.Close(hwnd); return; }
                 if (kind != PointerUpdateKind.LeftButtonReleased) return;
+                EndPeek();
                 Close(restoreFocus: false);
                 _tracker.Activate(hwnd);
             };
@@ -153,5 +172,34 @@ public sealed class WindowListPopup : Popup
         _thumbs.Clear();
     }
 
-    protected override void OnClosing() => ClearThumbnails();
+    void Peek(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero || !IsOpen || hwnd == _peeking) return;
+        try
+        {
+            // Наше окошко со списком остаётся поверх подсматриваемого окна.
+            if (DwmpActivateLivePreview(true, hwnd, Win.Hwnd, 3 /* окно */, IntPtr.Zero) == 0) _peeking = hwnd;
+        }
+        catch (Exception e) { Log.Error("подсмотреть окно", e); }
+    }
+
+    void EndPeek()
+    {
+        _peekDelay.Stop();
+        _peekWanted = IntPtr.Zero;
+        if (_peeking == IntPtr.Zero) return;
+        _peeking = IntPtr.Zero;
+        try { DwmpActivateLivePreview(false, IntPtr.Zero, IntPtr.Zero, 3, IntPtr.Zero); }
+        catch { }
+    }
+
+    protected override void OnClosing()
+    {
+        EndPeek();
+        ClearThumbnails();
+    }
+
+    // Недокументированная функция DWM (номер 113), её же зовут панель задач Windows и Cairo.
+    [System.Runtime.InteropServices.DllImport("dwmapi.dll", EntryPoint = "#113")]
+    static extern int DwmpActivateLivePreview(bool peekOn, IntPtr peekWindow, IntPtr topmostWindow, uint peekType, IntPtr reserved);
 }

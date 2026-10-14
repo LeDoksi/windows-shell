@@ -38,6 +38,7 @@ public sealed class Services
     public required WinKeys Keys { get; init; }
     public required Start.Catalog Catalog { get; init; }
     public required Tray.TrayHost Tray { get; init; }
+    public required Tray.TaskbarButtons Buttons { get; init; }
     public required Tail.NetworkService Network { get; init; }
     public required Tail.BatteryService Battery { get; init; }
     public required Tail.InputLanguage Language { get; init; }

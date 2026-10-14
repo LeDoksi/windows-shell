@@ -95,6 +95,10 @@ public sealed partial class Dock : IBar, IDropZone
         /// Значок-заглушка, пока у программы нет своей иконки (не найдена, не отдала иконку).
         public FontIcon? Placeholder;
         public required Border Dot;
+        /// Счётчик программы (значок поверх иконки) и полоска загрузки (раздел 8).
+        public Image? Badge;
+        public Grid? Progress;
+        public Border? ProgressFill;
         public double Base, BaseV, Size, SizeV;
         public double DX, DXV;
         public bool Placed;
@@ -205,6 +209,7 @@ public sealed partial class Dock : IBar, IDropZone
         _s.Tracker.Changed += Rebuild;
         _s.Tracker.ForegroundChanged += OnForeground;
         _s.Tracker.AttentionChanged += UpdateDots;
+        _s.Buttons.Changed += UpdateDots;
         SubscribeTail();
         _s.Config.Changed += OnConfigChanged;
         _s.Launched += OnLaunched;
@@ -488,6 +493,7 @@ public sealed partial class Dock : IBar, IDropZone
         _s.Tracker.Changed -= Rebuild;
         _s.Tracker.ForegroundChanged -= OnForeground;
         _s.Tracker.AttentionChanged -= UpdateDots;
+        _s.Buttons.Changed -= UpdateDots;
         UnsubscribeTail();
         _s.Config.Changed -= OnConfigChanged;
         _s.Launched -= OnLaunched;
@@ -580,11 +586,30 @@ public sealed partial class Dock : IBar, IDropZone
             Foreground = Theme.Brush(Theme.TextSecondary),
             Visibility = Visibility.Collapsed,
         };
-        var visual = new Grid { Width = ElementSize, Height = ElementSize, Children = { placeholder, image } };
+        // Счётчик — в правом верхнем углу, полоска загрузки — внизу иконки. Они внутри иконки,
+        // поэтому растут вместе с ней под курсором.
+        var badge = new Image
+        {
+            Width = ElementSize * 0.42, Height = ElementSize * 0.42, Stretch = Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
+            Visibility = Visibility.Collapsed,
+        };
+        var fill = new Border { CornerRadius = new CornerRadius(ElementSize * 0.04), HorizontalAlignment = HorizontalAlignment.Left };
+        var progress = new Grid
+        {
+            Height = ElementSize * 0.08,
+            Margin = new Thickness(ElementSize * 0.12, 0, ElementSize * 0.12, ElementSize * 0.02),
+            VerticalAlignment = VerticalAlignment.Bottom,
+            CornerRadius = new CornerRadius(ElementSize * 0.04),
+            Background = Theme.Brush(Windows.UI.Color.FromArgb(0xB0, 0x20, 0x20, 0x20)),
+            Children = { fill },
+            Visibility = Visibility.Collapsed,
+        };
+        var visual = new Grid { Width = ElementSize, Height = ElementSize, Children = { placeholder, image, progress, badge } };
         var dot = new Border { Width = 5, Height = 5, CornerRadius = new CornerRadius(2.5), Background = Theme.Brush(Theme.Text), Opacity = 0 };
         _canvas.Children.Insert(0, dot);
         _canvas.Children.Insert(0, visual);
-        return new Item { Key = key, Visual = visual, Image = image, Dot = dot, Placeholder = placeholder };
+        return new Item { Key = key, Visual = visual, Image = image, Dot = dot, Placeholder = placeholder, Badge = badge, Progress = progress, ProgressFill = fill };
     }
 
     Item CreateStart()
@@ -658,8 +683,34 @@ public sealed partial class Dock : IBar, IDropZone
             it.Dot.CornerRadius = new CornerRadius(active ? 2 : 2.5);
             it.Dot.Background = Theme.Brush(attention ? Theme.Warning : Theme.Text);
             it.Dot.Opacity = !running ? 0 : active || attention ? 1 : 0.55;
+            UpdateButtons(it);
         }
         Kick();
+    }
+
+    /// Счётчик и полоска загрузки, как их задала программа (раздел 8).
+    void UpdateButtons(Item it)
+    {
+        if (it.Badge is null || it.Progress is null || it.ProgressFill is null || it.Entry is null) return;
+        var windows = it.Entry.Windows.Select(w => w.Hwnd).ToList();
+        var overlay = windows.Count > 0 ? _s.Buttons.OverlayOf(windows) : null;
+        it.Badge.Source = overlay;
+        it.Badge.Visibility = overlay is null ? Visibility.Collapsed : Visibility.Visible;
+        var p = windows.Count > 0 ? _s.Buttons.ProgressOf(windows) : null;
+        if (p is null) { it.Progress.Visibility = Visibility.Collapsed; return; }
+        it.Progress.Visibility = Visibility.Visible;
+        var color = p.State switch
+        {
+            Tray.TaskbarButtons.Error => Windows.UI.Color.FromArgb(255, 0xE8, 0x48, 0x48),
+            Tray.TaskbarButtons.Paused => Windows.UI.Color.FromArgb(255, 0xE8, 0xB4, 0x2A),
+            _ => Windows.UI.Color.FromArgb(255, 0x3C, 0xC8, 0x5A),
+        };
+        it.ProgressFill.Background = Theme.Brush(color);
+        var track = ElementSize * 0.76;
+        // Бегущая полоска (время неизвестно): заполнена целиком и полупрозрачная.
+        var indeterminate = p.State == Tray.TaskbarButtons.Indeterminate;
+        it.ProgressFill.Width = indeterminate ? track : Math.Max(track * Math.Clamp(p.Value, 0, 1), ElementSize * 0.08);
+        it.ProgressFill.Opacity = indeterminate ? 0.6 : 1;
     }
 
     // ---------- кадр ----------
