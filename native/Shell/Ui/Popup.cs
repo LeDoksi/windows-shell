@@ -277,6 +277,14 @@ public abstract class Popup
 
     protected virtual void OnClosing() { }
 
+    /// Поднять окошко наверх вместе с открытым внутри него меню (меню остаётся выше).
+    public void Raise()
+    {
+        if (!IsOpen) return;
+        RaiseTop(Win.Hwnd);
+        _child?.Raise();
+    }
+
     /// Окошко под курсором (для списков, которые закрываются, когда курсор ушёл).
     public bool ContainsCursor()
     {

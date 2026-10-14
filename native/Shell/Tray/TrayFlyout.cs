@@ -75,6 +75,8 @@ public sealed class TrayFlyout : Popup
     {
         _watch.Stop();
         _clickedAt = 0;
+        _hadMenu = false;
+        _keepFor = IntPtr.Zero;
         _placed.Clear();
         if (_menuOpen) { _menuOpen = false; RestoreOwn(); }
         if (_hovered is { } h) { GetCursorPos(out var p); TrayHost.Hover(h, enter: false, p.X, p.Y); _hovered = null; }
@@ -252,6 +254,11 @@ public sealed class TrayFlyout : Popup
     }
 
     bool _menuOpen;
+    // После клика по иконке: было ли меню, какие окна программы уже были открыты, и окно,
+    // вышедшее вперёд после меню, которое окошко не закрывает.
+    bool _hadMenu;
+    readonly HashSet<IntPtr> _visibleAtClick = [];
+    IntPtr _keepFor;
     readonly HashSet<IntPtr> _placed = [];
 
     /// Окна «поверх всех», которые были до клика (у Проводника их много, и это не меню).
@@ -318,6 +325,11 @@ public sealed class TrayFlyout : Popup
         foreach (var h in TopmostWindows()) _before.Add(h);
         GetCursorPos(out _clickPoint);
         _clickedPid = ProcessId(it.Hwnd);
+        _hadMenu = false;
+        _keepFor = IntPtr.Zero;
+        _visibleAtClick.Clear();
+        var pid = _clickedPid;
+        EnumWindows((h, _) => { if (IsWindowVisible(h) && ProcessId(h) == pid) _visibleAtClick.Add(h); return true; }, IntPtr.Zero);
         _clickedAt = Environment.TickCount64;
     }
 
@@ -342,7 +354,11 @@ public sealed class TrayFlyout : Popup
                 _menuOpen = true;
                 Log.Write($"трей: меню {string.Join(", ", popups.Select(h => $"{ClassName(h)} ({ProcessName(ProcessId(h))})"))}");
             }
-            foreach (var h in popups) PlaceStray(h);
+            _hadMenu = true;
+            // Переносим только меню нажатой программы (и меню Windows): уведомление другой
+            // программы, всплывшее в это время (Telegram), остаётся на месте.
+            foreach (var h in popups)
+                if (ProcessId(h) == _clickedPid || ClassName(h) == "#32768") PlaceStray(h);
             // Каждый раз: наше окно могло подняться между проверками (смена активного окна).
             var moved = DemoteOwn();
             if (moved > 0) Log.Write($"трей: наши окна под меню программы ({moved})");
@@ -358,9 +374,13 @@ public sealed class TrayFlyout : Popup
         }
         var fg = GetForegroundWindow();
         if (fg == IntPtr.Zero || fg == Hwnd || ProcessId(fg) == (uint)Environment.ProcessId) return;
-        // Впереди обычное окно (рабочий стол, другая программа, окно, открытое кликом по иконке):
-        // окошко закрывается. Скрытые служебные окна программ и их меню — нет.
-        if (IsRealWindow(fg) && !popups.Contains(fg)) Close(restoreFocus: false);
+        if (!IsRealWindow(fg) || popups.Contains(fg) || fg == _keepFor) return;
+        // Меню закрыли (Esc), а программа вывела вперёд своё окно, которое и так было открыто
+        // (Discord, Chrome, Claude, Xbox так делают): это не уход из окошка, оно остаётся.
+        if (_hadMenu && ProcessId(fg) == _clickedPid && _visibleAtClick.Contains(fg)) { _keepFor = fg; return; }
+        // Впереди обычное окно (рабочий стол, другая программа, окно, открытое кликом по иконке
+        // или пунктом меню): окошко закрывается.
+        Close(restoreFocus: false);
     }
 
     /// Обычное окно программы (а не меню, подсказка или скрытое служебное окно).
