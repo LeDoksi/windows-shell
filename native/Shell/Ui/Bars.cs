@@ -241,11 +241,12 @@ public sealed class Bars
         // 3 — Direct3D на весь экран, 4 — презентация.
         var exclusive = state is 3 or 4;
         var covers = r.Left <= screen.Bounds.Left && r.Top <= screen.Bounds.Top && r.Right >= screen.Bounds.Right && r.Bottom >= screen.Bounds.Bottom;
-        // Развёрнутое окно тоже закрывает монитор, но это не игра (1.6): док выезжает над ним.
-        // Панель задач спрятана, поэтому развёрнутое окно (Chrome) закрывает монитор целиком,
-        // и Windows отвечает «2 — занят полноэкранным» — ему не верим (WSH-95). Полноэкранный
-        // режим браузеров и видео не развёрнут: окно просто растянуто на монитор.
-        if (exclusive || (covers && !IsZoomed(fg))) set.Add(screen.Name);
+        // Развёрнутое окно тоже закрывает монитор (панель задач спрятана), но это не игра (1.6):
+        // док выезжает над ним (WSH-95), поэтому и «2 — занят» от Windows не в счёт. Chrome в F11
+        // остаётся развёрнутым, но без заголовка и рамки — по этому и отличаем полный экран.
+        const long WS_CAPTION = 0x00C00000;
+        var caption = ((long)GetWindowLongPtrW(fg, GWL_STYLE) & WS_CAPTION) == WS_CAPTION;
+        if (exclusive || (covers && (!IsZoomed(fg) || !caption))) set.Add(screen.Name);
         return set;
     }
 
