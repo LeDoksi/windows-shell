@@ -350,8 +350,15 @@ public sealed class ShellConfig
             Directory.CreateDirectory(dir);
             var name = Path.GetFileNameWithoutExtension(path);
             var dest = Path.Combine(dir, name + ext);
-            for (var n = 2; File.Exists(dest); n++) dest = Path.Combine(dir, $"{name} ({n}){ext}");
-            File.Copy(path, dest);
+            // Тот же ярлык уже лежит у нас (бросили второй раз, два быстрых броска): берём его,
+            // иначе копия «(2)» получила бы другой путь и плитка задвоилась бы (WSH-59).
+            var bytes = File.ReadAllBytes(path);
+            for (var n = 2; File.Exists(dest); n++)
+            {
+                if (File.ReadAllBytes(dest).AsSpan().SequenceEqual(bytes)) return dest;
+                dest = Path.Combine(dir, $"{name} ({n}){ext}");
+            }
+            File.WriteAllBytes(dest, bytes);
             return dest;
         }
         catch { return path; }

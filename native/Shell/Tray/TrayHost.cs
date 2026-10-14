@@ -359,12 +359,18 @@ public sealed class TrayHost
                 // можем не знать (программа сообщила её Проводнику до нашего запуска), а старые
                 // программы лишнее событие просто пропускают — поэтому шлём всегда.
                 Send(it, WM_CONTEXTMENU, x, y);
-                Log.Write($"трей: правый клик, версия {it.Version}, {ClassName(it.Hwnd)}");
+                Log.Write($"трей: правый клик, версия {it.Version}, uid {it.Uid}, сообщение 0x{it.Callback:X}, {ClassName(it.Hwnd)}, {ExeOf(it.Hwnd)}");
                 break;
             default:
                 Send(it, WM_MBUTTONUP, x, y);
                 break;
         }
+    }
+
+    static string ExeOf(IntPtr hwnd)
+    {
+        try { return System.Diagnostics.Process.GetProcessById((int)ProcessId(hwnd)).ProcessName; }
+        catch { return "?"; }
     }
 
     public static void Hover(TrayItem it, bool enter, int x, int y)

@@ -126,7 +126,7 @@ public sealed class TopPanel : IBar, IDropZone
             _shown = true;
         }
         _win.Raise();
-        if (Popups.Current is { IsOpen: true } p) SetWindowPos(p.Hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        Popups.Current?.Raise();
     }
 
     int Px(double dip) => (int)Math.Round(dip * _scale);

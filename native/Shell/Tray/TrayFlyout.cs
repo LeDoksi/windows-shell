@@ -30,7 +30,6 @@ public sealed class TrayFlyout : Popup
     // Последний клик: по какой программе и когда — её меню и окна не закрывают окошко сразу.
     uint _clickedPid;
     long _clickedAt;
-    bool _menuSeen;
     (IntPtr, uint, TrayHost.Button, long) _lastDown;
     TrayItem? _hovered;
 
@@ -51,7 +50,7 @@ public sealed class TrayFlyout : Popup
         SetContent(_body);
         _host.Changed += () => { if (IsOpen) { Build(); Layout(); } };
         _watch = DispatcherQueue.GetForCurrentThread().CreateTimer();
-        _watch.Interval = TimeSpan.FromMilliseconds(150);
+        _watch.Interval = TimeSpan.FromMilliseconds(60);
         _watch.Tick += (_, _) => Watch();
     }
 
@@ -65,17 +64,24 @@ public sealed class TrayFlyout : Popup
 
     public void Show(object anchor, Rect anchorPx, object? owner)
     {
+        _fgBeforeOpen = GetForegroundWindow();
         _host.Prune();
-        _menuSeen = false;
         _clickedPid = 0;
         Build();
         Open(anchor, anchorPx, owner: owner);
         _watch.Start();
+        HookMouse();
     }
 
     protected override void OnClosing()
     {
         _watch.Stop();
+        UnhookMouse();
+        _clickedAt = 0;
+        _hadMenu = false;
+        _keepFor = IntPtr.Zero;
+        _placed.Clear();
+        if (_menuOpen) { _menuOpen = false; RestoreOwn(); }
         if (_hovered is { } h) { GetCursorPos(out var p); TrayHost.Hover(h, enter: false, p.X, p.Y); _hovered = null; }
     }
 
@@ -167,6 +173,7 @@ public sealed class TrayFlyout : Popup
             var now = Environment.TickCount64;
             var dbl = _lastDown.Item1 == it.Hwnd && _lastDown.Item2 == it.Uid && _lastDown.Item3 == button && now - _lastDown.Item4 <= GetDoubleClickTime();
             _lastDown = (it.Hwnd, it.Uid, button, dbl ? 0 : now);
+            if (it.Callback == 0) return;
             NoteClick(it);
             var (x, y) = Center(cell);
             TrayHost.Down(it, button, dbl, x, y);
@@ -183,6 +190,7 @@ public sealed class TrayFlyout : Popup
                 PointerUpdateKind.MiddleButtonReleased => TrayHost.Button.Middle,
                 _ => TrayHost.Button.Left,
             };
+            if (it.Callback == 0) { NoCallback(it, button); return; }
             NoteClick(it);
             var (x, y) = Center(cell);
             TrayHost.Up(it, button, x, y);
@@ -210,6 +218,27 @@ public sealed class TrayFlyout : Popup
         return cell;
     }
 
+    MenuPopup? _ownMenu;
+
+    /// Иконка, у которой мы не знаем сообщения для кликов: программа сообщила его Проводнику
+    /// ещё до запуска оболочки и нам не повторила (так делает щит «Безопасность Windows»).
+    /// Для известных программ делаем то же, что их меню; для остальных пишем в журнал.
+    void NoCallback(TrayItem it, TrayHost.Button button)
+    {
+        var exe = ProcessName(ProcessId(it.Hwnd));
+        Log.Write($"трей: у иконки {exe} нет сообщения для кликов");
+        if (!exe.Equals("SecurityHealthSystray", StringComparison.OrdinalIgnoreCase)) return;
+        void Open() { Close(restoreFocus: false); Apps.Launcher.Open("windowsdefender:"); }
+        if (button == TrayHost.Button.Left) { Open(); return; }
+        GetCursorPos(out var c);
+        _ownMenu ??= new MenuPopup();
+        _ownMenu.ShowInside(this, it, new Rect(c.X, c.Y, 0, 0),
+        [
+            new MenuItem { Text = "Открыть «Безопасность Windows»", Glyph = "\uE83D", Invoke = Open },
+            new MenuItem { Text = "Защита от вирусов и угроз", Glyph = "\uE8A7", Invoke = () => { Close(restoreFocus: false); Apps.Launcher.Open("windowsdefender://threat"); } },
+        ]);
+    }
+
     /// Центр клетки на экране (физические пиксели): программы ставят там своё меню.
     (int X, int Y) Center(FrameworkElement cell)
     {
@@ -227,56 +256,118 @@ public sealed class TrayFlyout : Popup
         }
     }
 
-    IntPtr _raisedMenu;
+    bool _menuOpen;
+    // После клика по иконке: было ли меню, какие окна программы уже были открыты, и окно,
+    // вышедшее вперёд после меню, которое окошко не закрывает.
+    bool _hadMenu;
+    readonly HashSet<IntPtr> _visibleAtClick = [];
+    IntPtr _keepFor;
+    IntPtr _fgBeforeOpen;
 
-    /// Окна «поверх всех» программы, которые были до клика (у Проводника их много, и это не меню).
+    // ---------- клик мимо ----------
+    // Пока окошко открыто, слушаем нажатия мыши во всей системе (как окошко трея Windows): клик
+    // по чужому окну, не по меню программы, закрывает окошко, даже если фокус не сменился (после
+    // меню Chrome фокус уже у того окна, по которому кликают). В самом перехватчике ничего не
+    // делаем — только ставим проверку в очередь окна.
+
+    delegate IntPtr MouseProc(int code, IntPtr w, IntPtr l);
+    MouseProc? _mouseProc;
+    IntPtr _mouseHook;
+
+    void HookMouse()
+    {
+        if (_mouseHook != IntPtr.Zero) return;
+        _mouseProc ??= OnMouse;
+        _mouseHook = SetWindowsHookExW(14 /* WH_MOUSE_LL */, _mouseProc, GetModuleHandleW(null), 0);
+    }
+
+    void UnhookMouse()
+    {
+        if (_mouseHook == IntPtr.Zero) return;
+        UnhookWindowsHookEx(_mouseHook);
+        _mouseHook = IntPtr.Zero;
+    }
+
+    IntPtr OnMouse(int code, IntPtr w, IntPtr l)
+    {
+        var msg = (uint)(long)w;
+        if (code >= 0 && msg is 0x201 or 0x204 or 0x207 /* L, R, M down */)
+        {
+            var pt = System.Runtime.InteropServices.Marshal.PtrToStructure<POINT>(l);
+            Win.Window.DispatcherQueue.TryEnqueue(() => ClickAt(pt));
+        }
+        return CallNextHookEx(IntPtr.Zero, code, w, l);
+    }
+
+    void ClickAt(POINT pt)
+    {
+        if (!IsOpen) return;
+        var root = GetAncestor(WindowFromPoint(pt), 2 /* GA_ROOT */);
+        if (root == IntPtr.Zero || ProcessId(root) == (uint)Environment.ProcessId || ClassName(root) == "#32768") return;
+        if (FindPopups().Contains(root)) return;
+        Close(restoreFocus: false);
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr SetWindowsHookExW(int id, MouseProc proc, IntPtr mod, uint thread);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool UnhookWindowsHookEx(IntPtr hook);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr w, IntPtr l);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] static extern IntPtr GetModuleHandleW(string? name);
+    readonly HashSet<IntPtr> _placed = [];
+
+    /// Окна «поверх всех», которые были до клика (у Проводника их много, и это не меню).
     readonly HashSet<IntPtr> _before = [];
 
-    static IEnumerable<IntPtr> TopmostWindows(uint pid)
+    static IEnumerable<IntPtr> TopmostWindows()
     {
         for (var h = GetWindow(GetDesktopWindow(), 5 /* GW_CHILD */); h != IntPtr.Zero; h = GetWindow(h, 2 /* GW_HWNDNEXT */))
         {
             if ((ExStyle(h) & WS_EX_TOPMOST) == 0) yield break;
-            if (IsWindowVisible(h) && ProcessId(h) == pid) yield return h;
+            if (IsWindowVisible(h)) yield return h;
         }
     }
 
-    /// Видимое окно «поверх всех» этой программы, появившееся после клика (её меню), если есть.
-    IntPtr TopmostOf(uint pid)
+    /// Окна, которые программа вывела после клика по иконке: обычное меню Windows (#32768) или
+    /// свои окна «поверх всех» (Chrome, Discord, Fan Control, Xbox, G HUB рисуют меню сами, вместе
+    /// с подсказками, иногда в другом процессе). Наши окна не в счёт.
+    List<IntPtr> FindPopups()
     {
-        if (pid == 0) return IntPtr.Zero;
-        foreach (var h in TopmostWindows(pid))
-            if (!_before.Contains(h) && !IsRealWindow(h) && ClassName(h) != "tooltips_class32") return h;
-        return IntPtr.Zero;
-    }
-
-    static void StepBelow(IntPtr menu)
-    {
+        var list = new List<IntPtr>();
+        var menu = FindWindowW("#32768", null);
+        if (menu != IntPtr.Zero && IsWindowVisible(menu)) list.Add(menu);
+        if (_clickedAt == 0) return list;
         var own = (uint)Environment.ProcessId;
-        var above = new List<IntPtr>();
-        for (var h = GetWindow(menu, 3 /* GW_HWNDPREV */); h != IntPtr.Zero; h = GetWindow(h, 3))
-            if (IsWindowVisible(h) && ProcessId(h) == own) above.Add(h);
-        // Снизу вверх: каждое окно встаёт прямо под меню, порядок между нашими сохраняется.
-        for (var i = above.Count - 1; i >= 0; i--)
-            SetWindowPos(above[i], menu, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        Log.Write($"трей: меню программы поверх наших окон ({above.Count})");
+        var late = Environment.TickCount64 - _clickedAt > 3000;
+        foreach (var h in TopmostWindows())
+        {
+            if (h == menu || _before.Contains(h) || ProcessId(h) == own || IsRealWindow(h)) continue;
+            if (ClassName(h) is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") continue;
+            // Чужое новое окно через много секунд после клика — уже не меню (уведомление и т. п.).
+            if (late && ProcessId(h) != _clickedPid) continue;
+            list.Add(h);
+        }
+        return list;
     }
 
     POINT _clickPoint;
 
-    /// Значки самого Проводника (Bluetooth) ставят меню по месту его спрятанной панели задач —
-    /// в угол экрана. Такое меню переносим к иконке, на которую нажали.
-    void PlaceStrayMenu(IntPtr menu)
+    /// Программы ставят меню по месту панели задач Windows, а она у нас спрятана: Bluetooth —
+    /// в угол экрана, Xbox — под нижний край, G HUB — в левый верхний угол. Меню, которое не на
+    /// мониторе клика или далеко от иконки, переносим к иконке (над ней). Окна программ,
+    /// запущенных от администратора, Windows двигать не даёт — их не трогаем.
+    void PlaceStray(IntPtr menu)
     {
-        if (ClassName(menu) != "#32768" || !GetWindowRect(menu, out var r)) return;
-        var mon = MonitorInfo(MonitorFromPoint(_clickPoint, MONITOR_DEFAULTTONEAREST)).rcWork;
-        var near = Math.Abs(r.Left - _clickPoint.X) < 600 && Math.Abs(r.Bottom - _clickPoint.Y) < 600;
-        if (near) return;
+        if (!GetWindowRect(menu, out var r)) return;
+        var mon = MonitorInfo(MonitorFromPoint(_clickPoint, MONITOR_DEFAULTTONEAREST)).rcMonitor;
+        var onMonitor = r.Left >= mon.Left && r.Top >= mon.Top && r.Right <= mon.Right && r.Bottom <= mon.Bottom;
+        var near = Math.Abs((r.Left + r.Right) / 2 - _clickPoint.X) < 700 && Math.Abs((r.Top + r.Bottom) / 2 - _clickPoint.Y) < 700;
+        if (onMonitor && near) return;
         int w = r.Right - r.Left, h = r.Bottom - r.Top;
-        var x = Math.Clamp(_clickPoint.X, mon.Left, mon.Right - w);
-        var y = Math.Clamp(_clickPoint.Y - h, mon.Top, mon.Bottom - h);
-        SetWindowPos(menu, IntPtr.Zero, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-        Log.Write($"трей: меню перенесено из {r.Left},{r.Top} к иконке");
+        var margin = 8;
+        var x = Math.Clamp(_clickPoint.X - w / 2, mon.Left + margin, Math.Max(mon.Left + margin, mon.Right - margin - w));
+        var y = Math.Clamp(_clickPoint.Y - h - margin, mon.Top + margin, Math.Max(mon.Top + margin, mon.Bottom - margin - h));
+        var ok = SetWindowPos(menu, IntPtr.Zero, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        if (_placed.Add(menu)) Log.Write($"трей: меню {ClassName(menu)} перенесено из {r.Left},{r.Top} к иконке{(ok ? "" : " — не дали")}");
     }
 
     IntPtr _clickedHwnd;
@@ -285,63 +376,69 @@ public sealed class TrayFlyout : Popup
     {
         _clickedHwnd = it.Hwnd;
         _before.Clear();
-        foreach (var h in TopmostWindows(ProcessId(it.Hwnd))) _before.Add(h);
+        foreach (var h in TopmostWindows()) _before.Add(h);
         GetCursorPos(out _clickPoint);
         _clickedPid = ProcessId(it.Hwnd);
+        _hadMenu = false;
+        _keepFor = IntPtr.Zero;
+        _visibleAtClick.Clear();
+        var pid = _clickedPid;
+        EnumWindows((h, _) => { if (IsWindowVisible(h) && ProcessId(h) == pid) _visibleAtClick.Add(h); return true; }, IntPtr.Zero);
         _clickedAt = Environment.TickCount64;
-        _menuSeen = false;
     }
 
-    /// Окошко не закрывается само, когда теряет фокус (так меню программы может открыться).
-    /// Решаем здесь: пока открыто меню — стоим; меню закрылось или ушли в другое окно — закрываемся.
+    static string ProcessName(uint pid)
+    {
+        try { return System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; }
+        catch { return pid.ToString(); }
+    }
+
+    /// Окошко живёт как в Windows 11: стоит, пока открыто меню программы и после него, и
+    /// закрывается, когда ушли в другое окно (клик мимо, программа открыла своё окно), по Esc или
+    /// повторному клику по ⌃. Меню программы на это не влияет — только на порядок окон: пока оно
+    /// открыто, наши окна стоят под ним.
     void Watch()
     {
         if (!IsOpen) { _watch.Stop(); return; }
-        var fg = GetForegroundWindow();
-        var own = (uint)Environment.ProcessId;
-        if (fg == Hwnd || fg != IntPtr.Zero && ProcessId(fg) == own) { _menuSeen = false; return; }
-        var menu = FindWindowW("#32768", null);
-        var fgPid = fg == IntPtr.Zero ? 0 : ProcessId(fg);
-        var programMenu = menu != IntPtr.Zero && IsWindowVisible(menu)
-            || _clickedPid != 0 && fgPid == _clickedPid && (!IsRealWindow(fg) || (ExStyle(fg) & WS_EX_TOPMOST) != 0);
-        // Видимое меню: #32768 или «поверх всех» окно программы (Chrome, Discord рисуют меню сами,
-        // и впереди у них бывает скрытое служебное окно, а не меню).
-        var visibleMenu = menu != IntPtr.Zero && IsWindowVisible(menu) ? menu : TopmostOf(_clickedPid);
-        if (visibleMenu != IntPtr.Zero) programMenu = true;
-        // Меню было видно и пропало (Esc, выбор пункта): закрываемся, даже если впереди осталось
-        // скрытое окно программы — иначе следующий клик по ⌃ уйдёт на закрытие невидимого окошка.
-        else if (_raisedMenu != IntPtr.Zero)
+        var popups = FindPopups();
+        if (popups.Count > 0)
         {
-            _raisedMenu = IntPtr.Zero;
+            if (!_menuOpen)
+            {
+                _menuOpen = true;
+                Log.Write($"трей: меню {string.Join(", ", popups.Select(h => $"{ClassName(h)} ({ProcessName(ProcessId(h))})"))}");
+            }
+            _hadMenu = true;
+            // Переносим только меню нажатой программы (и меню Windows): уведомление другой
+            // программы, всплывшее в это время (Telegram), остаётся на месте.
+            foreach (var h in popups)
+                if (ProcessId(h) == _clickedPid || ClassName(h) == "#32768") PlaceStray(h);
+            // Каждый раз: наше окно могло подняться между проверками (смена активного окна).
+            var moved = DemoteOwn();
+            if (moved > 0) Log.Write($"трей: наши окна под меню программы ({moved})");
+        }
+        else if (_menuOpen)
+        {
+            // Меню закрылось (Esc, выбрали пункт): наши окна снова поверх всех.
+            _menuOpen = false;
+            RestoreOwn();
             // Окну программы — пустое сообщение после меню (так советует Microsoft для меню из
             // трея): иначе его меню держит мышь и следующий клик по ⌃ пропадает.
             if (_clickedHwnd != IntPtr.Zero) PostMessageW(_clickedHwnd, 0 /* WM_NULL */, IntPtr.Zero, IntPtr.Zero);
-            Close(restoreFocus: false);
-            return;
+            // Меню Chrome и Discord, закрываясь, отдают фокус окну, которое было впереди до ⌃.
+            // Это не уход из окошка: фокус забираем назад (как окошко трея Windows), а если
+            // Windows не даст — то окно окошко не закрывает.
+            _keepFor = _fgBeforeOpen;
+            SetForegroundWindow(Hwnd);
         }
-        if (programMenu)
-        {
-            _menuSeen = true;
-            // Наше окошко тоже поверх всех: меню программы поднимаем над ним, иначе оно под нами.
-            var shown = visibleMenu;
-            if (shown != IntPtr.Zero && shown != _raisedMenu)
-            {
-                _raisedMenu = shown;
-                // Само окошко прячем, пока открыто меню: оно всё равно закроется вместе с меню,
-                // а «поверх всех» его иначе не опустить.
-                ShowWindowAsync(Hwnd, 0 /* SW_HIDE */);
-                PlaceStrayMenu(shown);
-                // Поднять чужое меню над нашими окнами Windows не даёт, поэтому все наши окна,
-                // которые выше меню (это окошко, док), ставим сразу под него. Меню — Win32 (#32768)
-                // или своё у Chrome, Discord и прочих Electron-программ.
-                StepBelow(shown);
-            }
-            return;
-        }
-        _raisedMenu = IntPtr.Zero;
-        if (_menuSeen) { Close(restoreFocus: false); return; }
-        // Только что кликнули: программа ещё выводит своё меню (её скрытое окно уже впереди).
-        if (_clickedPid != 0 && Environment.TickCount64 - _clickedAt < 1500 && (fgPid == _clickedPid || fg == IntPtr.Zero) && !IsRealWindow(fg)) return;
+        var fg = GetForegroundWindow();
+        if (fg == IntPtr.Zero || fg == Hwnd || ProcessId(fg) == (uint)Environment.ProcessId) return;
+        if (!IsRealWindow(fg) || popups.Contains(fg) || fg == _keepFor) return;
+        // Меню закрыли (Esc), а программа вывела вперёд своё окно, которое и так было открыто
+        // (Discord, Chrome, Claude, Xbox так делают): это не уход из окошка, оно остаётся.
+        if (_hadMenu && ProcessId(fg) == _clickedPid && _visibleAtClick.Contains(fg)) { _keepFor = fg; return; }
+        // Впереди обычное окно (рабочий стол, другая программа, окно, открытое кликом по иконке
+        // или пунктом меню): окошко закрывается.
         Close(restoreFocus: false);
     }
 

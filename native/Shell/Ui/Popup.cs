@@ -228,6 +228,8 @@ public abstract class Popup
             }
         }
         Win.Place(x, y, w, h);
+        // Окошко поднялось (пересчёт размера): открытое внутри него меню должно остаться выше.
+        _child?.Raise();
     }
 
     /// Появление 150 мс: лёгкий выезд на 8 px и проявление (правило 0.8).
@@ -276,6 +278,14 @@ public abstract class Popup
     }
 
     protected virtual void OnClosing() { }
+
+    /// Поднять окошко наверх вместе с открытым внутри него меню (меню остаётся выше).
+    public void Raise()
+    {
+        if (!IsOpen) return;
+        RaiseTop(Win.Hwnd);
+        _child?.Raise();
+    }
 
     /// Окошко под курсором (для списков, которые закрываются, когда курсор ушёл).
     public bool ContainsCursor()
