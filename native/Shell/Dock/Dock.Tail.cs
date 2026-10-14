@@ -38,6 +38,9 @@ public sealed partial class Dock
                 Height = 40,
                 CornerRadius = new CornerRadius(6),
                 Background = Theme.Brush(Microsoft.UI.Colors.Transparent),
+                // Скрыт, пока UpdateTail его не покажет: иначе выключенный значок (батарея на ПК
+                // без батареи) стоит видимым в левом углу полосы и вылезает, когда док под курсором.
+                Visibility = Visibility.Collapsed,
             };
             foreach (var c in children) g.Children.Add(c);
             _canvas.Children.Add(g);
