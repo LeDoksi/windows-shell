@@ -118,7 +118,7 @@ public static class Launcher
     {
         var t = new Thread(() =>
         {
-            bool Exec(string f)
+            bool Try(string f)
             {
                 var info = new SHELLEXECUTEINFO
                 {
@@ -132,7 +132,7 @@ public static class Launcher
                 return Exec(ref info);
             }
             // Отказ в окне UAC (1223) — не ошибка, запасной вариант не нужен.
-            if (!Exec(file) && Marshal.GetLastWin32Error() != 1223 && fallback != null) Exec(fallback);
+            if (!Try(file) && Marshal.GetLastWin32Error() != 1223 && fallback != null) Try(fallback);
         }) { IsBackground = true };
         t.SetApartmentState(ApartmentState.STA);
         t.Start();
