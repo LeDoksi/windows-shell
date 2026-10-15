@@ -142,18 +142,48 @@ public sealed class ShellConfig
     public KeysSection Keys => Data.Keys;
     public TailSection Tail => Data.Tail;
 
+    enum Read { Ok, Missing, Broken, Unavailable }
+
     public static ShellConfig Load()
     {
         var c = new ShellConfig();
-        if (c.TryRead(FilePath) is { } own) { c.Data = own; c.Normalize(); return c; }
-        if (File.Exists(FilePath))
+        var (own, ownState) = c.TryRead(FilePath);
+        if (own != null) { c.Data = own; c.Normalize(); KeepDailyCopy(); return c; }
+        if (ownState == Read.Unavailable)
         {
-            Log.Write("конфиг испорчен, беру бэкап");
-            try { File.Move(FilePath, Path.Combine(Dir, "config.broken.json"), overwrite: true); } catch { }
-            if (c.TryRead(FilePath + ".bak") is { } bak) { c.Data = bak; c.Normalize(); c.Save(); return c; }
+            // Папку оболочки не дают читать (так было при входе в Windows 15.10: File.Exists
+            // ответил «нет», и оболочка показала старую раскладку Tauri как при первом запуске,
+            // WSH-99). Работаем на пустой раскладке, ничего не пишем и ждём, пока файл откроется.
+            Log.Write("конфиг недоступен: жду, ничего не записываю");
+            c.Data = Defaults();
+            c.Normalize();
+            c.WaitForFile();
+            return c;
+        }
+        var (bak, bakState) = c.TryRead(FilePath + ".bak");
+        if (ownState == Read.Broken || bakState != Read.Missing || c.NewestDaily() != null)
+        {
+            // Конфиг был, но не прочитался: это не первый запуск, конфиг Tauri сюда не берём.
+            // Испорченный файл откладываем с датой, чтобы ничего не потерять.
+            if (ownState == Read.Broken)
+                try { File.Copy(FilePath, Path.Combine(Dir, $"config.broken-{DateTime.Now:yyyyMMdd-HHmmss}.json"), overwrite: true); } catch { }
+            var restored = bak ?? c.NewestDaily();
+            if (restored != null)
+            {
+                Log.Write(bak != null ? "конфиг не прочитан, беру бэкап" : "конфиг и бэкап не прочитаны, беру дневную копию");
+                c.Data = restored;
+                c.Normalize();
+                c.Save();
+                return c;
+            }
+            Log.Write("конфиг и все копии не читаются, начинаю с пустой раскладки");
+            c.Data = Defaults();
+            c.Normalize();
+            if (bakState == Read.Unavailable) c.WaitForFile(); else c.Save();
+            return c;
         }
         // Первый запуск: переезд с версии на Tauri.
-        var tauri = c.TryRead(Path.Combine(TauriDir, "config.json"));
+        var (tauri, _) = c.TryRead(Path.Combine(TauriDir, "config.json"));
         c.Data = tauri ?? Defaults();
         c.ImportPrototypePins();
         if (tauri is null && !File.Exists(PrototypeFile)) c.ImportTaskbarPins();
@@ -163,18 +193,84 @@ public sealed class ShellConfig
         return c;
     }
 
-    ConfigData? TryRead(string path)
+    // Запущены без конфига (файл не открывался): не пишем, пока он не прочитается.
+    volatile bool _waiting;
+    Timer? _retry;
+
+    /// Каждые 2 секунды пробуем прочитать конфиг; вышло — подменяем раскладку и сообщаем всем.
+    void WaitForFile()
+    {
+        _waiting = true;
+        var ui = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        _retry = new Timer(_ =>
+        {
+            var (data, state) = TryRead(FilePath, attempts: 1);
+            if (data is null && state == Read.Unavailable) return;
+            _retry?.Dispose();
+            void Apply()
+            {
+                if (data != null) { Data = data; Normalize(); KeepDailyCopy(); Log.Write("конфиг снова доступен, раскладка загружена"); }
+                else Log.Write($"конфиг снова доступен, но не прочитан ({state})");
+                _waiting = false;
+                Changed?.Invoke();
+            }
+            if (ui is null || !ui.TryEnqueue(Apply)) Apply();
+        }, null, 2000, 2000);
+    }
+
+    static readonly string DailyDir = Path.Combine(Dir, "backups");
+
+    /// Раз в день — копия конфига в `backups\config-ГГГГММДД.json`, последние 14.
+    static void KeepDailyCopy()
     {
         try
         {
-            if (!File.Exists(path)) return null;
-            var data = JsonSerializer.Deserialize<ConfigData>(File.ReadAllText(path), Json);
-            return data is { SchemaVersion: 1 } ? data : null;
+            Directory.CreateDirectory(DailyDir);
+            var today = Path.Combine(DailyDir, $"config-{DateTime.Now:yyyyMMdd}.json");
+            if (!File.Exists(today)) File.Copy(FilePath, today);
+            foreach (var old in Directory.GetFiles(DailyDir, "config-*.json").OrderDescending().Skip(14)) File.Delete(old);
         }
-        catch (Exception e)
+        catch (Exception e) { Log.Write($"дневная копия конфига не сделана: {e.Message}"); }
+    }
+
+    ConfigData? NewestDaily()
+    {
+        try
         {
-            Log.Write($"конфиг не читается ({path}): {e.Message}");
-            return null;
+            if (!Directory.Exists(DailyDir)) return null;
+            foreach (var f in Directory.GetFiles(DailyDir, "config-*.json").OrderDescending())
+                if (TryRead(f, attempts: 1).Data is { } d) return d;
+        }
+        catch { }
+        return null;
+    }
+
+    /// Прочитать конфиг. File.Exists отвечает «нет» и когда файл есть, но его не дают открыть,
+    /// поэтому читаем сразу и различаем: нет файла, испорчен, недоступен (занят или нет доступа —
+    /// тогда пробуем ещё несколько секунд).
+    (ConfigData? Data, Read State) TryRead(string path, int attempts = 20)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                var data = JsonSerializer.Deserialize<ConfigData>(File.ReadAllText(path), Json);
+                return data is { SchemaVersion: 1 } ? (data, Read.Ok) : (null, Read.Broken);
+            }
+            catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return (null, Read.Missing);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                if (attempt >= attempts) { Log.Write($"конфиг недоступен ({path}): {e.GetType().Name} {e.Message}"); return (null, Read.Unavailable); }
+                Thread.Sleep(250);
+            }
+            catch (Exception e)
+            {
+                Log.Write($"конфиг не читается ({path}): {e.Message}");
+                return (null, Read.Broken);
+            }
         }
     }
 
@@ -265,6 +361,8 @@ public sealed class ShellConfig
 
     public void Save()
     {
+        // Запущены без конфига: не затираем раскладку на диске, пока он не прочитается.
+        if (_waiting) { Log.Write("конфиг не записан: он ещё недоступен"); return; }
         try
         {
             Directory.CreateDirectory(Dir);
