@@ -344,7 +344,6 @@ public sealed class TrayFlyout : Popup
     /// WM_CONTEXTMENU (версия 3–4, сообщённая Проводнику до нашего запуска). Ждём немного и
     /// шлём его, только если от неё так ничего и не появилось.
     DispatcherQueueTimer? _contextTimer;
-    const long WS_EX_TRANSPARENT = 0x20;
 
     void MenuOrContext(TrayItem it, int x, int y)
     {
@@ -467,8 +466,6 @@ public sealed class TrayFlyout : Popup
         {
             if (h == menu || _before.Contains(h) || ProcessId(h) == own || IsRealWindow(h)) continue;
             if (ClassName(h) is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") continue;
-            // Окно, сквозь которое проходит мышь (подсказка, тень, уведомление), — не меню.
-            if ((ExStyle(h) & WS_EX_TRANSPARENT) != 0) continue;
             // Чужое новое окно через много секунд после клика — уже не меню (уведомление и т. п.).
             if (late && ProcessId(h) != _clickedPid) continue;
             list.Add(h);
