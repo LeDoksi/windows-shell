@@ -33,6 +33,22 @@ public sealed class TrayFlyout : Popup
     (IntPtr, uint, TrayHost.Button, long) _lastDown;
     TrayItem? _hovered;
 
+    /// Клетка иконки. Живёт, пока иконка в трее: программы меняют подсказку и картинку очень
+    /// часто (торрент-клиенты — скорость на каждое движение мыши), и пересоздавать клетки на
+    /// каждое изменение нельзя — под мышью клетка исчезает и появляется заново, иконка мерцает,
+    /// а программа получает «мышь ушла / пришла» и снова меняет иконку.
+    sealed class Slot
+    {
+        public required TrayItem Item;
+        public required ContentControl Cell;
+        public required Border Bg;
+        public WriteableBitmap? Shown;
+        public bool Placeholder;
+    }
+
+    readonly Dictionary<(IntPtr, uint), Slot> _slots = [];
+    List<(IntPtr, uint)> _order = [];
+
     public TrayFlyout(TrayHost host) : base(activating: true)
     {
         _host = host;
@@ -48,7 +64,7 @@ public sealed class TrayFlyout : Popup
         _body = new StackPanel { Padding = new Thickness(Pad), Children = { _grid, _tip } };
         _grid.XYFocusKeyboardNavigation = XYFocusKeyboardNavigationMode.Enabled;
         SetContent(_body);
-        _host.Changed += () => { if (IsOpen) { Build(); Layout(); } };
+        _host.Changed += () => { if (IsOpen && Build()) Layout(); };
         _watch = DispatcherQueue.GetForCurrentThread().CreateTimer();
         _watch.Interval = TimeSpan.FromMilliseconds(60);
         _watch.Tick += (_, _) => Watch();
@@ -81,31 +97,76 @@ public sealed class TrayFlyout : Popup
         _hadMenu = false;
         _keepFor = IntPtr.Zero;
         _placed.Clear();
+        _order = [];
+        foreach (var slot in _slots.Values) slot.Bg.Background = Theme.Brush(Microsoft.UI.Colors.Transparent);
         if (_menuOpen) { _menuOpen = false; RestoreOwn(); }
         if (_hovered is { } h) { GetCursorPos(out var p); TrayHost.Hover(h, enter: false, p.X, p.Y); _hovered = null; }
     }
 
-    void Build()
+    /// Обновить клетки по иконкам трея. Если набор и порядок иконок те же, клетки остаются на
+    /// месте (меняются только картинка и подсказка); true — набор поменялся, размер другой.
+    bool Build()
     {
+        var items = _host.Items.Where(i => !i.Hidden).ToList();
+        var keys = items.Select(i => (i.Hwnd, i.Uid)).ToList();
+        foreach (var it in items)
+        {
+            var key = (it.Hwnd, it.Uid);
+            if (_slots.TryGetValue(key, out var slot)) Refresh(slot, it);
+            else _slots[key] = MakeSlot(it);
+        }
+        if (keys.SequenceEqual(_order) && _grid.Children.Count == keys.Count) return false;
+
+        _order = keys;
+        var alive = keys.ToHashSet();
+        foreach (var k in _slots.Keys.Where(k => !alive.Contains(k)).ToList()) _slots.Remove(k);
+        foreach (var k in _bitmaps.Keys.Where(k => !alive.Contains(k)).ToList()) _bitmaps.Remove(k);
+        if (_hovered is { } h && !alive.Contains((h.Hwnd, h.Uid))) _hovered = null;
+
         _grid.Children.Clear();
         _grid.RowDefinitions.Clear();
         _grid.ColumnDefinitions.Clear();
-        var items = _host.Items.Where(i => !i.Hidden).ToList();
-        _tip.Text = items.Count == 0 ? "Фоновых программ нет" : "";
+        _tip.Text = items.Count == 0 ? "Фоновых программ нет" : _hovered is { } hv ? FirstLine(hv.Tip) : "";
         var cols = Math.Clamp(items.Count, 1, Columns);
         for (var c = 0; c < cols; c++) _grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Cell) });
         for (var r = 0; r < (items.Count + cols - 1) / cols; r++) _grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(Cell) });
-        var alive = new HashSet<(IntPtr, uint)>();
-        for (var i = 0; i < items.Count; i++)
+        for (var i = 0; i < keys.Count; i++)
         {
-            var it = items[i];
-            alive.Add((it.Hwnd, it.Uid));
-            var cell = MakeCell(it);
+            var cell = _slots[keys[i]].Cell;
             Grid.SetRow(cell, i / cols);
             Grid.SetColumn(cell, i % cols);
             _grid.Children.Add(cell);
         }
-        foreach (var k in _bitmaps.Keys.Where(k => !alive.Contains(k)).ToList()) _bitmaps.Remove(k);
+        return true;
+    }
+
+    static string FirstLine(string tip) => tip.Split('\n')[0];
+
+    /// Новые данные иконки в той же клетке: картинку меняем, только если она другая.
+    void Refresh(Slot slot, TrayItem it)
+    {
+        slot.Item = it;
+        if (_hovered is { } h && h.Hwnd == it.Hwnd && h.Uid == it.Uid)
+        {
+            _hovered = it;
+            var tip = FirstLine(it.Tip);
+            if (_tip.Text != tip) _tip.Text = tip;
+        }
+        var bmp = Bitmap(it);
+        if (bmp is null ? slot.Placeholder : ReferenceEquals(bmp, slot.Shown)) return;
+        slot.Bg.Child = IconOf(bmp);
+        slot.Shown = bmp;
+        slot.Placeholder = bmp is null;
+    }
+
+    static FrameworkElement IconOf(WriteableBitmap? bmp)
+    {
+        FrameworkElement icon = bmp is not null
+            ? new Image { Source = bmp, Width = IconSize, Height = IconSize, Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform }
+            : new FontIcon { Glyph = "\uE9CE", FontFamily = Theme.Icons, FontSize = IconSize, Foreground = Theme.Brush(Theme.TextSecondary) };
+        icon.HorizontalAlignment = HorizontalAlignment.Center;
+        icon.VerticalAlignment = VerticalAlignment.Center;
+        return icon;
     }
 
     WriteableBitmap? Bitmap(TrayItem it)
@@ -131,14 +192,10 @@ public sealed class TrayFlyout : Popup
         return bmp;
     }
 
-    FrameworkElement MakeCell(TrayItem it)
+    Slot MakeSlot(TrayItem first)
     {
-        UIElement icon = Bitmap(it) is { } bmp
-            ? new Image { Source = bmp, Width = IconSize, Height = IconSize, Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform }
-            : new FontIcon { Glyph = "", FontFamily = Theme.Icons, FontSize = IconSize, Foreground = Theme.Brush(Theme.TextSecondary) };
-        var bg = new Border { CornerRadius = new CornerRadius(4), Margin = new Thickness(2), Background = Theme.Brush(Microsoft.UI.Colors.Transparent), Child = icon };
-        ((FrameworkElement)icon).HorizontalAlignment = HorizontalAlignment.Center;
-        ((FrameworkElement)icon).VerticalAlignment = VerticalAlignment.Center;
+        var bmp = Bitmap(first);
+        var bg = new Border { CornerRadius = new CornerRadius(4), Margin = new Thickness(2), Background = Theme.Brush(Microsoft.UI.Colors.Transparent), Child = IconOf(bmp) };
         var cell = new ContentControl
         {
             Content = bg,
@@ -147,24 +204,28 @@ public sealed class TrayFlyout : Popup
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             VerticalContentAlignment = VerticalAlignment.Stretch,
         };
+        var slot = new Slot { Item = first, Cell = cell, Bg = bg, Shown = bmp, Placeholder = bmp is null };
         cell.PointerEntered += (_, _) =>
         {
+            var it = slot.Item;
             bg.Background = Theme.Brush(Theme.Hover);
-            _tip.Text = it.Tip.Split('\n')[0];
+            _tip.Text = FirstLine(it.Tip);
             _hovered = it;
             var (x, y) = Center(cell);
             TrayHost.Hover(it, enter: true, x, y);
         };
         cell.PointerExited += (_, _) =>
         {
+            var it = slot.Item;
             bg.Background = Theme.Brush(Microsoft.UI.Colors.Transparent);
             _tip.Text = "";
-            if (_hovered == it) _hovered = null;
+            if (_hovered is { } h && h.Hwnd == it.Hwnd && h.Uid == it.Uid) _hovered = null;
             var (x, y) = Center(cell);
             TrayHost.Hover(it, enter: false, x, y);
         };
         cell.PointerPressed += (_, e) =>
         {
+            var it = slot.Item;
             e.Handled = true;
             var pt = e.GetCurrentPoint(cell).Properties;
             var button = pt.IsRightButtonPressed ? TrayHost.Button.Right : pt.IsMiddleButtonPressed ? TrayHost.Button.Middle : TrayHost.Button.Left;
@@ -180,6 +241,7 @@ public sealed class TrayFlyout : Popup
         };
         cell.PointerReleased += (_, e) =>
         {
+            var it = slot.Item;
             e.Handled = true;
             bg.Background = Theme.Brush(Theme.Hover);
             var kind = e.GetCurrentPoint(cell).Properties.PointerUpdateKind;
@@ -195,9 +257,11 @@ public sealed class TrayFlyout : Popup
             NoteClick(it);
             var (x, y) = Center(cell);
             TrayHost.Up(it, button, x, y);
+            if (button == TrayHost.Button.Right) MenuOrContext(it, x, y);
         };
         cell.KeyDown += (_, e) =>
         {
+            var it = slot.Item;
             var (x, y) = Center(cell);
             var menuKey = e.Key is VirtualKey.Enter or VirtualKey.Space or VirtualKey.Application || (e.Key == VirtualKey.F10 && KeyDown(VK_SHIFT));
             if (menuKey && IsOwn(it))
@@ -220,10 +284,11 @@ public sealed class TrayFlyout : Popup
                     NoteClick(it);
                     TrayHost.Down(it, TrayHost.Button.Right, false, x, y);
                     TrayHost.Up(it, TrayHost.Button.Right, x, y);
+                    MenuOrContext(it, x, y);
                     break;
             }
         };
-        return cell;
+        return slot;
     }
 
     MenuPopup? _ownMenu;
@@ -273,6 +338,30 @@ public sealed class TrayFlyout : Popup
             new MenuItem { Text = "Открыть «Безопасность Windows»", Glyph = "\uE83D", Invoke = Open },
             new MenuItem { Text = "Защита от вирусов и угроз", Glyph = "\uE8A7", Invoke = () => { Close(restoreFocus: false); Apps.Launcher.Open("windowsdefender://threat"); } },
         ]);
+    }
+
+    /// Программа без известной версии (0) не вывела меню на правую кнопку: значит, она ждёт
+    /// WM_CONTEXTMENU (версия 3–4, сообщённая Проводнику до нашего запуска). Ждём немного и
+    /// шлём его, только если от неё так ничего и не появилось.
+    DispatcherQueueTimer? _contextTimer;
+    const long WS_EX_TRANSPARENT = 0x20;
+
+    void MenuOrContext(TrayItem it, int x, int y)
+    {
+        if (it.Version >= 3) return;
+        var clickedAt = _clickedAt;
+        _contextTimer?.Stop();
+        var t = _contextTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
+        t.Interval = TimeSpan.FromMilliseconds(300);
+        t.IsRepeating = false;
+        t.Tick += (_, _) =>
+        {
+            if (!IsOpen || _clickedAt != clickedAt || _hadMenu || _menuOpen || FindPopups().Count > 0) return;
+            var fg = GetForegroundWindow();
+            if (fg != IntPtr.Zero && fg != Hwnd && ProcessId(fg) == ProcessId(it.Hwnd)) return;
+            TrayHost.ContextMenu(it, x, y);
+        };
+        t.Start();
     }
 
     /// Центр клетки на экране (физические пиксели): программы ставят там своё меню.
@@ -378,6 +467,8 @@ public sealed class TrayFlyout : Popup
         {
             if (h == menu || _before.Contains(h) || ProcessId(h) == own || IsRealWindow(h)) continue;
             if (ClassName(h) is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") continue;
+            // Окно, сквозь которое проходит мышь (подсказка, тень, уведомление), — не меню.
+            if ((ExStyle(h) & WS_EX_TRANSPARENT) != 0) continue;
             // Чужое новое окно через много секунд после клика — уже не меню (уведомление и т. п.).
             if (late && ProcessId(h) != _clickedPid) continue;
             list.Add(h);

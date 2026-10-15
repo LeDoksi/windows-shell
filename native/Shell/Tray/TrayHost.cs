@@ -355,16 +355,28 @@ public sealed class TrayHost
                 break;
             case Button.Right:
                 Send(it, WM_RBUTTONUP, x, y);
-                // Меню по правой кнопке программы версии 3–4 выводят по WM_CONTEXTMENU. Версию мы
-                // можем не знать (программа сообщила её Проводнику до нашего запуска), а старые
-                // программы лишнее событие просто пропускают — поэтому шлём всегда.
-                Send(it, WM_CONTEXTMENU, x, y);
+                // Меню по правой кнопке программы версии 3–4 выводят по WM_CONTEXTMENU (как шлёт
+                // Проводник). Старым (версия 0) его не шлём: многие из них показывают меню уже по
+                // WM_RBUTTONUP, и второе событие, пришедшее, пока меню открыто, открывает меню
+                // заново — первое закрывается, меню мигает или не появляется (BitTorrent). Если
+                // версию мы не знаем, окошко трея пошлёт WM_CONTEXTMENU само, когда меню не
+                // появилось (ContextMenu).
+                if (it.Version >= 3) Send(it, WM_CONTEXTMENU, x, y);
                 Log.Write($"трей: правый клик, версия {it.Version}, uid {it.Uid}, сообщение 0x{it.Callback:X}, {ClassName(it.Hwnd)}, {ExeOf(it.Hwnd)}");
                 break;
             default:
                 Send(it, WM_MBUTTONUP, x, y);
                 break;
         }
+    }
+
+    /// WM_CONTEXTMENU отдельно: программе, версию которой мы не знаем и которая не ответила
+    /// меню на WM_RBUTTONUP.
+    public static void ContextMenu(TrayItem it, int x, int y)
+    {
+        AllowSetForegroundWindow(ProcessId(it.Hwnd));
+        Send(it, WM_CONTEXTMENU, x, y);
+        Log.Write($"трей: меню не открылось по правой кнопке — шлём WM_CONTEXTMENU ({ExeOf(it.Hwnd)})");
     }
 
     static string ExeOf(IntPtr hwnd)
