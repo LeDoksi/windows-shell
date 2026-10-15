@@ -204,7 +204,7 @@ public sealed class ShellConfig
         var ui = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         _retry = new Timer(_ =>
         {
-            var (data, state) = TryRead(FilePath, attempts: 1);
+            var (data, state) = TryRead(FilePath, attempts: 1, quiet: true);
             if (data is null && state == Read.Unavailable) return;
             _retry?.Dispose();
             void Apply()
@@ -248,7 +248,7 @@ public sealed class ShellConfig
     /// Прочитать конфиг. File.Exists отвечает «нет» и когда файл есть, но его не дают открыть,
     /// поэтому читаем сразу и различаем: нет файла, испорчен, недоступен (занят или нет доступа —
     /// тогда пробуем ещё несколько секунд).
-    (ConfigData? Data, Read State) TryRead(string path, int attempts = 20)
+    (ConfigData? Data, Read State) TryRead(string path, int attempts = 20, bool quiet = false)
     {
         for (var attempt = 1; ; attempt++)
         {
@@ -263,7 +263,7 @@ public sealed class ShellConfig
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
-                if (attempt >= attempts) { Log.Write($"конфиг недоступен ({path}): {e.GetType().Name} {e.Message}"); return (null, Read.Unavailable); }
+                if (attempt >= attempts) { if (!quiet) Log.Write($"конфиг недоступен ({path}): {e.GetType().Name} {e.Message}"); return (null, Read.Unavailable); }
                 Thread.Sleep(250);
             }
             catch (Exception e)
