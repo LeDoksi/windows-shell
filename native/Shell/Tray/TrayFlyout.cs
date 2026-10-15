@@ -345,9 +345,17 @@ public sealed class TrayFlyout : Popup
     /// шлём его, только если от неё так ничего и не появилось.
     DispatcherQueueTimer? _contextTimer;
 
+    // Иконки неизвестной версии, которые показывают меню только по WM_CONTEXTMENU (Bluetooth
+    // Проводника): узнали один раз — дальше шлём его сразу, без ожидания.
+    static readonly HashSet<(IntPtr, uint)> NeedsContext = [];
+    (IntPtr, uint)? _contextSent;
+
     void MenuOrContext(TrayItem it, int x, int y)
     {
         if (it.Version >= 3) return;
+        var key = (it.Hwnd, it.Uid);
+        _contextSent = null;
+        if (NeedsContext.Contains(key)) { TrayHost.ContextMenu(it, x, y); return; }
         var clickedAt = _clickedAt;
         _contextTimer?.Stop();
         var t = _contextTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
@@ -359,6 +367,7 @@ public sealed class TrayFlyout : Popup
             var fg = GetForegroundWindow();
             if (fg != IntPtr.Zero && fg != Hwnd && ProcessId(fg) == ProcessId(it.Hwnd)) return;
             TrayHost.ContextMenu(it, x, y);
+            _contextSent = key;
         };
         t.Start();
     }
@@ -398,8 +407,41 @@ public sealed class TrayFlyout : Popup
     MouseProc? _mouseProc;
     IntPtr _mouseHook;
 
+    // Меню программы ставим к иконке сразу, как только оно появилось (событие Windows), а не
+    // на следующей проверке: иначе меню на кадр видно в углу экрана (Bluetooth, G HUB).
+    WinEventProc? _showProc;
+    readonly List<IntPtr> _showHooks = [];
+
+    void HookShow()
+    {
+        if (_showHooks.Count > 0) return;
+        _showProc ??= OnShow;
+        foreach (var (min, max) in new[] { (0x6u /* MENUPOPUPSTART */, 0x6u), (EVENT_OBJECT_SHOW, EVENT_OBJECT_SHOW) })
+        {
+            var h = SetWinEventHook(min, max, IntPtr.Zero, _showProc, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+            if (h != IntPtr.Zero) _showHooks.Add(h);
+        }
+    }
+
+    void UnhookShow()
+    {
+        foreach (var h in _showHooks) UnhookWinEvent(h);
+        _showHooks.Clear();
+    }
+
+    void OnShow(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time)
+    {
+        if (!IsOpen || _clickedAt == 0 || hwnd == IntPtr.Zero || idChild != 0) return;
+        if (ev == EVENT_OBJECT_SHOW && idObject != OBJID_WINDOW) return;
+        if (GetAncestor(hwnd, 2 /* GA_ROOT */) != hwnd || _before.Contains(hwnd)) return;
+        var menu = ClassName(hwnd) == "#32768";
+        if (!menu && (ProcessId(hwnd) != _clickedPid || (ExStyle(hwnd) & WS_EX_TOPMOST) == 0 || IsRealWindow(hwnd))) return;
+        PlaceStray(hwnd);
+    }
+
     void HookMouse()
     {
+        HookShow();
         if (_mouseHook != IntPtr.Zero) return;
         _mouseProc ??= OnMouse;
         _mouseHook = SetWindowsHookExW(14 /* WH_MOUSE_LL */, _mouseProc, GetModuleHandleW(null), 0);
@@ -407,6 +449,7 @@ public sealed class TrayFlyout : Popup
 
     void UnhookMouse()
     {
+        UnhookShow();
         if (_mouseHook == IntPtr.Zero) return;
         UnhookWindowsHookEx(_mouseHook);
         _mouseHook = IntPtr.Zero;
@@ -533,6 +576,8 @@ public sealed class TrayFlyout : Popup
                 Log.Write($"трей: меню {string.Join(", ", popups.Select(h => $"{ClassName(h)} ({ProcessName(ProcessId(h))})"))}");
             }
             _hadMenu = true;
+            if (_contextSent is { } sent && NeedsContext.Add(sent)) Log.Write("трей: эта иконка открывает меню по WM_CONTEXTMENU — дальше шлём сразу");
+            _contextSent = null;
             // Переносим только меню нажатой программы (и меню Windows): уведомление другой
             // программы, всплывшее в это время (Telegram), остаётся на месте.
             foreach (var h in popups)
