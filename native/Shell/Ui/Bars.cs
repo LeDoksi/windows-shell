@@ -242,12 +242,31 @@ public sealed class Bars
         var exclusive = state is 3 or 4;
         var covers = r.Left <= screen.Bounds.Left && r.Top <= screen.Bounds.Top && r.Right >= screen.Bounds.Right && r.Bottom >= screen.Bounds.Bottom;
         // Развёрнутое окно тоже закрывает монитор (панель задач спрятана), но это не игра (1.6):
-        // док выезжает над ним (WSH-95), поэтому и «2 — занят» от Windows не в счёт. Chrome в F11
-        // остаётся развёрнутым, но без заголовка и рамки — по этому и отличаем полный экран.
-        const long WS_CAPTION = 0x00C00000;
-        var caption = ((long)GetWindowLongPtrW(fg, GWL_STYLE) & WS_CAPTION) == WS_CAPTION;
-        if (exclusive || (covers && (!IsZoomed(fg) || !caption))) set.Add(screen.Name);
+        // док выезжает над ним (WSH-95), поэтому и «2 — занят» от Windows не в счёт. Общее правило
+        // для любых программ: развёрнутое окно можно тянуть за края (рамка WS_THICKFRAME есть даже
+        // у окон без заголовка — ChatGPT, Electron), а полный экран рамку снимает (Chrome и
+        // Electron в F11 остаются «развёрнутыми», но без неё). Заголовок не смотрим (WSH-100).
+        const long WS_THICKFRAME = 0x00040000;
+        var style = (long)GetWindowLongPtrW(fg, GWL_STYLE);
+        var zoomed = IsZoomed(fg);
+        var resizable = (style & WS_THICKFRAME) != 0;
+        var full = exclusive || (covers && (!zoomed || !resizable));
+        if (full) set.Add(screen.Name);
+        // В журнал — каждое новое решение по окну, чтобы разбирать «док не выезжает над X».
+        var why = $"{cls} стиль {style:X8} развёрнуто {zoomed} весь экран {covers} состояние {state} → {(full ? "полный экран" : "обычное")}";
+        if (covers && (fg != _lastFg || why != _lastWhy)) Log.Write($"окно {ProcessName(fg)}: {why}");
+        _lastFg = fg;
+        _lastWhy = why;
         return set;
+    }
+
+    IntPtr _lastFg;
+    string? _lastWhy;
+
+    static string ProcessName(IntPtr h)
+    {
+        try { return System.Diagnostics.Process.GetProcessById((int)ProcessId(h)).ProcessName; }
+        catch { return "?"; }
     }
 
     // ---------- поток интерфейса ----------
