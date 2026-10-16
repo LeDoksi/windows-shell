@@ -254,7 +254,10 @@ public sealed class TrayFlyout : Popup
             };
             if (it.Callback == 0) { NoCallback(it, button); return; }
             if (IsOwn(it)) { if (button != TrayHost.Button.Middle) ShowOwnMenu(it); return; }
-            NoteClick(it);
+            // Снимок окон делаем на нажатии, не на отпускании: Chrome, Discord, Claude, G HUB
+            // выводят меню уже на нажатие, и второй снимок счёл бы его старым окном — меню
+            // «закрылось», окошко забирало фокус и меню пропадало.
+            if (_clickedHwnd != it.Hwnd || Environment.TickCount64 - _clickedAt > 5000) NoteClick(it);
             var (x, y) = Center(cell);
             TrayHost.Up(it, button, x, y);
             if (button == TrayHost.Button.Right) MenuOrContext(it, x, y);
@@ -435,7 +438,8 @@ public sealed class TrayFlyout : Popup
         if (ev == EVENT_OBJECT_SHOW && idObject != OBJID_WINDOW) return;
         if (GetAncestor(hwnd, 2 /* GA_ROOT */) != hwnd || _before.Contains(hwnd)) return;
         var menu = ClassName(hwnd) == "#32768";
-        if (!menu && (ProcessId(hwnd) != _clickedPid || (ExStyle(hwnd) & WS_EX_TOPMOST) == 0 || IsRealWindow(hwnd))) return;
+        // «Поверх всех» не требуем: G HUB (WinUI) ставит его уже после показа.
+        if (!menu && (ProcessId(hwnd) != _clickedPid || IsRealWindow(hwnd))) return;
         PlaceStray(hwnd);
     }
 
