@@ -39,8 +39,12 @@ jobs:
       - name: Build installer
         run: pnpm tauri build
 
+      # The build is the check; the download is a convenience. A full artifact quota must not
+      # turn a good build red, and short retention keeps the quota from filling up.
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
+          retention-days: 3
           name: windows-shell-${{ github.sha }}
           path: |
             src-tauri/target/release/bundle/nsis/*.exe
@@ -60,8 +64,12 @@ jobs:
       - name: Publish
         run: dotnet publish native/Shell/Shell.csproj -c Release -r win-x64 -o native/publish
 
+      # The build is the check; the download is a convenience. A full artifact quota must not
+      # turn a good build red, and short retention keeps the quota from filling up.
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
+          retention-days: 3
           name: windows-shell-native-${{ github.sha }}
           path: native/publish
           if-no-files-found: error
