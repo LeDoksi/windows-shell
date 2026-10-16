@@ -164,7 +164,8 @@ public static partial class Win32
                 if (menus.Contains(h)) { under = h; above = seen.Count; }
                 else if (IsWindowVisible(h) && ProcessId(h) == own) seen.Add(h);
             }
-            if (under != IntPtr.Zero)
+            // Под окном не из слоя «поверх всех» наши окна потеряли бы этот слой — тогда запасной путь.
+            if (under != IntPtr.Zero && (ExStyle(under) & WS_EX_TOPMOST) != 0)
             {
                 _under = under;
                 var moved = 0;
@@ -225,7 +226,7 @@ public static partial class Win32
     public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_FRAMECHANGED = 0x20, SWP_NOOWNERZORDER = 0x200, SWP_ASYNCWINDOWPOS = 0x4000;
     public const uint MONITOR_DEFAULTTONEAREST = 2, MONITOR_DEFAULTTOPRIMARY = 1;
     public const uint EVENT_SYSTEM_FOREGROUND = 0x3, EVENT_SYSTEM_MINIMIZESTART = 0x16, EVENT_SYSTEM_MINIMIZEEND = 0x17;
-    public const uint EVENT_OBJECT_CREATE = 0x8000, EVENT_OBJECT_DESTROY = 0x8001, EVENT_OBJECT_SHOW = 0x8002, EVENT_OBJECT_HIDE = 0x8003, EVENT_OBJECT_NAMECHANGE = 0x800C;
+    public const uint EVENT_OBJECT_CREATE = 0x8000, EVENT_OBJECT_DESTROY = 0x8001, EVENT_OBJECT_SHOW = 0x8002, EVENT_OBJECT_HIDE = 0x8003, EVENT_OBJECT_NAMECHANGE = 0x800C, EVENT_OBJECT_LOCATIONCHANGE = 0x800B;
     public const uint EVENT_OBJECT_CLOAKED = 0x8017, EVENT_OBJECT_UNCLOAKED = 0x8018;
     public const uint WINEVENT_OUTOFCONTEXT = 0, WINEVENT_SKIPOWNPROCESS = 2;
     public const int OBJID_WINDOW = 0;
