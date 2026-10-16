@@ -620,15 +620,21 @@ public sealed class TrayFlyout : Popup
         Close(restoreFocus: false);
     }
 
-    /// Обычное окно программы (а не меню, подсказка или скрытое служебное окно).
+    /// Обычное окно программы (а не меню, подсказка или скрытое служебное окно). Заголовок не
+    /// обязателен: у окон без рамки (ChatGPT, Claude, Discord) его нет. Такое окно считаем
+    /// обычным по правилу панели задач — без владельца, не «служебное», активируется — и если
+    /// оно не «поверх всех» (меню и подсказки всегда поверх всех).
     static bool IsRealWindow(IntPtr h)
     {
-        if (h == IntPtr.Zero || !IsWindowVisible(h)) return false;
+        if (h == IntPtr.Zero || !IsWindowVisible(h) || IsCloaked(h)) return false;
         var cls = ClassName(h);
         if (cls is "Progman" or "WorkerW") return true;
-        if ((ExStyle(h) & WS_EX_TOOLWINDOW) != 0) return false;
+        var ex = ExStyle(h);
+        if ((ex & WS_EX_TOOLWINDOW) != 0) return false;
+        if ((ex & WS_EX_APPWINDOW) != 0) return true;
         const long WS_CAPTION = 0x00C00000;
-        return ((long)GetWindowLongPtrW(h, GWL_STYLE) & WS_CAPTION) == WS_CAPTION || (ExStyle(h) & WS_EX_APPWINDOW) != 0;
+        if (((long)GetWindowLongPtrW(h, GWL_STYLE) & WS_CAPTION) == WS_CAPTION) return true;
+        return (ex & (WS_EX_TOPMOST | WS_EX_NOACTIVATE)) == 0 && GetWindow(h, GW_OWNER) == IntPtr.Zero;
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]

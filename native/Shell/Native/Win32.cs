@@ -101,12 +101,40 @@ public static partial class Win32
     static IntPtr _under;
     static bool _belowTopmost;
 
+    // Под слой опущены только наши окна, которые меню перекрывают (и те, что перекрывают их):
+    // остальные (док под окошком трея) остаются сверху, и окно программы, вышедшее вперёд, их
+    // не накрывает.
+    static readonly HashSet<IntPtr> Demoted = [];
+    static List<RECT> _menuRects = [];
+
     /// Куда ставить наше окно: на самый верх или, пока открыто чужое меню, под него.
-    public static IntPtr TopZ => !ForeignMenuOpen ? HWND_TOPMOST
-        : _belowTopmost || !IsWindow(_under) ? HWND_NOTOPMOST : _under;
+    public static IntPtr TopZFor(IntPtr hwnd)
+    {
+        if (!ForeignMenuOpen) return HWND_TOPMOST;
+        if (!_belowTopmost) return IsWindow(_under) ? _under : HWND_TOPMOST;
+        return Demoted.Contains(hwnd) || Overlaps(Bounds(hwnd), _menuRects) ? HWND_NOTOPMOST : HWND_TOPMOST;
+    }
 
     /// Поднять наше окно наверх (но не выше открытого чужого меню).
-    public static void RaiseTop(IntPtr hwnd) => SetWindowPos(hwnd, TopZ, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    public static void RaiseTop(IntPtr hwnd) => SetWindowPos(hwnd, TopZFor(hwnd), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    /// Видимая часть окна на экране, с учётом его области (SetWindowRgn у дока).
+    static RECT Bounds(IntPtr h)
+    {
+        if (!GetWindowRect(h, out var r)) return default;
+        var kind = GetWindowRgnBox(h, out var box);
+        if (kind is 2 or 3 /* SIMPLEREGION, COMPLEXREGION */)
+            return new RECT { Left = r.Left + box.Left, Top = r.Top + box.Top, Right = r.Left + box.Right, Bottom = r.Top + box.Bottom };
+        return kind == 1 /* NULLREGION */ ? default : r;
+    }
+
+    static bool Overlap(RECT a, RECT b) =>
+        a.Right > a.Left && a.Bottom > a.Top && b.Right > b.Left && b.Bottom > b.Top &&
+        a.Left < b.Right && b.Left < a.Right && a.Top < b.Bottom && b.Top < a.Bottom;
+
+    static bool Overlaps(RECT a, IEnumerable<RECT> list) => list.Any(b => Overlap(a, b));
+
+    [DllImport("user32.dll")] static extern int GetWindowRgnBox(IntPtr h, out RECT box);
 
     /// Наши видимые окна сверху вниз.
     static List<IntPtr> OwnWindows()
@@ -146,11 +174,23 @@ public static partial class Win32
             }
             else _belowTopmost = true;
         }
-        var count = 0;
+        // Запасной путь: опускаем под слой только окна под меню и всё, что с ними перекрывается
+        // (подложка дока вместе с иконками), порядок между ними сохраняется.
+        _menuRects = menus.Select(Bounds).ToList();
         var list = OwnWindows();
+        var bounds = list.ToDictionary(h => h, Bounds);
+        foreach (var h in list) if (Overlaps(bounds[h], _menuRects)) Demoted.Add(h);
+        for (var grew = true; grew;)
+        {
+            grew = false;
+            foreach (var h in list)
+                if (!Demoted.Contains(h) && Overlaps(bounds[h], Demoted.Where(bounds.ContainsKey).Select(d => bounds[d])))
+                    grew |= Demoted.Add(h);
+        }
+        var count = 0;
         for (var i = list.Count - 1; i >= 0; i--)
         {
-            if ((ExStyle(list[i]) & WS_EX_TOPMOST) == 0) continue;
+            if (!Demoted.Contains(list[i]) || (ExStyle(list[i]) & WS_EX_TOPMOST) == 0) continue;
             SetWindowPos(list[i], HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
             count++;
         }
@@ -167,6 +207,8 @@ public static partial class Win32
         _under = IntPtr.Zero;
         if (!_belowTopmost) return;
         _belowTopmost = false;
+        Demoted.Clear();
+        _menuRects = [];
         var list = OwnWindows();
         var dwp = BeginDeferWindowPos(list.Count);
         for (var i = list.Count - 1; i >= 0 && dwp != IntPtr.Zero; i--)
