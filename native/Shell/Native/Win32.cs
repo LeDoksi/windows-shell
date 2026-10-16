@@ -92,18 +92,49 @@ public static partial class Win32
     public const int SC_CLOSE = 0xF060;
     public static readonly IntPtr HWND_TOPMOST = new(-1), HWND_NOTOPMOST = new(-2);
 
-    /// Открыто меню чужой программы (из трея): наши окна опущены из слоя «поверх всех» и не
-    /// поднимаются, пока оно не закроется. Ставить свои окна прямо под чужое меню ненадёжно:
-    /// под окно программы, запущенной от администратора (Fan Control, MSI Afterburner), Windows
-    /// не пускает (ошибка 5), а любой подъём дока между проверками закрывал меню собой.
+    /// Открыто меню чужой программы (из трея): наши окна стоят прямо под ним и остаются в слое
+    /// «поверх всех» — иначе развёрнутое окно программы, вышедшее вперёд при клике, накрывает
+    /// док (Claude). Под окно программы, запущенной от администратора (Fan Control, MSI
+    /// Afterburner), Windows не пускает (ошибка 5): тогда опускаем наши окна под слой «поверх
+    /// всех», как раньше.
     public static bool ForeignMenuOpen { get; private set; }
+    static IntPtr _under;
+    static bool _belowTopmost;
 
-    /// Куда ставить наше окно: на самый верх или, пока открыто чужое меню, под весь слой
-    /// «поверх всех» (выше обычных окон).
-    public static IntPtr TopZ => ForeignMenuOpen ? HWND_NOTOPMOST : HWND_TOPMOST;
+    // Под слой опущены только наши окна, которые меню перекрывают (и те, что перекрывают их):
+    // остальные (док под окошком трея) остаются сверху, и окно программы, вышедшее вперёд, их
+    // не накрывает.
+    static readonly HashSet<IntPtr> Demoted = [];
+    static List<RECT> _menuRects = [];
+
+    /// Куда ставить наше окно: на самый верх или, пока открыто чужое меню, под него.
+    public static IntPtr TopZFor(IntPtr hwnd)
+    {
+        if (!ForeignMenuOpen) return HWND_TOPMOST;
+        if (!_belowTopmost) return IsWindow(_under) ? _under : HWND_TOPMOST;
+        return Demoted.Contains(hwnd) || Overlaps(Bounds(hwnd), _menuRects) ? HWND_NOTOPMOST : HWND_TOPMOST;
+    }
 
     /// Поднять наше окно наверх (но не выше открытого чужого меню).
-    public static void RaiseTop(IntPtr hwnd) => SetWindowPos(hwnd, TopZ, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    public static void RaiseTop(IntPtr hwnd) => SetWindowPos(hwnd, TopZFor(hwnd), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    /// Видимая часть окна на экране, с учётом его области (SetWindowRgn у дока).
+    static RECT Bounds(IntPtr h)
+    {
+        if (!GetWindowRect(h, out var r)) return default;
+        var kind = GetWindowRgnBox(h, out var box);
+        if (kind is 2 or 3 /* SIMPLEREGION, COMPLEXREGION */)
+            return new RECT { Left = r.Left + box.Left, Top = r.Top + box.Top, Right = r.Left + box.Right, Bottom = r.Top + box.Bottom };
+        return kind == 1 /* NULLREGION */ ? default : r;
+    }
+
+    static bool Overlap(RECT a, RECT b) =>
+        a.Right > a.Left && a.Bottom > a.Top && b.Right > b.Left && b.Bottom > b.Top &&
+        a.Left < b.Right && b.Left < a.Right && a.Top < b.Bottom && b.Top < a.Bottom;
+
+    static bool Overlaps(RECT a, IEnumerable<RECT> list) => list.Any(b => Overlap(a, b));
+
+    [DllImport("user32.dll")] static extern int GetWindowRgnBox(IntPtr h, out RECT box);
 
     /// Наши видимые окна сверху вниз.
     static List<IntPtr> OwnWindows()
@@ -115,32 +146,80 @@ public static partial class Win32
         return list;
     }
 
-    /// Открылось чужое меню: все наши окна уходят под слой «поверх всех», порядок между ними
-    /// сохраняется (снизу вверх: каждое следующее встаёт над предыдущими). Повторный вызов
-    /// опускает окна, которые успели подняться.
-    public static int DemoteOwn()
+    /// Открылось чужое меню (`menus` — его окна): наши окна, которые выше него, встают прямо под
+    /// нижнее из них, порядок между нашими окнами сохраняется (снизу вверх: каждое следующее
+    /// встаёт над предыдущими). Повторный вызов опускает окна, которые успели подняться.
+    public static int DemoteOwn(IReadOnlyCollection<IntPtr> menus)
     {
         ForeignMenuOpen = true;
-        var moved = 0;
+        var own = (uint)Environment.ProcessId;
+        if (!_belowTopmost)
+        {
+            // Наши окна выше нижнего окна меню, сверху вниз.
+            var seen = new List<IntPtr>();
+            var above = 0;
+            var under = IntPtr.Zero;
+            for (var h = GetWindow(GetDesktopWindow(), 5 /* GW_CHILD */); h != IntPtr.Zero; h = GetWindow(h, 2 /* GW_HWNDNEXT */))
+            {
+                if (menus.Contains(h)) { under = h; above = seen.Count; }
+                else if (IsWindowVisible(h) && ProcessId(h) == own) seen.Add(h);
+            }
+            if (under != IntPtr.Zero)
+            {
+                _under = under;
+                var moved = 0;
+                for (var i = above - 1; i >= 0; i--, moved++)
+                    if (!SetWindowPos(seen[i], under, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)) { _belowTopmost = true; break; }
+                if (!_belowTopmost) return moved;
+            }
+            else _belowTopmost = true;
+        }
+        // Запасной путь: опускаем под слой только окна под меню и всё, что с ними перекрывается
+        // (подложка дока вместе с иконками), порядок между ними сохраняется.
+        _menuRects = menus.Select(Bounds).ToList();
         var list = OwnWindows();
+        var bounds = list.ToDictionary(h => h, Bounds);
+        foreach (var h in list) if (Overlaps(bounds[h], _menuRects)) Demoted.Add(h);
+        for (var grew = true; grew;)
+        {
+            grew = false;
+            foreach (var h in list)
+                if (!Demoted.Contains(h) && Overlaps(bounds[h], Demoted.Where(bounds.ContainsKey).Select(d => bounds[d])))
+                    grew |= Demoted.Add(h);
+        }
+        var count = 0;
         for (var i = list.Count - 1; i >= 0; i--)
         {
-            if ((ExStyle(list[i]) & WS_EX_TOPMOST) == 0) continue;
+            if (!Demoted.Contains(list[i]) || (ExStyle(list[i]) & WS_EX_TOPMOST) == 0) continue;
             SetWindowPos(list[i], HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            moved++;
+            count++;
         }
-        return moved;
+        return count;
     }
 
-    /// Чужое меню закрылось: наши окна снова «поверх всех», в прежнем порядке.
+    /// Чужое меню закрылось. Наши окна стояли под ним — так и остаются «поверх всех». Если их
+    /// опускали под слой, поднимаем разом (DeferWindowPos), в прежнем порядке: по одному док
+    /// успевал показать подложку без иконок.
     public static void RestoreOwn()
     {
         if (!ForeignMenuOpen) return;
         ForeignMenuOpen = false;
+        _under = IntPtr.Zero;
+        if (!_belowTopmost) return;
+        _belowTopmost = false;
+        Demoted.Clear();
+        _menuRects = [];
         var list = OwnWindows();
-        for (var i = list.Count - 1; i >= 0; i--)
-            SetWindowPos(list[i], HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        var dwp = BeginDeferWindowPos(list.Count);
+        for (var i = list.Count - 1; i >= 0 && dwp != IntPtr.Zero; i--)
+            dwp = DeferWindowPos(dwp, list[i], HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        if (dwp != IntPtr.Zero) EndDeferWindowPos(dwp);
+        else foreach (var h in Enumerable.Reverse(list)) SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
+
+    [DllImport("user32.dll")] static extern IntPtr BeginDeferWindowPos(int n);
+    [DllImport("user32.dll")] static extern IntPtr DeferWindowPos(IntPtr dwp, IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] static extern bool EndDeferWindowPos(IntPtr dwp);
 
     [DllImport("user32.dll")] static extern IntPtr GetDesktopWindow();
     public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40, SWP_FRAMECHANGED = 0x20, SWP_NOOWNERZORDER = 0x200, SWP_ASYNCWINDOWPOS = 0x4000;

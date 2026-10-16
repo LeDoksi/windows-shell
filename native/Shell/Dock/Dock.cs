@@ -543,6 +543,7 @@ public sealed partial class Dock : IBar, IDropZone
             {
                 item = CreateItem(e.Id);
                 if (initial) item.Base = item.Size = Icon;
+                if (!e.Pinned) Log.Write($"док: запущена {e.Title} ({e.Id}, окон {e.Windows.Count})");
             }
             item.Entry = e;
             if (e.Running) item.LaunchUntil = 0;
@@ -666,8 +667,17 @@ public sealed partial class Dock : IBar, IDropZone
         _s.Icons.Get(source, px, bmp =>
         {
             if (item.IconSource != source) return;
-            if (bmp != null || fallback is null || string.Equals(fallback, source, StringComparison.OrdinalIgnoreCase)) { Apply(bmp); return; }
-            _s.Icons.Get(fallback, px, alt => { if (item.IconSource == source) Apply(alt); });
+            if (bmp != null || fallback is null || string.Equals(fallback, source, StringComparison.OrdinalIgnoreCase))
+            {
+                if (bmp is null) Log.Write($"док: нет картинки для {source}");
+                Apply(bmp);
+                return;
+            }
+            _s.Icons.Get(fallback, px, alt =>
+            {
+                if (alt is null) Log.Write($"док: нет картинки ни для {source}, ни для {fallback}");
+                if (item.IconSource == source) Apply(alt);
+            });
         });
     }
 
