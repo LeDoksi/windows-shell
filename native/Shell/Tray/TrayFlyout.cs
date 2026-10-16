@@ -97,6 +97,7 @@ public sealed class TrayFlyout : Popup
         _hadMenu = false;
         _keepFor = IntPtr.Zero;
         _placed.Clear();
+        Unlift();
         _order = [];
         foreach (var slot in _slots.Values) slot.Bg.Background = Theme.Brush(Microsoft.UI.Colors.Transparent);
         if (_menuOpen) { _menuOpen = false; RestoreOwn(); }
@@ -399,7 +400,8 @@ public sealed class TrayFlyout : Popup
     // После клика по иконке: было ли меню, какие окна программы уже были открыты, и окно,
     // вышедшее вперёд после меню, которое окошко не закрывает.
     bool _hadMenu;
-    readonly HashSet<IntPtr> _visibleAtClick = [];
+    // Окна нажатой программы, видимые в момент клика, и где они стояли.
+    readonly Dictionary<IntPtr, RECT> _atClick = [];
     IntPtr _keepFor;
     IntPtr _fgBeforeOpen;
 
@@ -429,21 +431,61 @@ public sealed class TrayFlyout : Popup
         }
     }
 
+    // Сдвиги окон нажатой программы (только её, хук на один процесс): программа может сама
+    // поставить меню в угол уже после показа или показать то же окно меню ещё раз без «показа».
+    IntPtr _moveHook;
+
+    void HookMoves(uint pid)
+    {
+        if (_moveHook != IntPtr.Zero) UnhookWinEvent(_moveHook);
+        _moveHook = IntPtr.Zero;
+        if (pid == 0 || _showProc == null) return;
+        _moveHook = SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE, IntPtr.Zero, _showProc, pid, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    }
+
     void UnhookShow()
     {
         foreach (var h in _showHooks) UnhookWinEvent(h);
         _showHooks.Clear();
+        HookMoves(0);
     }
 
     void OnShow(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time)
     {
         if (!IsOpen || _clickedAt == 0 || hwnd == IntPtr.Zero || idChild != 0) return;
-        if (ev == EVENT_OBJECT_SHOW && idObject != OBJID_WINDOW) return;
-        if (GetAncestor(hwnd, 2 /* GA_ROOT */) != hwnd || _before.Contains(hwnd)) return;
-        var menu = ClassName(hwnd) == "#32768";
-        // «Поверх всех» не требуем: G HUB (WinUI) ставит его уже после показа.
-        if (!menu && (ProcessId(hwnd) != _clickedPid || IsRealWindow(hwnd))) return;
-        PlaceStray(hwnd);
+        if (ev != 0x6 /* MENUPOPUPSTART */ && idObject != OBJID_WINDOW) return;
+        if (GetAncestor(hwnd, 2 /* GA_ROOT */) != hwnd) return;
+        if (ClassName(hwnd) == "#32768") { if (!_before.Contains(hwnd)) PlaceStray(hwnd); return; }
+        if (IsAppMenu(hwnd)) { PlaceStray(hwnd); Lift(hwnd); }
+    }
+
+    /// Меню нажатой программы: её окно — не обычное, — которое появилось или сдвинулось после
+    /// клика. «Поверх всех» не требуем: G HUB (WinUI) показывает меню обычным окном, и это то
+    /// же окно, что получает клики иконки, — после первого раза оно уже было до клика.
+    bool IsAppMenu(IntPtr h)
+    {
+        if (_clickedPid == 0 || ProcessId(h) != _clickedPid || !IsWindowVisible(h) || IsCloaked(h) || IsRealWindow(h)) return false;
+        if (!GetWindowRect(h, out var r) || r.Width <= 0 || r.Height <= 0) return false;
+        if (!_atClick.TryGetValue(h, out var was)) return true;
+        return r.Left != was.Left || r.Top != was.Top || r.Right != was.Right || r.Bottom != was.Bottom;
+    }
+
+    // Меню программы — над нашими окнами «поверх всех», как меню над панелью задач Windows.
+    // Наши окна под меню не в слое «поверх всех» потеряли бы этот слой (док под окнами).
+    readonly HashSet<IntPtr> _lifted = [];
+
+    void Lift(IntPtr menu)
+    {
+        if ((ExStyle(menu) & WS_EX_TOPMOST) != 0) return;
+        if (SetWindowPos(menu, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)) _lifted.Add(menu);
+    }
+
+    /// Окошко закрылось: поднятым окнам программ возвращаем обычный слой.
+    void Unlift()
+    {
+        foreach (var h in _lifted)
+            if (IsWindow(h)) SetWindowPos(h, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        _lifted.Clear();
     }
 
     void HookMouse()
@@ -501,9 +543,10 @@ public sealed class TrayFlyout : Popup
         }
     }
 
-    /// Окна, которые программа вывела после клика по иконке: обычное меню Windows (#32768) или
-    /// свои окна «поверх всех» (Chrome, Discord, Fan Control, Xbox, G HUB рисуют меню сами, вместе
-    /// с подсказками, иногда в другом процессе). Наши окна не в счёт.
+    /// Окна, которые программа вывела после клика по иконке: обычное меню Windows (#32768),
+    /// новые или сдвинутые окна нажатой программы (не обычные, «поверх всех» или нет) и новые
+    /// окна «поверх всех» других процессов (Chrome, Discord, Fan Control, Xbox, G HUB рисуют
+    /// меню сами, вместе с подсказками, иногда в другом процессе). Наши окна не в счёт.
     List<IntPtr> FindPopups()
     {
         var list = new List<IntPtr>();
@@ -512,9 +555,14 @@ public sealed class TrayFlyout : Popup
         if (_clickedAt == 0) return list;
         var own = (uint)Environment.ProcessId;
         var late = Environment.TickCount64 - _clickedAt > 3000;
+        EnumWindows((h, _) =>
+        {
+            if (h != menu && IsWindowVisible(h) && ClassName(h) is not ("Shell_TrayWnd" or "Shell_SecondaryTrayWnd") && IsAppMenu(h)) list.Add(h);
+            return true;
+        }, IntPtr.Zero);
         foreach (var h in TopmostWindows())
         {
-            if (h == menu || _before.Contains(h) || ProcessId(h) == own || IsRealWindow(h)) continue;
+            if (h == menu || ProcessId(h) == _clickedPid || _before.Contains(h) || ProcessId(h) == own || IsRealWindow(h)) continue;
             if (ClassName(h) is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") continue;
             // Чужое новое окно через много секунд после клика — уже не меню (уведомление и т. п.).
             if (late && ProcessId(h) != _clickedPid) continue;
@@ -557,10 +605,11 @@ public sealed class TrayFlyout : Popup
         _menuAtClick = _menuOpen || _before.Any(h => ProcessId(h) == _clickedPid && !IsRealWindow(h));
         _hadMenu = false;
         _keepFor = IntPtr.Zero;
-        _visibleAtClick.Clear();
+        _atClick.Clear();
         var pid = _clickedPid;
-        EnumWindows((h, _) => { if (IsWindowVisible(h) && ProcessId(h) == pid) _visibleAtClick.Add(h); return true; }, IntPtr.Zero);
+        EnumWindows((h, _) => { if (IsWindowVisible(h) && ProcessId(h) == pid && GetWindowRect(h, out var r)) _atClick[h] = r; return true; }, IntPtr.Zero);
         _clickedAt = Environment.TickCount64;
+        HookMoves(pid);
     }
 
     static string ProcessName(uint pid)
@@ -590,7 +639,10 @@ public sealed class TrayFlyout : Popup
             // Переносим только меню нажатой программы (и меню Windows): уведомление другой
             // программы, всплывшее в это время (Telegram), остаётся на месте.
             foreach (var h in popups)
-                if (ProcessId(h) == _clickedPid || ClassName(h) == "#32768") PlaceStray(h);
+            {
+                if (ProcessId(h) == _clickedPid) { PlaceStray(h); Lift(h); }
+                else if (ClassName(h) == "#32768") PlaceStray(h);
+            }
             // Каждый раз: наше окно могло подняться между проверками (смена активного окна).
             var moved = DemoteOwn(popups);
             if (moved > 0) Log.Write($"трей: наши окна под меню программы ({moved})");
@@ -614,7 +666,7 @@ public sealed class TrayFlyout : Popup
         if (!IsRealWindow(fg) || popups.Contains(fg) || fg == _keepFor) return;
         // Меню закрыли (Esc), а программа вывела вперёд своё окно, которое и так было открыто
         // (Discord, Chrome, Claude, Xbox так делают): это не уход из окошка, оно остаётся.
-        if (_hadMenu && ProcessId(fg) == _clickedPid && _visibleAtClick.Contains(fg)) { _keepFor = fg; return; }
+        if (_hadMenu && ProcessId(fg) == _clickedPid && _atClick.ContainsKey(fg)) { _keepFor = fg; return; }
         // Впереди обычное окно (рабочий стол, другая программа, окно, открытое кликом по иконке
         // или пунктом меню): окошко закрывается.
         Close(restoreFocus: false);
