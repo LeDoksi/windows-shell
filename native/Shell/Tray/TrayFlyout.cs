@@ -358,6 +358,9 @@ public sealed class TrayFlyout : Popup
         if (it.Version >= 3) return;
         var key = (it.Hwnd, it.Uid);
         _contextSent = null;
+        // Меню программы уже было открыто: этот клик его закрыл (так делают Claude, Discord).
+        // Это не «меню не открылось» — WM_CONTEXTMENU открыл бы его снова.
+        if (_menuAtClick) return;
         if (NeedsContext.Contains(key)) { TrayHost.ContextMenu(it, x, y); return; }
         var clickedAt = _clickedAt;
         _contextTimer?.Stop();
@@ -542,6 +545,7 @@ public sealed class TrayFlyout : Popup
     }
 
     IntPtr _clickedHwnd;
+    bool _menuAtClick;
 
     void NoteClick(TrayItem it)
     {
@@ -550,6 +554,7 @@ public sealed class TrayFlyout : Popup
         foreach (var h in TopmostWindows()) _before.Add(h);
         GetCursorPos(out _clickPoint);
         _clickedPid = ProcessId(it.Hwnd);
+        _menuAtClick = _menuOpen || _before.Any(h => ProcessId(h) == _clickedPid && !IsRealWindow(h));
         _hadMenu = false;
         _keepFor = IntPtr.Zero;
         _visibleAtClick.Clear();
@@ -587,7 +592,7 @@ public sealed class TrayFlyout : Popup
             foreach (var h in popups)
                 if (ProcessId(h) == _clickedPid || ClassName(h) == "#32768") PlaceStray(h);
             // Каждый раз: наше окно могло подняться между проверками (смена активного окна).
-            var moved = DemoteOwn();
+            var moved = DemoteOwn(popups);
             if (moved > 0) Log.Write($"трей: наши окна под меню программы ({moved})");
         }
         else if (_menuOpen)
