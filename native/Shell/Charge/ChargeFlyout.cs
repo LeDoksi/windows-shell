@@ -88,7 +88,7 @@ public sealed class ChargeFlyout : Popup
         {
             { Connected: false } => "не подключено",
             { Charging: true } => "заряжается",
-            { Percent: null } => "заряд неизвестен",
+            { Percent: null, Detail: null } => "заряд неизвестен",
             _ when low => "пора зарядить",
             _ => null,
         };

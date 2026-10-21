@@ -65,6 +65,7 @@ public static class Logitech
             var fi = root[0];
             if (fi == 0) continue;
             int? percent = null;
+            string? detail = null;
             var charging = false;
             var connected = true;
             switch (feature)
@@ -95,15 +96,17 @@ public static class Logitech
                     var mv = r[0] << 8 | r[1];
                     connected = (r[2] & 1) != 0;
                     charging = (r[2] & 2) != 0;
-                    if (connected) percent = FromVoltage(mv);
-                    log?.Invoke($"   напряжение {mv} мВ, флаги {r[2]:X2}");
+                    string? note = null;
+                    if (connected) (percent, note) = Smooth($"{pid:X4}:{index:X2}", mv, charging);
+                    log?.Invoke($"   напряжение {mv} мВ ({FromVoltage(mv)} %), флаги {r[2]:X2}{(note != null ? $", {note}" : "")}");
+                    detail = note;
                     break;
                 }
             }
             log?.Invoke($"   №{index:X2} функция {feature:X4} → {percent?.ToString() ?? "?"} %, заряжается {charging}, включено {connected}");
             // За приёмником имя спрашиваем у самого устройства (у приёмника имя «USB Receiver»).
             var title = Clean(index == 0xFF ? name : DeviceName(s, index) ?? name);
-            return new ChargeDevice($"logi:{pid:X4}:{index:X2}", title, Kind(title), percent is { } p ? Math.Clamp(p, 0, 100) : null, charging, connected, "Logitech");
+            return new ChargeDevice($"logi:{pid:X4}:{index:X2}", title, Kind(title), percent is { } p ? Math.Clamp(p, 0, 100) : null, charging, connected, "Logitech", detail);
         }
         return null;
     }
@@ -123,6 +126,49 @@ public static class Logitech
         }
         var text = System.Text.Encoding.UTF8.GetString(bytes.ToArray()).TrimEnd('\0').Trim();
         return text.Length > 0 ? text : null;
+    }
+
+    sealed class VoltageState
+    {
+        public bool Charging;
+        public long SettleUntil;
+        public readonly List<(long At, int Percent)> Samples = [];
+        public int? Shown;
+    }
+
+    static readonly Dictionary<string, VoltageState> Voltages = [];
+    const long SettleMs = 10 * 60_000, WindowMs = 3 * 60_000;
+
+    /// Уровень по напряжению честный только у отдыхающего аккумулятора. На зарядке напряжение
+    /// завышено (G733: «10 → 66 % за минуту»), после зарядки минут десять оседает, под нагрузкой
+    /// проседает. Поэтому: на зарядке процентов не показываем; 10 минут после неё — «уточняется»;
+    /// дальше — среднее за 3 минуты, и заряд только убывает (пока снова не зарядят).
+    static (int? Percent, string? Note) Smooth(string key, int mv, bool charging)
+    {
+        lock (Voltages)
+        {
+            if (!Voltages.TryGetValue(key, out var v)) Voltages[key] = v = new VoltageState();
+            var now = Environment.TickCount64;
+            if (charging)
+            {
+                v.Charging = true;
+                v.Samples.Clear();
+                v.Shown = null;
+                return (null, null);
+            }
+            if (v.Charging)
+            {
+                v.Charging = false;
+                v.SettleUntil = now + SettleMs;
+            }
+            if (now < v.SettleUntil) return (null, "уточняется после зарядки");
+            v.Samples.Add((now, FromVoltage(mv)));
+            v.Samples.RemoveAll(x => now - x.At > WindowMs);
+            var avg = (int)Math.Round(v.Samples.Average(x => x.Percent));
+            // Заметно больше показанного — значит, зарядили, пока мы не видели (оболочка не работала).
+            v.Shown = v.Shown is { } shown && avg <= shown + 15 ? Math.Min(shown, avg) : avg;
+            return (v.Shown, null);
+        }
     }
 
     /// Кривая разряда литиевого аккумулятора (как в Solaar): напряжение → %.
