@@ -133,6 +133,7 @@ public static class Logitech
         public bool Charging;
         public long SettleUntil;
         public readonly List<(long At, int Percent)> Samples = [];
+        public readonly List<(long At, int Mv)> Raw = [];
         public int? Shown;
     }
 
@@ -142,7 +143,9 @@ public static class Logitech
     /// Уровень по напряжению честный только у отдыхающего аккумулятора. На зарядке напряжение
     /// завышено (G733: «10 → 66 % за минуту»), после зарядки минут десять оседает, под нагрузкой
     /// проседает. Поэтому: на зарядке процентов не показываем; 10 минут после неё — «уточняется»;
-    /// дальше — среднее за 3 минуты, и заряд только убывает (пока снова не зарядят).
+    /// дальше — среднее за 3 минуты, и заряд только убывает (пока снова не зарядят). Флагу зарядки
+    /// G733 верить не всегда можно (и оболочку могли запустить сразу после зарядки), поэтому
+    /// оседание узнаём и по самому напряжению: падает быстрее 25 мВ в минуту (обычный разряд ~6).
     static (int? Percent, string? Note) Smooth(string key, int mv, bool charging)
     {
         lock (Voltages)
@@ -153,6 +156,7 @@ public static class Logitech
             {
                 v.Charging = true;
                 v.Samples.Clear();
+                v.Raw.Clear();
                 v.Shown = null;
                 return (null, null);
             }
@@ -160,6 +164,14 @@ public static class Logitech
             {
                 v.Charging = false;
                 v.SettleUntil = now + SettleMs;
+            }
+            v.Raw.Add((now, mv));
+            v.Raw.RemoveAll(x => now - x.At > 2 * 60_000);
+            if (v.Raw[0] is var first && now - first.At >= 50_000 && (first.Mv - mv) * 60_000.0 / (now - first.At) > 25)
+            {
+                v.SettleUntil = Math.Max(v.SettleUntil, now + 3 * 60_000);
+                v.Samples.Clear();
+                v.Shown = null;
             }
             if (now < v.SettleUntil) return (null, "уточняется после зарядки");
             v.Samples.Add((now, FromVoltage(mv)));
