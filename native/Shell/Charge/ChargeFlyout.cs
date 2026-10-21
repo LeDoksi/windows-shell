@@ -108,9 +108,10 @@ public sealed class ChargeFlyout : Popup
             track.HorizontalAlignment = HorizontalAlignment.Left;
             text.Children.Add(track);
         }
-        if (status != null)
+        var sub = string.Join(" · ", new[] { d.Connected ? d.Detail : null, status }.Where(x => !string.IsNullOrEmpty(x)));
+        if (sub.Length > 0)
         {
-            var s = Label(status, 11, secondary: true);
+            var s = Label(sub, 11, secondary: true);
             if (low) s.Foreground = Theme.Brush(Theme.Warning);
             text.Children.Add(s);
         }

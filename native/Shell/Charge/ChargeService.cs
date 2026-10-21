@@ -51,6 +51,7 @@ public sealed class ChargeService
         _soon.Tick += (_, _) => Refresh();
         messages.Message += (msg, _, _) => { if (msg == 0x0219 && Enabled) _soon.Start(); };
         messages.Resumed += () => { if (Enabled) _soon.Start(); };
+        AirPods.Changed += () => _queue.TryEnqueue(() => { if (Enabled && !_soon.IsRunning) _soon.Start(); });
     }
 
     public ChargeSettings Settings => new(_config.Widget("charge"));
@@ -119,7 +120,7 @@ public sealed class ChargeService
         if (!_started) return;
         var all = _found
             // Не подключено — уровень старый, не показываем.
-            .Select(d => d.Connected ? d : d with { Percent = null, Charging = false })
+            .Select(d => d.Connected ? d : d with { Percent = null, Charging = false, Detail = null })
             .GroupBy(d => d.Key).Select(g => g.First())
             .OrderBy(d => d.Connected ? 0 : 1).ThenBy(d => d.Percent ?? 101).ThenBy(d => d.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();

@@ -39,6 +39,13 @@ public static class SelfTest
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var bt = await Bluetooth.Read(say);
         say($"   прочитано за {sw.ElapsedMilliseconds} мс");
+        if (bt.Any(d => d.Source.Contains("Apple") && d.Percent is null))
+        {
+            // Объявления AirPods приходят раз в секунду-две: слушаем немного и читаем ещё раз.
+            say("   жду объявления AirPods 8 с");
+            await Task.Delay(8000);
+            bt = await Bluetooth.Read(say);
+        }
         foreach (var d in bt) say($"   → {Line(d)}");
 
         say("== Logitech (HID++)");

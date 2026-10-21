@@ -7,8 +7,9 @@ namespace WindowsShell.Charge;
 public enum DeviceKind { Other, Keyboard, Mouse, Headphones, Gamepad }
 
 /// Устройство с батареей. `Key` постоянный между запусками (по нему «не следить» и память
-/// об уже показанных уведомлениях). `Percent` null — уровень неизвестен.
-public sealed record ChargeDevice(string Key, string Name, DeviceKind Kind, int? Percent, bool Charging, bool Connected, string Source)
+/// об уже показанных уведомлениях). `Percent` null — уровень неизвестен. `Detail` — подробности
+/// под именем (у AirPods: левый, правый, футляр).
+public sealed record ChargeDevice(string Key, string Name, DeviceKind Kind, int? Percent, bool Charging, bool Connected, string Source, string? Detail = null)
 {
     /// «Клавиатура RK-S98» для уведомления; если тип уже в имени («Xbox Controller») — просто имя.
     public string Title
@@ -82,9 +83,17 @@ public static class Bluetooth
         var nodes = Nodes();
         var withBattery = nodes.Where(n => n.Battery != null && n.Container != Guid.Empty && n.Container != ComputerContainer).ToList();
         foreach (var n in withBattery) log?.Invoke($"PnP {n.Battery}% · {n.Name} · {n.Id} · {n.Container}");
-        if (withBattery.Count == 0) return [];
         var endpoints = await Endpoints(log);
         var list = new List<ChargeDevice>();
+        // AirPods и Beats: заряда у Windows нет, он в их Bluetooth-объявлениях.
+        var apple = endpoints.Where(e => e.Value.Connected && AirPods.IsApple(e.Value.Name) && withBattery.All(n => n.Container != e.Key)).ToList();
+        AirPods.Listen(apple.Count > 0);
+        foreach (var (container, ep) in apple)
+        {
+            var s = AirPods.Latest;
+            log?.Invoke($"AirPods {ep.Name}: {(s is null ? "объявлений пока нет" : $"{s.Detail} · сигнал {s.Rssi} дБм")}");
+            list.Add(new ChargeDevice($"bt:{container:D}", ep.Name.Trim(), DeviceKind.Headphones, s?.Percent, s?.Charging ?? false, true, "Bluetooth (объявления Apple)", s?.Detail));
+        }
         foreach (var group in withBattery.GroupBy(n => n.Container))
         {
             var container = group.Key;
@@ -119,9 +128,17 @@ public static class Bluetooth
         var map = new Dictionary<Guid, Endpoint>();
         try
         {
-            const string query = "System.Devices.Aep.ProtocolId:=\"{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}\" OR System.Devices.Aep.ProtocolId:=\"{bb7bb05e-5972-42b5-94fc-76eaa7084d49}\"";
+            // Только сопряжённые: без этого условия Windows ещё ~30 с ищет новые устройства вокруг.
+            const string query = "(System.Devices.Aep.ProtocolId:=\"{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}\" OR System.Devices.Aep.ProtocolId:=\"{bb7bb05e-5972-42b5-94fc-76eaa7084d49}\")"
+                + " AND System.Devices.Aep.IsPaired:=System.StructuredQueryType.Boolean#True";
             string[] props = ["System.Devices.Aep.IsConnected", "System.Devices.Aep.IsPaired", "System.Devices.Aep.ContainerId"];
-            var all = await DeviceInformation.FindAllAsync(query, props, DeviceInformationKind.AssociationEndpoint);
+            var find = DeviceInformation.FindAllAsync(query, props, DeviceInformationKind.AssociationEndpoint).AsTask();
+            if (await Task.WhenAny(find, Task.Delay(8000)) != find)
+            {
+                log?.Invoke("Bluetooth: список сопряжённых не пришёл за 8 с");
+                return map;
+            }
+            var all = await find;
             foreach (var d in all)
             {
                 if (d.Properties.TryGetValue("System.Devices.Aep.IsPaired", out var p) && p is false) continue;
