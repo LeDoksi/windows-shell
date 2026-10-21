@@ -48,7 +48,7 @@ public static class Popups
     internal static void RaiseChanged() => CurrentChanged?.Invoke();
 }
 
-public enum Placement { Above, Below, Beside, AtPoint, AboveLeft }
+public enum Placement { Above, Below, Beside, AtPoint, AboveLeft, Caret }
 
 /// Всплывающее окошко с настоящим стеклом (меню, окошко звука, список окон). Стоит над кнопкой,
 /// выровнено по её центру и не выходит за край экрана.
@@ -196,6 +196,17 @@ public abstract class Popup
             if (x + w > work.Right - margin) x = (int)(_anchorPx.X - 2 * scale - w);
             y = (int)(_anchorPx.Y - 4 * scale);
             y = Math.Clamp(y, work.Top + margin, Math.Max(work.Top + margin, work.Bottom - margin - h));
+        }
+        else if (_placement == Placement.Caret)
+        {
+            // Окошко буфера (Win+V): под текстовым курсором, левым краем по нему; снизу не
+            // влезает — над ним, чтобы не закрыть строку, которую печатают.
+            var area = MonitorInfo(mon).rcMonitor;
+            x = (int)(_anchorPx.X - 16 * scale);
+            x = Math.Clamp(x, area.Left + margin, Math.Max(area.Left + margin, area.Right - margin - w));
+            y = (int)(_anchorPx.Y + _anchorPx.Height + 6 * scale);
+            if (y + h > area.Bottom - margin) y = (int)(_anchorPx.Y - 6 * scale - h);
+            y = Math.Clamp(y, area.Top + margin, Math.Max(area.Top + margin, area.Bottom - margin - h));
         }
         else if (_placement == Placement.AtPoint)
         {

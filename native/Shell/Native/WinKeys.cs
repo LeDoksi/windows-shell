@@ -40,6 +40,9 @@ public sealed class WinKeys
     /// Alt+PrtSc, Ctrl+PrtSc и Win+PrtSc остаются Windows.
     public volatile bool PrintScreen, WinShiftS;
 
+    /// Win+V — наша история буфера обмена (design-v2 п. 5), иначе история Windows.
+    public volatile bool WinV;
+
     /// Клавиши-стрелки уходят доку (Win+T, Win+B), а не активному окну.
     public volatile bool Capturing;
 
@@ -99,6 +102,7 @@ public sealed class WinKeys
             'X' => WinX,
             'S' or 'Q' => WinSearch,
             'T' or 'B' => DockKeys,
+            'V' => WinV,
             _ => false,
         };
     }
@@ -230,6 +234,18 @@ public sealed class WinKeys
             Key(VK_LWIN, 0, KEYEVENTF_KEYUP | KEYEVENTF_EXTENDEDKEY),
         };
         SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+    }
+
+    /// Ctrl+V от нашего имени (вставка из истории буфера). Shift, Alt и Win, если их ещё держат,
+    /// сначала отпускаются: иначе программа получит Ctrl+Shift+V (в VS Code это другое действие).
+    public static void SendPaste()
+    {
+        var inputs = new List<INPUT>();
+        foreach (var vk in new[] { VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN })
+            if (Down(vk)) inputs.Add(Key(vk, 0, KEYEVENTF_KEYUP | (vk is VK_LWIN or VK_RWIN ? KEYEVENTF_EXTENDEDKEY : 0)));
+        if (Down(VK_LWIN) || Down(VK_RWIN) || Down(VK_MENU)) inputs.InsertRange(0, [Key(VK_MASK, 0, 0), Key(VK_MASK, 0, KEYEVENTF_KEYUP)]);
+        inputs.AddRange([Key(VK_CONTROL, 0, 0), Key('V', 0, 0), Key('V', 0, KEYEVENTF_KEYUP), Key(VK_CONTROL, 0, KEYEVENTF_KEYUP)]);
+        SendInput((uint)inputs.Count, [.. inputs], Marshal.SizeOf<INPUT>());
     }
 
     /// Ничего не значащее нажатие от нашего имени: после него Windows разрешает нам вывести
