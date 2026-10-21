@@ -107,9 +107,14 @@ public static partial class Win32
     static readonly HashSet<IntPtr> Demoted = [];
     static List<RECT> _menuRects = [];
 
+    /// Окно выбора области для снимка: пока оно открыто, наши окна (док выезжает или прячется)
+    /// встают под него, а не поверх замёрзшего экрана.
+    public static IntPtr Cover { get; set; }
+
     /// Куда ставить наше окно: на самый верх или, пока открыто чужое меню, под него.
     public static IntPtr TopZFor(IntPtr hwnd)
     {
+        if (Cover != IntPtr.Zero && hwnd != Cover && IsWindow(Cover)) return Cover;
         if (!ForeignMenuOpen) return HWND_TOPMOST;
         if (!_belowTopmost) return IsWindow(_under) ? _under : HWND_TOPMOST;
         return Demoted.Contains(hwnd) || Overlaps(Bounds(hwnd), _menuRects) ? HWND_NOTOPMOST : HWND_TOPMOST;

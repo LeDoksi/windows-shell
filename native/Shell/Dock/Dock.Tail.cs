@@ -1,7 +1,10 @@
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Windows.Foundation;
 using WindowsShell.Apps;
 using WindowsShell.Native;
+using WindowsShell.Shots;
 using WindowsShell.Tail;
 using WindowsShell.Ui;
 using static WindowsShell.Native.Win32;
@@ -10,7 +13,7 @@ namespace WindowsShell.Dock;
 
 /// Системный хвост дока (раздел 2, WSH-E9): [временные значки] · ⌃ трей · сеть · звук · батарея ·
 /// язык · уведомления · часы. Полный хвост — на мониторе хвоста, на остальных только часы (раздел 9).
-/// Временные значки (design-v2 п. 2) стоят в постоянном порядке: Сейчас играет · Скриншот ·
+/// Временные значки (design-v2 п. 2) стоят в постоянном порядке: Сейчас играет · Снимки ·
 /// Корзина · Заряд; видны, когда нужны, появляются и исчезают плавно. Корзина — п. 3.
 public sealed partial class Dock
 {
@@ -30,12 +33,16 @@ public sealed partial class Dock
     }
 
     readonly List<Slot> _slots = [];
-    Slot _mediaSlot = null!, _binSlot = null!, _traySlot = null!, _netSlot = null!, _soundSlot = null!, _batSlot = null!, _langSlot = null!, _bellSlot = null!, _clockSlot = null!;
+    Slot _mediaSlot = null!, _shotsSlot = null!, _binSlot = null!, _traySlot = null!, _netSlot = null!, _soundSlot = null!, _batSlot = null!, _langSlot = null!, _bellSlot = null!, _clockSlot = null!;
     FontIcon _binIcon = null!, _soundIcon = null!, _netIcon = null!, _batIcon = null!, _bellIcon = null!;
     Border _trayDot = null!, _bellDot = null!;
     TextBlock _lang = null!, _time = null!, _date = null!;
     Image _mediaCover = null!;
     FontIcon _mediaNote = null!;
+    FontIcon _shotsIcon = null!;
+    StackPanel _shotsRec = null!;
+    TextBlock _shotsTime = null!;
+    Border _shotsDot = null!;
 
     void CreateTail()
     {
@@ -78,6 +85,18 @@ public sealed partial class Dock
         });
         _mediaSlot.Temp = true;
         _mediaSlot.Grow = 0;
+        // «Снимки» (design-v2 п. 4): камера; во время записи — красная точка с таймером.
+        _shotsIcon = Glyph("\uE722", 16);
+        _shotsDot = new Border { Width = 8, Height = 8, CornerRadius = new CornerRadius(4), Background = Theme.Brush(Windows.UI.Color.FromArgb(255, 0xFF, 0x5B, 0x5B)), VerticalAlignment = VerticalAlignment.Center };
+        _shotsTime = new TextBlock { FontFamily = Theme.Font, FontSize = 12, Foreground = Theme.Brush(Theme.Text), VerticalAlignment = VerticalAlignment.Center };
+        _shotsRec = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 6, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed, Children = { _shotsDot, _shotsTime },
+        };
+        _shotsSlot = Add("shots", 36, _shotsIcon, _shotsRec);
+        _shotsSlot.Temp = true;
+        _shotsSlot.Grow = 0;
         _binIcon = Glyph("\uE74D", 17);
         _binSlot = Add("bin", 36, _binIcon);
         _binSlot.Temp = true;
@@ -111,6 +130,8 @@ public sealed partial class Dock
         _s.Tray.Changed += OnTailChanged;
         _s.Media.Changed += OnTailChanged;
         _s.Bin.Changed += OnTailChanged;
+        _s.Shots.Changed += OnTailChanged;
+        _s.Shots.Tick += OnShotsTick;
     }
 
     void UnsubscribeTail()
@@ -123,6 +144,23 @@ public sealed partial class Dock
         _s.Tray.Changed -= OnTailChanged;
         _s.Media.Changed -= OnTailChanged;
         _s.Bin.Changed -= OnTailChanged;
+        _s.Shots.Changed -= OnTailChanged;
+        _s.Shots.Tick -= OnShotsTick;
+    }
+
+    void OnShotsTick()
+    {
+        _shotsTime.Text = ShotsService.Length(_s.Shots.RecordingTime);
+        _shotsDot.Opacity = _s.Shots.RecordingPaused ? 0.35 : 1;
+        if (Equals(_tooltipFor, _shotsSlot)) { _tooltipText.Text = SlotTooltip(_shotsSlot); PlaceTooltip(); }
+    }
+
+    /// Где значок «Снимки», когда док виден: миниатюра снимка всплывает над ним, даже если док
+    /// спрятан. null — значка в этом доке нет.
+    public Rect? ShotsAnchorPx()
+    {
+        if (!_fullTail || !_shotsSlot.Shown) return null;
+        return new Rect(_stripX + _shotsSlot.X * _scale, _stripY + Headroom * _scale, _shotsSlot.W * _scale, PillH * _scale);
     }
 
     void OnTailChanged()
@@ -146,6 +184,19 @@ public sealed partial class Dock
         }
         var media = _s.Media.Current;
         Show(_mediaSlot, full && _s.Config.TempWidgetVisible("media", media != null));
+        var shots = _s.Shots;
+        var recording = shots.Recording;
+        Show(_shotsSlot, full && shots.Enabled && (shots.Settings.Icon || recording));
+        var shotsW = recording ? 74 : 36;
+        if (_shotsSlot.W != shotsW)
+        {
+            _shotsSlot.W = shotsW;
+            _shotsSlot.Visual.Width = shotsW;
+            changed = true;
+        }
+        _shotsIcon.Visibility = recording ? Visibility.Collapsed : Visibility.Visible;
+        _shotsRec.Visibility = recording ? Visibility.Visible : Visibility.Collapsed;
+        if (recording) OnShotsTick();
         // Корзина: пока не пустая и пока из Проводника тащат файлы (чтобы было куда бросить).
         Show(_binSlot, full && _s.Config.TempWidgetVisible("bin", !_s.Bin.Empty || _binDrag));
         Show(_traySlot, full && t.Tray && _s.Tray.Running);
@@ -203,6 +254,10 @@ public sealed partial class Dock
                 return m.Playing ? title : $"{title}\nПауза";
             }
             case "bin": return _s.Bin.Empty ? "Корзина пуста" : $"Корзина: {_s.Bin.Summary}";
+            case "shots":
+                if (_s.Shots.Recording)
+                    return $"{(_s.Shots.RecordingPaused ? "Запись на паузе" : "Идёт запись")} · {ShotsService.Length(_s.Shots.RecordingTime)}\nКлик — остановить";
+                return "Снимки\nPrtSc — снимок, Shift+PrtSc — запись";
             case "network":
             {
                 var n = _s.Network.State;
@@ -235,6 +290,10 @@ public sealed partial class Dock
                 break;
             case "bin":
                 Popups.Toggle(key, () => _s.BinFlyout.Show(key, AnchorPx(t), this));
+                break;
+            case "shots":
+                if (_s.Shots.Recording) { Popups.CloseAll(); _s.Shots.StopRecording(); return; }
+                Popups.Toggle(key, () => _s.ShotsFlyout.Show(key, AnchorPx(t), this));
                 break;
             case "tray":
                 _s.Tray.Anchor = AnchorRect(t);
@@ -291,6 +350,17 @@ public sealed partial class Dock
                 MenuItem.Sep,
                 new() { Text = "Настройки виджета", Glyph = "\uE713", Invoke = () => _s.OpenSettings("widgets") },
             ],
+            "shots" =>
+            [
+                new() { Text = "Снимок", Glyph = "\uE722", Invoke = () => After(_s.Shots.Snap) },
+                _s.Shots.Recording
+                    ? new() { Text = "Остановить запись", Glyph = "\uE71A", Invoke = _s.Shots.StopRecording }
+                    : new() { Text = "Запись экрана", Glyph = "\uE7C8", Invoke = () => After(_s.Shots.Record) },
+                new() { Text = "Открыть папку", Glyph = "\uE838", Invoke = ShotsService.OpenFolder },
+                MenuItem.Sep,
+                new() { Text = "Убрать значок", Glyph = "\uE711", Invoke = () => _s.Config.Update(_ => _s.Shots.Settings.Icon = false) },
+                new() { Text = "Настройки виджета", Glyph = "\uE713", Invoke = () => _s.OpenSettings("widgets") },
+            ],
             "sound" => SoundMenu(),
             "network" =>
             [
@@ -308,6 +378,13 @@ public sealed partial class Dock
         if (items is null) return;
         Popups.Toggle(key, () => _s.Menu.Show(key, AnchorPx(t), items, owner: this));
     }
+
+    /// Снимок или запись из меню: меню успевает исчезнуть и не попадает в кадр.
+    void After(Action action) => DispatcherQueue.GetForCurrentThread().TryEnqueue(async () =>
+    {
+        await Task.Delay(200);
+        action();
+    });
 
     /// Правый клик по «Сейчас играет»: управление и настройки виджета (п. 2).
     List<MenuItem> MediaMenu()

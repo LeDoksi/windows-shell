@@ -83,6 +83,9 @@ public sealed class ShellHost
         ApplyKeys();
         RegisterHotkeys();
         _s.Keys.Start += () => ToggleStart(null);
+        _s.Keys.Snapshot += record => { if (record) _s.Shots.Record(); else _s.Shots.Snap(); };
+        // Миниатюра снимка — над значком «Снимки» в доке монитора хвоста.
+        _s.Shots.Anchor = () => _docks.Values.FirstOrDefault(d => d.FullTail)?.ShotsAnchorPx();
         _s.Keys.Combo += OnWinCombo;
         _s.Keys.Captured += (vk, shift) => { foreach (var d in _docks.Values) if (d.KeyboardActive) d.KeyboardKey(vk, shift); };
         _s.Keys.CaptureBroken += () => { foreach (var d in _docks.Values) d.EndKeyboard(); };
@@ -164,6 +167,8 @@ public sealed class ShellHost
         _s.Keys.WinX = k.WinX;
         _s.Keys.WinSearch = k.WinSearch;
         _s.Keys.DockKeys = k.DockKeys;
+        _s.Keys.PrintScreen = _s.Shots.Enabled;
+        _s.Keys.WinShiftS = _s.Shots.Enabled && _s.Shots.Settings.WinShiftS;
     }
 
     void ApplyWidgets()
@@ -246,6 +251,7 @@ public sealed class ShellHost
         switch (vk)
         {
             case 'X': ToggleTools(null); break;
+            case 'S' when shift: _s.Shots.Snap(); break;
             case 'S' or 'Q': ToggleStart(null, search: true); break;
             case 'T' or 'B':
                 Popups.CloseAll();
