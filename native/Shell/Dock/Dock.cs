@@ -108,6 +108,10 @@ public sealed partial class Dock : IBar, IDropZone
         public bool Removing;
         public long LaunchUntil;
         public string? IconSource;
+        /// Своей иконки нет (заглушка, запасная или значок): спросим снова при запуске программы
+        /// и не чаще раза в 20 с (WSH-102).
+        public bool IconWeak;
+        public long IconAt;
         // Положение этого кадра (DIP, в координатах полосы).
         public double X, Top;
     }
@@ -545,8 +549,10 @@ public sealed partial class Dock : IBar, IDropZone
                 if (initial) item.Base = item.Size = Icon;
                 if (!e.Pinned) Log.Write($"док: запущена {e.Title} ({e.Id}, окон {e.Windows.Count})");
             }
+            var started = e.Running && item.Entry is { Running: false };
             item.Entry = e;
             if (e.Running) item.LaunchUntil = 0;
+            if (item.IconWeak && (started || Environment.TickCount64 - item.IconAt > 20_000)) item.IconSource = null;
             SetIcon(item, IconSource(e), e.Windows.FirstOrDefault()?.Exe ?? Launcher.Resolve(e.Target).Exe);
             next.Add(item);
         }
@@ -649,36 +655,41 @@ public sealed partial class Dock : IBar, IDropZone
         return new Item { Key = "start", IsStart = true, Visual = visual, Image = null, Dot = dot, Base = Icon, Size = Icon };
     }
 
-    /// Иконка по AUMID или пути; если Проводник её не знает (свой AUMID у Electron-программ),
-    /// берём иконку exe.
+    /// Иконка по AUMID или пути; если Проводник её не знает (свой AUMID у Electron-программ) или
+    /// отдал заглушку, берём иконку exe, потом иконку окна. Пока своей нет, старая картинка
+    /// остаётся на месте (лучше прежняя иконка, чем мигание значком).
     void SetIcon(Item item, string source, string? fallback)
     {
         if (item.IconSource == source || item.Image is null) return;
         item.IconSource = source;
+        item.IconAt = Environment.TickCount64;
         var img = item.Image;
-        void Apply(ImageSource? bmp)
+        void Apply(ImageSource? bmp, bool weak)
         {
+            if (item.IconSource != source) return;
+            item.IconWeak = weak;
+            if (bmp is null && img.Source != null) return;
             img.Source = bmp;
             if (item.Placeholder != null) item.Placeholder.Visibility = bmp is null ? Visibility.Visible : Visibility.Collapsed;
         }
         fallback ??= item.Entry?.Windows.FirstOrDefault()?.Exe ?? (item.Entry is { } en ? Launcher.Resolve(en.Target).Exe : null);
+        var chain = new List<string> { source };
+        if (fallback != null && !string.Equals(fallback, source, StringComparison.OrdinalIgnoreCase)) chain.Add(fallback);
+        if (item.Entry?.Windows.FirstOrDefault() is { } w) chain.Add(Icons.WindowSource(w.Hwnd));
         // Иконка в размере увеличенной (1,6×): так она чёткая и в покое, и под курсором.
         var px = (int)Math.Ceiling(ElementSize * _scale);
-        _s.Icons.Get(source, px, bmp =>
+        void Next(int i)
         {
-            if (item.IconSource != source) return;
-            if (bmp != null || fallback is null || string.Equals(fallback, source, StringComparison.OrdinalIgnoreCase))
+            _s.Icons.Get(chain[i], px, bmp =>
             {
-                if (bmp is null) Log.Write($"док: нет картинки для {source}");
-                Apply(bmp);
-                return;
-            }
-            _s.Icons.Get(fallback, px, alt =>
-            {
-                if (alt is null) Log.Write($"док: нет картинки ни для {source}, ни для {fallback}");
-                if (item.IconSource == source) Apply(alt);
+                if (item.IconSource != source) return;
+                if (bmp != null) { Apply(bmp, weak: i > 0); return; }
+                if (i + 1 < chain.Count) { Next(i + 1); return; }
+                Log.Write($"док: нет картинки для {string.Join(", ", chain)}");
+                Apply(null, weak: true);
             });
-        });
+        }
+        Next(0);
     }
 
     bool IsActive(DockEntry e) => e.Windows.Any(w => w.Hwnd == _s.Tracker.Foreground);
