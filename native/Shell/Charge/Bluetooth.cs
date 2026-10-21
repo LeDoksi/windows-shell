@@ -10,7 +10,7 @@ public enum DeviceKind { Other, Keyboard, Mouse, Headphones, Gamepad }
 /// под именем (у AirPods: левый, правый, футляр).
 public sealed record ChargeDevice(string Key, string Name, DeviceKind Kind, int? Percent, bool Charging, bool Connected, string Source, string? Detail = null)
 {
-    /// «Клавиатура RK-S98» для уведомления; если тип уже в имени («Xbox Controller») — просто имя.
+    /// «Клавиатура RK-S98» для уведомления; если тип уже в имени — просто имя.
     public string Title
     {
         get
@@ -23,7 +23,9 @@ public sealed record ChargeDevice(string Key, string Name, DeviceKind Kind, int?
                 DeviceKind.Gamepad => "Геймпад",
                 _ => "",
             };
-            if (kind.Length == 0 || Kind == DeviceKind.Gamepad && Name.Contains("controller", StringComparison.OrdinalIgnoreCase)) return Name;
+            // Тип уже есть в имени («Xbox Wireless Controller», «G733 Gaming Headset») — не повторяем.
+            string[] named = ["controller", "gamepad", "keyboard", "mouse", "headset", "headphones", "earbuds", kind];
+            if (kind.Length == 0 || named.Any(w => Name.Contains(w, StringComparison.OrdinalIgnoreCase))) return Name;
             return $"{kind} {Name}";
         }
     }
