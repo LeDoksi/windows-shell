@@ -86,6 +86,8 @@ public sealed class ShellHost
         _s.Keys.Snapshot += record => { if (record) _s.Shots.Record(); else _s.Shots.Snap(); };
         // Миниатюра снимка — над значком «Снимки» в доке монитора хвоста.
         _s.Shots.Anchor = () => _docks.Values.FirstOrDefault(d => d.FullTail)?.ShotsAnchorPx();
+        // Предупреждения о заряде в игре: сигнал и плашка на мониторе с полноэкранной игрой.
+        _s.Charge.GameScreen = () => _s.Monitors.All.FirstOrDefault(_s.Bars.IsFullscreen);
         _s.Keys.Combo += OnWinCombo;
         _s.Keys.Captured += (vk, shift) => { foreach (var d in _docks.Values) if (d.KeyboardActive) d.KeyboardKey(vk, shift); };
         _s.Keys.CaptureBroken += () => { foreach (var d in _docks.Values) d.EndKeyboard(); };
@@ -177,6 +179,7 @@ public sealed class ShellHost
         if (_s.Config.WidgetEnabled("media")) _s.Media.Start();
         else _s.Media.Stop();
         _s.Clips.Apply();
+        _s.Charge.Apply();
     }
 
     /// Горячие клавиши профилей звука и «следующее устройство».

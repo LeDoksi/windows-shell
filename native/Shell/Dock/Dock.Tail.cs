@@ -14,7 +14,7 @@ namespace WindowsShell.Dock;
 /// Системный хвост дока (раздел 2, WSH-E9): [временные значки] · ⌃ трей · сеть · звук · батарея ·
 /// язык · уведомления · часы. Полный хвост — на мониторе хвоста, на остальных только часы (раздел 9).
 /// Временные значки (design-v2 п. 2) стоят в постоянном порядке: Сейчас играет · Снимки ·
-/// Корзина · Заряд; видны, когда нужны, появляются и исчезают плавно. Корзина — п. 3.
+/// Корзина · Заряд; видны, когда нужны, появляются и исчезают плавно. Корзина — п. 3, заряд — п. 7.
 public sealed partial class Dock
 {
     /// Значок хвоста: место в доке, вид и показан ли он сейчас.
@@ -33,9 +33,9 @@ public sealed partial class Dock
     }
 
     readonly List<Slot> _slots = [];
-    Slot _mediaSlot = null!, _shotsSlot = null!, _binSlot = null!, _traySlot = null!, _netSlot = null!, _soundSlot = null!, _batSlot = null!, _langSlot = null!, _bellSlot = null!, _clockSlot = null!;
-    FontIcon _binIcon = null!, _soundIcon = null!, _netIcon = null!, _batIcon = null!, _bellIcon = null!;
-    Border _trayDot = null!, _bellDot = null!;
+    Slot _mediaSlot = null!, _shotsSlot = null!, _binSlot = null!, _chargeSlot = null!, _traySlot = null!, _netSlot = null!, _soundSlot = null!, _batSlot = null!, _langSlot = null!, _bellSlot = null!, _clockSlot = null!;
+    FontIcon _binIcon = null!, _chargeIcon = null!, _soundIcon = null!, _netIcon = null!, _batIcon = null!, _bellIcon = null!;
+    Border _trayDot = null!, _bellDot = null!, _chargeDot = null!;
     TextBlock _lang = null!, _time = null!, _date = null!;
     Image _mediaCover = null!;
     FontIcon _mediaNote = null!;
@@ -101,6 +101,12 @@ public sealed partial class Dock
         _binSlot = Add("bin", 36, _binIcon);
         _binSlot.Temp = true;
         _binSlot.Grow = 0;
+        // «Заряд» (п. 7): уровень самого севшего устройства, оранжевая точка — пора зарядить.
+        _chargeIcon = Glyph("\uE850", 18);
+        _chargeDot = Dot();
+        _chargeSlot = Add("charge", 36, _chargeIcon, _chargeDot);
+        _chargeSlot.Temp = true;
+        _chargeSlot.Grow = 0;
 
         _trayDot = Dot();
         _traySlot = Add("tray", 30, Glyph("", 12), _trayDot);
@@ -132,6 +138,7 @@ public sealed partial class Dock
         _s.Bin.Changed += OnTailChanged;
         _s.Shots.Changed += OnTailChanged;
         _s.Shots.Tick += OnShotsTick;
+        _s.Charge.Changed += OnTailChanged;
     }
 
     void UnsubscribeTail()
@@ -146,6 +153,7 @@ public sealed partial class Dock
         _s.Bin.Changed -= OnTailChanged;
         _s.Shots.Changed -= OnTailChanged;
         _s.Shots.Tick -= OnShotsTick;
+        _s.Charge.Changed -= OnTailChanged;
     }
 
     void OnShotsTick()
@@ -199,6 +207,14 @@ public sealed partial class Dock
         if (recording) OnShotsTick();
         // Корзина: пока не пустая и пока из Проводника тащат файлы (чтобы было куда бросить).
         Show(_binSlot, full && _s.Config.TempWidgetVisible("bin", !_s.Bin.Empty || _binDrag));
+        // Заряд: пока у какого-то устройства не выше порога.
+        var low = _s.Charge.Low;
+        Show(_chargeSlot, full && _s.Config.TempWidgetVisible("charge", low.Count > 0));
+        var weakest = low.FirstOrDefault() ?? _s.Charge.Watched.FirstOrDefault(d => d.Percent != null);
+        _chargeIcon.Glyph = weakest?.Percent is { } wp ? Charge.ChargeDevice.LevelGlyph(wp, weakest.Charging) : "\uE83F";
+        _chargeIcon.Foreground = Theme.Brush(low.Count > 0 ? Theme.Warning : Theme.Text);
+        _chargeDot.Visibility = low.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (Equals(_tooltipFor, _chargeSlot)) { _tooltipText.Text = SlotTooltip(_chargeSlot); PlaceTooltip(); }
         Show(_traySlot, full && t.Tray && _s.Tray.Running);
         Show(_netSlot, full && t.Network);
         Show(_soundSlot, full && _s.Config.WidgetEnabled("audio"));
@@ -258,6 +274,12 @@ public sealed partial class Dock
                 if (_s.Shots.Recording)
                     return $"{(_s.Shots.RecordingPaused ? "Запись на паузе" : "Идёт запись")} · {ShotsService.Length(_s.Shots.RecordingTime)}\nКлик — остановить";
                 return "Снимки\nPrtSc — снимок, Shift+PrtSc — запись";
+            case "charge":
+            {
+                var list = _s.Charge.Watched.Where(d => d.Connected && d.Percent != null).ToList();
+                if (list.Count == 0) return "Заряд устройств";
+                return "Заряд устройств\n" + string.Join("\n", list.Select(d => $"{d.Name}: {d.Percent} %{(d.Charging ? ", заряжается" : "")}"));
+            }
             case "network":
             {
                 var n = _s.Network.State;
@@ -294,6 +316,9 @@ public sealed partial class Dock
             case "shots":
                 if (_s.Shots.Recording) { Popups.CloseAll(); _s.Shots.StopRecording(); return; }
                 Popups.Toggle(key, () => _s.ShotsFlyout.Show(key, AnchorPx(t), this));
+                break;
+            case "charge":
+                Popups.Toggle(key, () => _s.ChargeFlyout.Show(key, AnchorPx(t), this));
                 break;
             case "tray":
                 _s.Tray.Anchor = AnchorRect(t);
@@ -359,6 +384,12 @@ public sealed partial class Dock
                 new() { Text = "Открыть папку", Glyph = "\uE838", Invoke = ShotsService.OpenFolder },
                 MenuItem.Sep,
                 new() { Text = "Убрать значок", Glyph = "\uE711", Invoke = () => _s.Config.Update(_ => _s.Shots.Settings.Icon = false) },
+                new() { Text = "Настройки виджета", Glyph = "\uE713", Invoke = () => _s.OpenSettings("widgets") },
+            ],
+            "charge" =>
+            [
+                new() { Text = "Bluetooth и устройства", Glyph = "\uE702", Invoke = () => Launcher.Open("ms-settings:bluetooth") },
+                MenuItem.Sep,
                 new() { Text = "Настройки виджета", Glyph = "\uE713", Invoke = () => _s.OpenSettings("widgets") },
             ],
             "sound" => SoundMenu(),
