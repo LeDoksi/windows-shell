@@ -8,7 +8,7 @@ using WindowsShell.Native;
 namespace WindowsShell.Charge;
 
 /// Виджет «Заряд устройств» (design-v2 п. 7): сам находит устройства с батареей (Bluetooth из
-/// Windows, Logitech из G HUB), показывает значок в хвосте, когда что-то садится, и предупреждает:
+/// Windows, Logitech напрямую по HID++ — G HUB не нужен), показывает значок в хвосте, когда что-то садится, и предупреждает:
 /// уведомление Windows при пороге (20 %) и при 10 %, повтор — только после зарядки выше 30 %.
 /// В полноэкранной игре Windows уведомления прячет, поэтому там ещё мягкий сигнал в наушники
 /// и своя плашка в углу на 5 секунд.
@@ -19,12 +19,11 @@ public sealed class ChargeService
 
     readonly DispatcherQueue _queue;
     readonly ShellConfig _config;
-    readonly GHub _ghub = new();
     readonly DispatcherQueueTimer _poll, _soon;
     readonly string _stateFile = Path.Combine(ShellConfig.Dir, "charge-alerts.json");
     /// Сколько предупреждений уже было по устройству: 1 — при пороге, 2 — при 10 %.
     Dictionary<string, int> _alerted = [];
-    List<ChargeDevice> _bluetooth = [];
+    List<ChargeDevice> _found = [];
     bool _reading, _started;
     ChargeBanner? _banner;
     MediaPlayer? _player;
@@ -52,7 +51,6 @@ public sealed class ChargeService
         _soon.Tick += (_, _) => Refresh();
         messages.Message += (msg, _, _) => { if (msg == 0x0219 && Enabled) _soon.Start(); };
         messages.Resumed += () => { if (Enabled) _soon.Start(); };
-        _ghub.Changed += () => _queue.TryEnqueue(Merge);
     }
 
     public ChargeSettings Settings => new(_config.Widget("charge"));
@@ -84,7 +82,6 @@ public sealed class ChargeService
         _started = Enabled;
         if (_started)
         {
-            _ghub.Start();
             _poll.Start();
             Refresh();
         }
@@ -96,20 +93,22 @@ public sealed class ChargeService
         }
     }
 
-    /// Перечитать Bluetooth в фоне (окошко открыли — тоже зовём, чтобы цифры были свежие).
+    /// Перечитать устройства в фоне (окошко открыли — тоже зовём, чтобы цифры были свежие).
     public void Refresh()
     {
         if (!_started || _reading) return;
         _reading = true;
         Task.Run(async () =>
         {
-            List<ChargeDevice> list;
-            try { list = await Bluetooth.Read(); }
-            catch (Exception e) { Log.Error("заряд: Bluetooth", e); list = _bluetooth; }
+            var list = new List<ChargeDevice>();
+            try { list.AddRange(await Bluetooth.Read()); }
+            catch (Exception e) { Log.Error("заряд: Bluetooth", e); }
+            try { list.AddRange(Logitech.Read()); }
+            catch (Exception e) { Log.Error("заряд: Logitech", e); }
             _queue.TryEnqueue(() =>
             {
                 _reading = false;
-                _bluetooth = list;
+                _found = list;
                 Merge();
             });
         });
@@ -118,7 +117,7 @@ public sealed class ChargeService
     void Merge()
     {
         if (!_started) return;
-        var all = _bluetooth.Concat(_ghub.Devices)
+        var all = _found
             // Не подключено — уровень старый, не показываем.
             .Select(d => d.Connected ? d : d with { Percent = null, Charging = false })
             .GroupBy(d => d.Key).Select(g => g.First())

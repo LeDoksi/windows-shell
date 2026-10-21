@@ -55,7 +55,7 @@ public sealed class ChargeFlyout : Popup
         if (list.Count == 0)
             _body.Children.Add(new TextBlock
             {
-                Text = "Устройства с батареей появятся здесь сами: Bluetooth-клавиатуры, мыши, геймпады, наушники и гарнитуры Logitech (через G HUB).",
+                Text = "Устройства с батареей появятся здесь сами: Bluetooth-клавиатуры, мыши, геймпады, наушники и мыши и гарнитуры Logitech.",
                 FontFamily = Theme.Font, FontSize = 13, Foreground = Theme.Brush(Theme.TextSecondary),
                 TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 6, 4, 10),
             });

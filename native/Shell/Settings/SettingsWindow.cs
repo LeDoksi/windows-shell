@@ -363,7 +363,7 @@ public sealed class SettingsWindow
         var charge = _s.Charge;
         var chargeRows = new List<UIElement>
         {
-            TempWidget("charge", "Значок «Заряд»", "Сам находит Bluetooth-клавиатуры, мыши, геймпады, наушники и гарнитуры Logitech (через G HUB). «Когда нужно» — значок появляется, когда что-то садится. «Никогда» — ни значка, ни уведомлений.", rebuild: true),
+            TempWidget("charge", "Значок «Заряд»", "Сам находит Bluetooth-клавиатуры, мыши, геймпады, наушники, гарнитуры и мыши Logitech (без G HUB). «Когда нужно» — значок появляется, когда что-то садится. «Никогда» — ни значка, ни уведомлений.", rebuild: true),
         };
         if (charge.Enabled)
         {

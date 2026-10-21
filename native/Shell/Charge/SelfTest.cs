@@ -3,8 +3,8 @@ using System.Text;
 namespace WindowsShell.Charge;
 
 /// Проверка заряда без интерфейса (для проверки через удалённый доступ):
-/// `WindowsShellNative.exe --charge-test`. Что нашлось в Windows (Bluetooth) и в G HUB,
-/// сырые ответы G HUB, итоговый список и оба сигнала. Итог — в `charge-test.txt` рядом с exe.
+/// `WindowsShellNative.exe --charge-test`. Что нашлось в Windows (Bluetooth) и у устройств
+/// Logitech (HID++), с подробностями, и оба сигнала. Итог — в `charge-test.txt` рядом с exe.
 public static class SelfTest
 {
     public const string Arg = "--charge-test";
@@ -41,11 +41,11 @@ public static class SelfTest
         say($"   прочитано за {sw.ElapsedMilliseconds} мс");
         foreach (var d in bt) say($"   → {Line(d)}");
 
-        say("== G HUB");
-        var ghub = new GHub(say);
-        try { await ghub.Session(TimeSpan.FromSeconds(6)); }
-        catch (Exception e) { say($"   не отвечает: {e.Message}"); }
-        foreach (var d in ghub.Devices) say($"   → {Line(d)}");
+        say("== Logitech (HID++)");
+        sw.Restart();
+        var logi = Logitech.Read(say);
+        say($"   прочитано за {sw.ElapsedMilliseconds} мс");
+        foreach (var d in logi) say($"   → {Line(d)}");
 
         say("== Сигналы");
         foreach (var name in new[] { "charge-20.mp3", "charge-10.mp3" })
