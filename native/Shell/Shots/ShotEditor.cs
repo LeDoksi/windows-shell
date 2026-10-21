@@ -179,7 +179,11 @@ public sealed class ShotEditor
         Refresh();
         SelectTool(_tool);
         UpdateSwatches();
-        _host.Loaded += (_, _) => _host.Focus(FocusState.Programmatic);
+        _host.Loaded += (_, _) =>
+        {
+            _host.Focus(FocusState.Programmatic);
+            FitToolbar();
+        };
         _window.Activate();
         ShellWindow.ForceForeground(_hwnd);
         _host.Focus(FocusState.Programmatic);
@@ -193,23 +197,51 @@ public sealed class ShotEditor
         var mon = MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST);
         var work = MonitorInfo(mon).rcWork;
         var scale = MonitorScale(mon);
-        var chrome = (int)((32 + 56 + 32 + 32) * scale);
-        var w = Math.Clamp(_source.Width + (int)(32 * scale) + 16, (int)(820 * scale), (int)(work.Width * 0.9));
+        var chrome = (int)((32 + 100 + 32 + 32) * scale);
+        var w = Math.Clamp(_source.Width + (int)(32 * scale) + 16, (int)(940 * scale), (int)(work.Width * 0.9));
         var h = Math.Clamp(_source.Height + chrome, (int)(480 * scale), (int)(work.Height * 0.9));
         _window.AppWindow.MoveAndResize(new RectInt32(work.Left + (work.Width - w) / 2, work.Top + (work.Height - h) / 2, w, h));
         return scale;
     }
 
+    /// Панель шире окна (крупный шрифт, другой масштаб) — расширить окно, чтобы видно было все кнопки.
+    void FitToolbar()
+    {
+        if (_bar is null) return;
+        _bar.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        var need = (int)Math.Ceiling(_bar.DesiredSize.Width * _scale);
+        var client = _window.AppWindow.ClientSize.Width;
+        if (need <= client) return;
+        var mon = MonitorFromWindow(_hwnd, MONITOR_DEFAULTTONEAREST);
+        var work = MonitorInfo(mon).rcWork;
+        var size = _window.AppWindow.Size;
+        var w = Math.Min(size.Width + need - client, work.Width);
+        var pos = _window.AppWindow.Position;
+        var x = Math.Clamp(pos.X - (w - size.Width) / 2, work.Left, work.Right - w);
+        _window.AppWindow.MoveAndResize(new RectInt32(x, pos.Y, w, size.Height));
+    }
+
     // ---------- панель инструментов ----------
+
+    Grid? _bar;
 
     UIElement Toolbar()
     {
-        var bar = new Grid { Padding = new Thickness(10, 8, 10, 8), ColumnSpacing = 4, Background = Theme.Brush(Theme.Card) };
+        // Два ряда: сверху инструменты, снизу цвет, толщина и действия. В один ряд всё не влезало
+        // в окно обычной ширины, и правые кнопки обрезались.
+        var bar = new Grid { Padding = new Thickness(10, 8, 10, 8), ColumnSpacing = 4, RowSpacing = 6, Background = Theme.Brush(Theme.Card) };
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        bar.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        bar.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _bar = bar;
 
-        var left = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
+        var tools = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
+        Grid.SetColumnSpan(tools, 3);
+        bar.Children.Add(tools);
+        var left = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(2, 0, 0, 0) };
+        Grid.SetRow(left, 1);
         foreach (var (tool, glyph, name, key) in Tools)
         {
             var t = tool;
@@ -225,9 +257,8 @@ public sealed class ShotEditor
             var b = ToolbarButton(content, () => SelectTool(t));
             ToolTipService.SetToolTip(b, $"{name} ({key})");
             _toolButtons[tool] = b;
-            left.Children.Add(b);
+            tools.Children.Add(b);
         }
-        left.Children.Add(Divider());
         for (var i = 0; i < Colors.Length; i++)
         {
             var index = i;
@@ -297,6 +328,7 @@ public sealed class ShotEditor
         done.Foreground = Theme.Brush(Color.FromArgb(255, 0x06, 0x23, 0x3A));
         right.Children.Add(done);
         Grid.SetColumn(right, 2);
+        Grid.SetRow(right, 1);
         bar.Children.Add(right);
         return bar;
     }
