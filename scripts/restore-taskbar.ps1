@@ -46,3 +46,15 @@ foreach ($class in "Shell_TrayWnd", "Shell_SecondaryTrayWnd") {
   }
 }
 "taskbar shown"
+
+# Desktop Recycle Bin icon hidden by the shell (desktop-bin.txt holds the value it had before).
+$binFile = Join-Path $env:LOCALAPPDATA "WindowsShell\desktop-bin.txt"
+if (Test-Path $binFile) {
+  $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel"
+  $name = "{645FF040-5081-101B-9F08-00AA002F954E}"
+  $before = ((Get-Content $binFile -Raw) -split '[=\r\n]')[1]
+  if ($before -match '^\d+$') { Set-ItemProperty $key $name ([int]$before) -Type DWord }
+  else { Remove-ItemProperty $key $name -ErrorAction SilentlyContinue }
+  Remove-Item $binFile
+  "desktop recycle bin restored (press F5 on the desktop if it is not back yet)"
+}

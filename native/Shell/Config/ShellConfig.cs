@@ -442,6 +442,11 @@ public sealed class ShellConfig
         _ => needed,
     };
 
+    /// Прятать значок корзины на рабочем столе, пока работает оболочка (по умолчанию да).
+    public bool HideDesktopBin => Data.Widgets.FirstOrDefault(x => x.Id == "bin")?.Settings["hideDesktop"]?.GetValue<bool>() ?? true;
+
+    public void SetHideDesktopBin(bool on) => Widget("bin").Settings["hideDesktop"] = on;
+
     static readonly HashSet<string> Programs = ["exe", "lnk", "url", "appref-ms", "bat", "cmd"];
 
     public static bool IsProgram(string path)

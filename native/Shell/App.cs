@@ -111,6 +111,7 @@ public sealed class App : Application, IXamlMetadataProvider
                 Battery = new Tail.BatteryService(queue, messages),
                 Language = new Tail.InputLanguage(queue),
                 Notifications = new Tail.Notifications(queue),
+                Bin = new Tail.RecycleBin(queue, messages),
             };
             Ui.Popup.RestoreForeground = tracker.RestoreForeground;
             tracker.Start();

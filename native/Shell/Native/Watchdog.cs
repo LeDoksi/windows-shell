@@ -152,7 +152,7 @@ public static class Watchdog
             try { p.Kill(); p.WaitForExit(5000); } catch { }
         }
         // Ничего не осталось — панель задач не может остаться спрятанной.
-        if (Others().Count == 0) Taskbar.Restore("--stop");
+        if (Others().Count == 0) { Taskbar.Restore("--stop"); DesktopBin.Restore("--stop"); }
     }
 
     static List<Process> Others() =>
@@ -397,6 +397,7 @@ public static class Watchdog
         {
             // «Выход» оболочка сама вернула панель; убитая по таймауту — возвращаем мы.
             Taskbar.Restore(_stopping ? "остановка" : "выход");
+            DesktopBin.Restore(_stopping ? "остановка" : "выход");
             Log.Write(_stopping ? "оболочка остановлена" : "оболочка закрыта через «Выход»");
             PostQuitMessage(0);
             return;
@@ -433,6 +434,7 @@ public static class Watchdog
         Log.Write($"{Crashes.Count} сбоя за 5 минут ({what}): больше не поднимаю, панель задач Windows возвращена");
         Crashes.Clear();
         Taskbar.Restore("оболочка не запускается");
+        DesktopBin.Restore("оболочка не запускается");
         Toasts.Show("Оболочка не запускается", "Она упала 3 раза за 5 минут, панель задач Windows вернулась. Запустить снова: кнопка ниже, ярлык «Windows Shell» или Ctrl+Alt+Shift+R.",
             silent: false, button: "Запустить ещё раз");
     }

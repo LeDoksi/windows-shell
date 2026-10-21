@@ -19,7 +19,7 @@ public sealed class ShellHost
     TrayIcon? _tray;
     PathWatch? _pathWatch;
     string _hotkeysKey = "";
-    bool _restarting;
+    bool _restarting, _leavingForRestart;
     /// Панель задач вернули вручную (меню трея, Ctrl+Alt+Shift+T): не прячем до перезапуска.
     bool _taskbarReturned;
     readonly HashSet<IntPtr> _announced = [];
@@ -46,6 +46,7 @@ public sealed class ShellHost
         // Свой трей и скрытие панели задач (WSH-E9) — до доков: док сразу встаёт к нижнему краю.
         _s.Tray.Start();
         ApplyTaskbar();
+        ApplyDesktopBin();
         _s.Tray.Balloon += () => { _s.TrayAttention = true; _s.Notifications.NoteBalloon(); foreach (var d in _docks.Values) d.UpdateTail(); };
         _s.Messages.TaskbarCreated += Taskbar.OnTaskbarCreated;
         _s.Tracker.Changed += AnnounceButtons;
@@ -124,6 +125,13 @@ public sealed class ShellHost
         else if (Taskbar.Hidden || Taskbar.Leftover) Taskbar.Restore("выключено в настройках");
     }
 
+    /// Значок корзины на рабочем столе прячется, пока работает оболочка (настройки → «Виджеты»).
+    void ApplyDesktopBin()
+    {
+        if (_s.Config.HideDesktopBin) DesktopBin.Hide();
+        else DesktopBin.Restore("выключено в настройках");
+    }
+
     /// Новым окнам говорим «у тебя есть кнопка на панели задач»: тогда программы шлют нам
     /// полоску загрузки и значки поверх иконки (как Проводнику).
     void AnnounceButtons()
@@ -139,6 +147,7 @@ public sealed class ShellHost
     {
         Glass.Set(_s.Config.Tint);
         ApplyTaskbar();
+        ApplyDesktopBin();
         ApplyKeys();
         // Сменили монитор хвоста — хвост переезжает; закрепили док — резерв места.
         Sync();
@@ -332,6 +341,7 @@ public sealed class ShellHost
         _s.Tray.Stop();
         // При перезапуске панель остаётся спрятанной: новый процесс сразу забирает её себе.
         if (!_restarting) Taskbar.Restore(_s.Config.Tail.HideTaskbar ? "выход" : "выход (не пряталась)");
+        if (!_leavingForRestart) DesktopBin.Restore("выход");
     }
 
     /// Выход: резерв места и значок убираются, процесс завершается (Application.Exit оставлял
@@ -349,6 +359,7 @@ public sealed class ShellHost
         // Новый процесс запускает сторож; его нет — запускаемся сами.
         var watchdog = Watchdog.Leaving(Watchdog.Leave.Restart);
         _restarting = Taskbar.Hidden;
+        _leavingForRestart = true;
         Shutdown();
         Log.Write("перезапуск");
         if (!watchdog)

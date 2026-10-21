@@ -43,6 +43,7 @@ public sealed class Services
     public required Tail.BatteryService Battery { get; init; }
     public required Tail.InputLanguage Language { get; init; }
     public required Tail.Notifications Notifications { get; init; }
+    public required Tail.RecycleBin Bin { get; init; }
 
     MenuPopup? _menu;
     SoundFlyout? _sound;
@@ -53,6 +54,7 @@ public sealed class Services
     Tail.NetworkFlyout? _netFlyout;
     Tail.BatteryFlyout? _batFlyout;
     Tail.ClockFlyout? _clockFlyout;
+    Tail.BinFlyout? _binFlyout;
 
     public MenuPopup Menu => _menu ??= new MenuPopup();
     public SoundFlyout SoundFlyout => _sound ??= new SoundFlyout(Audio, Icons, Config);
@@ -63,6 +65,7 @@ public sealed class Services
     public Tail.NetworkFlyout NetworkFlyout => _netFlyout ??= new Tail.NetworkFlyout(Network);
     public Tail.BatteryFlyout BatteryFlyout => _batFlyout ??= new Tail.BatteryFlyout(Battery);
     public Tail.ClockFlyout ClockFlyout => _clockFlyout ??= new Tail.ClockFlyout();
+    public Tail.BinFlyout BinFlyout => _binFlyout ??= new Tail.BinFlyout(Bin, Icons);
 
     /// На ⌃ точка: программа из трея что-то сообщила, а окошко трея ещё не открывали.
     public bool TrayAttention { get; set; }

@@ -31,6 +31,7 @@ public static class Taskbar
         if (args.Contains(RestoreArg))
         {
             Restore("--restore-taskbar");
+            DesktopBin.Restore("--restore-taskbar");
             return true;
         }
         return false;

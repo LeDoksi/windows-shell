@@ -84,6 +84,8 @@ public sealed partial class Dock : IBar, IDropZone
     double _gapW, _gapV;
     Item? _dropOnto;
     List<string>? _dragPaths;
+    /// Из Проводника тащат файлы: корзина в хвосте видна, даже пустая (v2 п. 3); курсор над ней.
+    bool _binDrag, _dropOnBin;
     bool _dragPrograms = true;
 
     sealed class Item
@@ -206,8 +208,9 @@ public sealed partial class Dock : IBar, IDropZone
         _strip.Root.DragOver += OnDragOver;
         _strip.Root.DragLeave += (_, _) =>
         {
-            // DragLeave приходит и при переходе между иконками: сбрасываем, только если курсор ушёл с дока.
-            if (GetCursorPos(out var c) && InHot(c)) return;
+            // DragLeave приходит и при переходе между иконками: сбрасываем, только если курсор ушёл с дока
+            // или кнопку мыши отпустили (Esc над доком).
+            if (GetCursorPos(out var c) && InHot(c) && ((GetAsyncKeyState(0x01) | GetAsyncKeyState(0x02)) & 0x8000) != 0) return;
             _dragPaths = null;
             ClearExternalDrag();
         };
@@ -1325,6 +1328,13 @@ public sealed partial class Dock : IBar, IDropZone
         _springLoad.Stop();
         _dropOnto = null;
         if (_gapIndex >= 0) SetGap(-1);
+        _dropOnBin = false;
+        if (_binDrag)
+        {
+            _binDrag = false;
+            HighlightSlot(null);
+            if (UpdateTail()) { Relayout(); Kick(); }
+        }
         // Курсор не над доком: прозрачное место над таблеткой снова пропускает клики.
         if (_drag is null && !(GetCursorPos(out var c) && InHot(c))) SetHover(false);
     }
@@ -1371,6 +1381,11 @@ public sealed partial class Dock : IBar, IDropZone
             var items = await e.DataView.GetStorageItemsAsync();
             _dragPaths = items.Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p)).ToList();
             _dragPrograms = _dragPaths.Count > 0 && _dragPaths.All(ShellConfig.IsProgram);
+            if (_dragPaths.Count > 0 && !_binDrag)
+            {
+                _binDrag = true;
+                if (UpdateTail()) { Relayout(); Kick(); }
+            }
             OnDragOver(sender, e);
         }
         catch { }
@@ -1382,6 +1397,18 @@ public sealed partial class Dock : IBar, IDropZone
         if (!e.DataView.Contains(StandardDataFormats.StorageItems)) { e.AcceptedOperation = DataPackageOperation.None; return; }
         var p = e.GetPosition(_canvas);
         if (!_hover) SetHover(true);
+        // Над корзиной: бросил — файлы в корзину, как Delete в Проводнике.
+        if (_binSlot.Shown && p.X >= _binSlot.X && p.X < _binSlot.X + _binSlot.W && _dragPaths is { Count: > 0 })
+        {
+            SetGap(-1);
+            if (_dropOnto != null) { _dropOnto = null; _springLoad.Stop(); }
+            _dropOnBin = true;
+            HighlightSlot(_binSlot);
+            e.AcceptedOperation = DataPackageOperation.Move;
+            e.DragUIOverride.Caption = "В корзину";
+            return;
+        }
+        if (_dropOnBin) { _dropOnBin = false; HighlightSlot(null); }
         // Над кнопкой Пуска: подержать — откроется Пуск с категориями.
         if (_items.FirstOrDefault(i => i.IsStart) is { } start && p.X >= start.X && p.X <= start.X + start.Size)
         {
@@ -1424,9 +1451,11 @@ public sealed partial class Dock : IBar, IDropZone
         var onto = _dropOnto;
         var pinAt = PinIndexOfGap();
         var programs = _dragPrograms;
+        var onBin = _dropOnBin;
         _dragPaths = null;
         ClearExternalDrag();
         if (paths is null || paths.Count == 0 || onto is { IsStart: true }) return;
+        if (onBin) { _s.Bin.Delete(paths); return; }
         if (programs)
         {
             foreach (var path in paths)
