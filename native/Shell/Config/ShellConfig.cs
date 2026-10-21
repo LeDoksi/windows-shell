@@ -416,6 +416,32 @@ public sealed class ShellConfig
 
     public bool WidgetEnabled(string id) => Data.Widgets.FirstOrDefault(x => x.Id == id)?.Enabled ?? true;
 
+    /// Временный значок виджета в хвосте (design-v2 п. 2): «Когда нужно» (по умолчанию),
+    /// «Всегда» или «Никогда» (= виджет выключен).
+    public const string ShowWhenNeeded = "auto", ShowAlways = "always", ShowNever = "never";
+
+    public string TempWidgetMode(string id)
+    {
+        var w = Data.Widgets.FirstOrDefault(x => x.Id == id);
+        if (w is { Enabled: false }) return ShowNever;
+        return w?.Settings["show"]?.GetValue<string>() == ShowAlways ? ShowAlways : ShowWhenNeeded;
+    }
+
+    public void SetTempWidgetMode(string id, string mode)
+    {
+        var w = Widget(id);
+        w.Enabled = mode != ShowNever;
+        w.Settings["show"] = mode == ShowAlways ? ShowAlways : ShowWhenNeeded;
+    }
+
+    /// Виден ли временный значок: `needed` — виджету сейчас есть что показать.
+    public bool TempWidgetVisible(string id, bool needed) => TempWidgetMode(id) switch
+    {
+        ShowAlways => true,
+        ShowNever => false,
+        _ => needed,
+    };
+
     static readonly HashSet<string> Programs = ["exe", "lnk", "url", "appref-ms", "bat", "cmd"];
 
     public static bool IsProgram(string path)

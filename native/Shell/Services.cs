@@ -47,7 +47,7 @@ public sealed class Services
     MenuPopup? _menu;
     SoundFlyout? _sound;
     WindowListPopup? _list;
-    Panel.MediaFlyout? _mediaFlyout;
+    Tail.MediaFlyout? _mediaFlyout;
     Start.StartMenu? _start;
     Tray.TrayFlyout? _trayFlyout;
     Tail.NetworkFlyout? _netFlyout;
@@ -57,7 +57,7 @@ public sealed class Services
     public MenuPopup Menu => _menu ??= new MenuPopup();
     public SoundFlyout SoundFlyout => _sound ??= new SoundFlyout(Audio, Icons, Config);
     public WindowListPopup WindowList => _list ??= new WindowListPopup(Tracker, Icons);
-    public Panel.MediaFlyout MediaFlyout => _mediaFlyout ??= new Panel.MediaFlyout(Media);
+    public Tail.MediaFlyout MediaFlyout => _mediaFlyout ??= new Tail.MediaFlyout(Media);
     public Start.StartMenu StartMenu => _start ??= new Start.StartMenu(this, Catalog);
     public Tray.TrayFlyout TrayFlyout => _trayFlyout ??= new Tray.TrayFlyout(Tray);
     public Tail.NetworkFlyout NetworkFlyout => _netFlyout ??= new Tail.NetworkFlyout(Network);

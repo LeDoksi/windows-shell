@@ -263,6 +263,22 @@ public sealed class SettingsWindow
         Add(Note("Переключается сразу во всех окнах. Само ничего не меняет: только вручную."));
     }
 
+    /// Временный значок виджета в хвосте: Когда нужно / Всегда / Никогда (design-v2 п. 2).
+    Grid TempWidget(string id, string title, string hint)
+    {
+        var modes = new[] { (ShellConfig.ShowWhenNeeded, "Когда нужно"), (ShellConfig.ShowAlways, "Всегда"), (ShellConfig.ShowNever, "Никогда") };
+        var combo = new ComboBox { MinWidth = 160 };
+        foreach (var (_, text) in modes) combo.Items.Add(text);
+        combo.SelectedIndex = Array.FindIndex(modes, m => m.Item1 == _s.Config.TempWidgetMode(id));
+        combo.SelectionChanged += (_, _) =>
+        {
+            if (combo.SelectedIndex < 0) return;
+            var mode = modes[combo.SelectedIndex].Item1;
+            Change(_ => _s.Config.SetTempWidgetMode(id, mode));
+        };
+        return Row(title, hint, combo);
+    }
+
     void BuildWidgets()
     {
         var audioOn = _s.Config.WidgetEnabled("audio");
@@ -272,8 +288,8 @@ public sealed class SettingsWindow
                 Change(_ => _s.Config.Widget("audio").Enabled = on);
                 Build();
             }),
-            Switch("Сейчас играет", "Музыка и видео в верхней панели, пока играют.", _s.Config.WidgetEnabled("media"), on =>
-                Change(_ => _s.Config.Widget("media").Enabled = on))));
+            TempWidget("media", "Сейчас играет", "Значок в хвосте дока, пока открыт плеер или вкладка с музыкой (играет или на паузе). Клик — обложка и кнопки, средний клик — пауза.")));
+        Add(Note("Временные значки стоят в хвосте левее ⌃. «Когда нужно» — появляются сами, «Всегда» — видны постоянно."));
         if (!audioOn) return;
 
         var a = _s.AudioSettings;

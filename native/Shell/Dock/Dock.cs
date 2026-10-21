@@ -788,7 +788,7 @@ public sealed partial class Dock : IBar, IDropZone
         return true;
     }
 
-    double TailW() => SepW + _slots.Where(t => t.Shown).Sum(t => t.W + TailGap) - TailGap;
+    double TailW() => SepW + _slots.Sum(t => t.Width) - TailGap;
 
     double BaseTotal() => Pad + _items.Sum(i => i.Base + Gap * i.Base / Icon) - (_items.Count > 0 ? Gap : 0) + _gapW + TailW() + Pad;
 
@@ -817,6 +817,17 @@ public sealed partial class Dock : IBar, IDropZone
             _canvas.Children.Remove(gone.Visual);
             _canvas.Children.Remove(gone.Dot);
         }
+        // Временные значки хвоста плавно раздвигают соседей (v2 п. 2).
+        foreach (var t in _slots)
+        {
+            if (!t.Temp) continue;
+            var target = t.Shown ? 1 : 0;
+            if (!animate || dt == 0 && t.Grow == target) { t.Grow = target; t.GrowV = 0; }
+            else moving |= Spring(ref t.Grow, ref t.GrowV, target, dt, 300);
+            t.Visual.Opacity = t.Grow;
+            t.Visual.Visibility = t.Shown || t.Grow > 0.01 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
         // Промежуток для того, что тащат снаружи.
         var gapTarget = _gapIndex >= 0 ? Icon + Gap : 0;
         if (!animate) { _gapW = gapTarget; _gapV = 0; }
@@ -905,16 +916,17 @@ public sealed partial class Dock : IBar, IDropZone
             _removeLabel.Translation = new Vector3((float)(_drag.X + _drag.Base / 2 - lw / 2), (float)(_drag.Top + _drag.Base + 4), 0);
         }
 
-        // Хвост: разделитель, ⌃ трей, сеть, звук, батарея, язык, уведомления, часы.
+        // Хвост: разделитель, временные значки, ⌃ трей, сеть, звук, батарея, язык, уведомления, часы.
         var tailY = Headroom + PillH / 2;
         _separator.Translation = new Vector3((float)(x + 10), (float)(tailY - 17), 0);
         x += SepW;
         foreach (var t in _slots)
         {
-            if (!t.Shown) continue;
+            if (t.Width <= 0) continue;
             t.X = x;
-            t.Visual.Translation = new Vector3((float)x, (float)(tailY - 20), 0);
-            x += t.W + TailGap;
+            // Появляющийся значок растёт из середины своего места.
+            t.Visual.Translation = new Vector3((float)(x - t.W * (1 - t.Grow) / 2), (float)(tailY - 20), 0);
+            x += t.Width;
         }
 
         // Подсказка едет за своей иконкой.
@@ -1476,6 +1488,8 @@ public sealed partial class Dock : IBar, IDropZone
     void MiddleClick(object target)
     {
         if (ReferenceEquals(target, _soundSlot)) { _s.Audio.Muted = !_s.Audio.Muted; return; }
+        // Средний клик по «Сейчас играет» — пауза / играть, как было на верхней панели.
+        if (ReferenceEquals(target, _mediaSlot)) { _s.Media.PlayPause(); return; }
         if (target is Item { IsStart: false, Entry.Missing: false } it) Launch(it);
     }
 
