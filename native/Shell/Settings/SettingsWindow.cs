@@ -231,7 +231,9 @@ public sealed class SettingsWindow
     {
         var start = _s.Config.Start;
         Add(Card(
-            Switch("Недавние файлы", "Блок с последними открытыми файлами под поиском.", start.RecentFiles, on => Change(c => c.Start.RecentFiles = on))));
+            Switch("Недавние файлы", "Блок с последними открытыми файлами под поиском.", start.RecentFiles, on => Change(c => c.Start.RecentFiles = on)),
+            Switch("Отмечать новые программы", "Голубая точка и «Новое» у только что установленных программ во «Всех приложениях» и в поиске, сверху блок «Недавно установленные». Пропадает после первого запуска или через 7 дней.",
+                start.MarkNew, on => Change(c => c.Start.MarkNew = on))));
 
         Add(Section("Быстрые папки"));
         var list = new StackPanel { Padding = new Thickness(0, 6, 0, 6) };

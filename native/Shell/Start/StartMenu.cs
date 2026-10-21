@@ -73,6 +73,8 @@ public sealed class StartMenu : Popup
     bool _keyboard;
 
     string _tab = All;
+    /// Сколько строк «Недавно установленные» стоит над алфавитным списком.
+    int _recentCount;
     double _height = 720;
     List<StartEntry> _recent = [];
     List<StartEntry> _files = [];
@@ -545,6 +547,26 @@ public sealed class StartMenu : Popup
         {
             _gridScroll.Visibility = Visibility.Collapsed;
             _allScroll.Visibility = Visibility.Visible;
+            // Сверху до трёх только что установленных (design-v2 п. 10).
+            var fresh = _s.Config.Start.MarkNew
+                ? _catalog.Apps.Where(a => _catalog.New.IsNew(a.Target)).OrderByDescending(a => _catalog.New.Since(a.Target)).Take(3).ToList()
+                : [];
+            _recentCount = fresh.Count;
+            if (fresh.Count > 0)
+            {
+                _allList.Children.Add(new Border
+                {
+                    Height = 32,
+                    Padding = new Thickness(10, 0, 10, 0),
+                    Child = new TextBlock { Text = "Недавно установленные", FontFamily = Theme.Font, FontSize = 13, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, Foreground = Theme.Brush(Theme.TextSecondary), VerticalAlignment = VerticalAlignment.Center },
+                });
+                foreach (var app in fresh)
+                {
+                    var cell = AppRow(app);
+                    _allList.Children.Add(cell.Visual);
+                    cells.Add(cell);
+                }
+            }
             string? group = null;
             foreach (var app in _catalog.Apps)
             {
@@ -650,7 +672,8 @@ public sealed class StartMenu : Popup
         var y = header.TransformToVisual(_allList).TransformPoint(new Point(0, 0)).Y;
         _allScroll.ChangeView(null, y, null, true);
         // Выделение — на первую программу этой буквы.
-        var index = _cells[Zone.Main].FindIndex(c => c.Entry != null && Group(c.Entry.Title) == letter);
+        var main = _cells[Zone.Main];
+        var index = main.FindIndex(Math.Min(_recentCount, main.Count), c => c.Entry != null && Group(c.Entry.Title) == letter);
         if (index >= 0) { _zone = Zone.Main; _sel = index; Paint(); }
     }
 
@@ -663,6 +686,7 @@ public sealed class StartMenu : Popup
         var text = new TextBlock { Text = app.Title, FontFamily = Theme.Font, FontSize = 13, Foreground = Theme.Brush(Theme.Text), VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis };
         Grid.SetColumn(text, 1);
         grid.Children.Add(text);
+        AddNewBadge(grid, app);
         var border = new Border { Height = RowH, Padding = new Thickness(10, 0, 10, 0), CornerRadius = new CornerRadius(4), Child = grid };
         var item = new LauncherItem { Kind = "app", Title = app.Title, Target = app.Target, Meta = "Приложение" };
         var cell = new Cell { Visual = border, Entry = app, Drag = item, Invoke = () => OpenEntry(app), Menu = at => ShowMenu(at, EntryMenu(app, fromAll: true)) };
@@ -991,6 +1015,7 @@ public sealed class StartMenu : Popup
         texts.Children.Add(new TextBlock { Text = KindText(e), FontFamily = Theme.Font, FontSize = 11, Foreground = Theme.Brush(Theme.TextSecondary), TextTrimming = TextTrimming.CharacterEllipsis });
         Grid.SetColumn(texts, 1);
         grid.Children.Add(texts);
+        AddNewBadge(grid, e);
         var border = new Border { Height = big ? 54 : 44, Padding = new Thickness(10, 0, 10, 0), CornerRadius = new CornerRadius(4), Child = grid };
         LauncherItem? drag = e.Kind switch
         {
@@ -1002,6 +1027,26 @@ public sealed class StartMenu : Popup
         var cell = new Cell { Visual = border, Entry = e, Drag = drag, Invoke = () => OpenEntry(e), Menu = at => ShowMenu(at, EntryMenu(e, fromAll: false)) };
         Wire(cell);
         return cell;
+    }
+
+    /// Голубая точка и «Новое» справа у только что установленной программы (design-v2 п. 10).
+    void AddNewBadge(Grid row, StartEntry e)
+    {
+        if (e.Kind != ResultKind.App || !_s.Config.Start.MarkNew || !_catalog.New.IsNew(e.Target)) return;
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var badge = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children =
+            {
+                new Border { Width = 6, Height = 6, CornerRadius = new CornerRadius(3), Background = Theme.Brush(Theme.Accent), VerticalAlignment = VerticalAlignment.Center },
+                new TextBlock { Text = "Новое", FontFamily = Theme.Font, FontSize = 11, Foreground = Theme.Brush(Theme.Accent), VerticalAlignment = VerticalAlignment.Center },
+            },
+        };
+        Grid.SetColumn(badge, 2);
+        row.Children.Add(badge);
     }
 
     static string DefaultGlyph(ResultKind k) => k switch

@@ -85,7 +85,11 @@ public sealed class Services
 
     /// Программу запустили не из дока (из Пуска): её иконка в доке пульсирует.
     public event Action<string>? Launched;
-    public void NoteLaunch(string target) => Launched?.Invoke(target);
+    public void NoteLaunch(string target)
+    {
+        Catalog.New.Opened(target);
+        Launched?.Invoke(target);
+    }
 
     /// Открыть окно настроек на странице (null — на последней открытой): меню трея, правый клик
     /// по Пуску, поиск в Пуске.

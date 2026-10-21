@@ -58,6 +58,8 @@ public sealed class StartSection
     public bool RecentFiles { get; set; } = true;
     /// Быстрые папки в нижней строке: explorer, documents, downloads, pictures, music, videos, settings.
     public List<string> Folders { get; set; } = ["explorer", "downloads", "settings"];
+    /// Отметка «Новое» у недавно установленных программ (design-v2 п. 10).
+    public bool MarkNew { get; set; } = true;
     /// Сколько раз что запускали из Пуска: частое выше в поиске.
     public Dictionary<string, int> Launches { get; set; } = [];
 }

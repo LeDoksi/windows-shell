@@ -49,6 +49,8 @@ public sealed class Catalog
     }
 
     public IReadOnlyList<StartEntry> Apps { get { lock (_lock) return _apps; } }
+    /// Какие программы новые (отметка «Новое», design-v2 п. 10).
+    public NewApps New { get; } = new();
     public IReadOnlyList<StartEntry> Commands { get { lock (_lock) return _commands; } }
     public static IReadOnlyList<StartEntry> Settings => SettingsPages.All;
 
@@ -65,6 +67,7 @@ public sealed class Catalog
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var apps = LoadApps();
             var commands = _commands.Count > 0 ? _commands : LoadCommands();
+            var fresh = New.Update(apps);
             bool changed;
             lock (_lock)
             {
@@ -75,7 +78,7 @@ public sealed class Catalog
                 _loading = false;
             }
             Log.Write($"Пуск: программ {apps.Count}, команд {commands.Count} за {sw.ElapsedMilliseconds} мс");
-            if (changed) _queue.TryEnqueue(() => Changed?.Invoke());
+            if (changed || fresh) _queue.TryEnqueue(() => Changed?.Invoke());
         }) { IsBackground = true, Name = "catalog" };
         // Оболочке Windows нужен STA.
         t.SetApartmentState(ApartmentState.STA);
