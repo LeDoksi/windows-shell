@@ -84,6 +84,8 @@ public sealed partial class Dock : IBar, IDropZone
     double _gapW, _gapV;
     Item? _dropOnto;
     List<string>? _dragPaths;
+    /// Из Проводника тащат файлы: корзина в хвосте видна, даже пустая (v2 п. 3); курсор над ней.
+    bool _binDrag, _dropOnBin;
     bool _dragPrograms = true;
 
     sealed class Item
@@ -108,6 +110,10 @@ public sealed partial class Dock : IBar, IDropZone
         public bool Removing;
         public long LaunchUntil;
         public string? IconSource;
+        /// Своей иконки нет (заглушка, запасная или значок): спросим снова при запуске программы
+        /// и не чаще раза в 20 с (WSH-102).
+        public bool IconWeak;
+        public long IconAt;
         // Положение этого кадра (DIP, в координатах полосы).
         public double X, Top;
     }
@@ -184,6 +190,8 @@ public sealed partial class Dock : IBar, IDropZone
         _springLoad.Interval = TimeSpan.FromMilliseconds(600);
         _springLoad.Tick += (_, _) =>
         {
+            // Файл держат над кнопкой Пуска: Пуск открывается, файл можно бросить в категорию (v2 п. 1).
+            if (_dropOnto is { IsStart: true }) { if (!_s.StartMenu.IsOpen) _s.ToggleStart(this); return; }
             if (_dropOnto?.Entry?.Windows.FirstOrDefault() is { } w) _s.Tracker.Activate(w.Hwnd);
         };
 
@@ -200,8 +208,9 @@ public sealed partial class Dock : IBar, IDropZone
         _strip.Root.DragOver += OnDragOver;
         _strip.Root.DragLeave += (_, _) =>
         {
-            // DragLeave приходит и при переходе между иконками: сбрасываем, только если курсор ушёл с дока.
-            if (GetCursorPos(out var c) && InHot(c)) return;
+            // DragLeave приходит и при переходе между иконками: сбрасываем, только если курсор ушёл с дока
+            // или кнопку мыши отпустили (Esc над доком).
+            if (GetCursorPos(out var c) && InHot(c) && ((GetAsyncKeyState(0x01) | GetAsyncKeyState(0x02)) & 0x8000) != 0) return;
             _dragPaths = null;
             ClearExternalDrag();
         };
@@ -545,8 +554,10 @@ public sealed partial class Dock : IBar, IDropZone
                 if (initial) item.Base = item.Size = Icon;
                 if (!e.Pinned) Log.Write($"док: запущена {e.Title} ({e.Id}, окон {e.Windows.Count})");
             }
+            var started = e.Running && item.Entry is { Running: false };
             item.Entry = e;
             if (e.Running) item.LaunchUntil = 0;
+            if (item.IconWeak && (started || Environment.TickCount64 - item.IconAt > 20_000)) item.IconSource = null;
             SetIcon(item, IconSource(e), e.Windows.FirstOrDefault()?.Exe ?? Launcher.Resolve(e.Target).Exe);
             next.Add(item);
         }
@@ -649,36 +660,41 @@ public sealed partial class Dock : IBar, IDropZone
         return new Item { Key = "start", IsStart = true, Visual = visual, Image = null, Dot = dot, Base = Icon, Size = Icon };
     }
 
-    /// Иконка по AUMID или пути; если Проводник её не знает (свой AUMID у Electron-программ),
-    /// берём иконку exe.
+    /// Иконка по AUMID или пути; если Проводник её не знает (свой AUMID у Electron-программ) или
+    /// отдал заглушку, берём иконку exe, потом иконку окна. Пока своей нет, старая картинка
+    /// остаётся на месте (лучше прежняя иконка, чем мигание значком).
     void SetIcon(Item item, string source, string? fallback)
     {
         if (item.IconSource == source || item.Image is null) return;
         item.IconSource = source;
+        item.IconAt = Environment.TickCount64;
         var img = item.Image;
-        void Apply(ImageSource? bmp)
+        void Apply(ImageSource? bmp, bool weak)
         {
+            if (item.IconSource != source) return;
+            item.IconWeak = weak;
+            if (bmp is null && img.Source != null) return;
             img.Source = bmp;
             if (item.Placeholder != null) item.Placeholder.Visibility = bmp is null ? Visibility.Visible : Visibility.Collapsed;
         }
         fallback ??= item.Entry?.Windows.FirstOrDefault()?.Exe ?? (item.Entry is { } en ? Launcher.Resolve(en.Target).Exe : null);
+        var chain = new List<string> { source };
+        if (fallback != null && !string.Equals(fallback, source, StringComparison.OrdinalIgnoreCase)) chain.Add(fallback);
+        if (item.Entry?.Windows.FirstOrDefault() is { } w) chain.Add(Icons.WindowSource(w.Hwnd));
         // Иконка в размере увеличенной (1,6×): так она чёткая и в покое, и под курсором.
         var px = (int)Math.Ceiling(ElementSize * _scale);
-        _s.Icons.Get(source, px, bmp =>
+        void Next(int i)
         {
-            if (item.IconSource != source) return;
-            if (bmp != null || fallback is null || string.Equals(fallback, source, StringComparison.OrdinalIgnoreCase))
+            _s.Icons.Get(chain[i], px, bmp =>
             {
-                if (bmp is null) Log.Write($"док: нет картинки для {source}");
-                Apply(bmp);
-                return;
-            }
-            _s.Icons.Get(fallback, px, alt =>
-            {
-                if (alt is null) Log.Write($"док: нет картинки ни для {source}, ни для {fallback}");
-                if (item.IconSource == source) Apply(alt);
+                if (item.IconSource != source) return;
+                if (bmp != null) { Apply(bmp, weak: i > 0); return; }
+                if (i + 1 < chain.Count) { Next(i + 1); return; }
+                Log.Write($"док: нет картинки для {string.Join(", ", chain)}");
+                Apply(null, weak: true);
             });
-        });
+        }
+        Next(0);
     }
 
     bool IsActive(DockEntry e) => e.Windows.Any(w => w.Hwnd == _s.Tracker.Foreground);
@@ -775,7 +791,7 @@ public sealed partial class Dock : IBar, IDropZone
         return true;
     }
 
-    double TailW() => SepW + _slots.Where(t => t.Shown).Sum(t => t.W + TailGap) - TailGap;
+    double TailW() => SepW + _slots.Sum(t => t.Width) - TailGap;
 
     double BaseTotal() => Pad + _items.Sum(i => i.Base + Gap * i.Base / Icon) - (_items.Count > 0 ? Gap : 0) + _gapW + TailW() + Pad;
 
@@ -804,6 +820,17 @@ public sealed partial class Dock : IBar, IDropZone
             _canvas.Children.Remove(gone.Visual);
             _canvas.Children.Remove(gone.Dot);
         }
+        // Временные значки хвоста плавно раздвигают соседей (v2 п. 2).
+        foreach (var t in _slots)
+        {
+            if (!t.Temp) continue;
+            var target = t.Shown ? 1 : 0;
+            if (!animate || dt == 0 && t.Grow == target) { t.Grow = target; t.GrowV = 0; }
+            else moving |= Spring(ref t.Grow, ref t.GrowV, target, dt, 300);
+            t.Visual.Opacity = t.Grow;
+            t.Visual.Visibility = t.Shown || t.Grow > 0.01 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
         // Промежуток для того, что тащат снаружи.
         var gapTarget = _gapIndex >= 0 ? Icon + Gap : 0;
         if (!animate) { _gapW = gapTarget; _gapV = 0; }
@@ -892,16 +919,17 @@ public sealed partial class Dock : IBar, IDropZone
             _removeLabel.Translation = new Vector3((float)(_drag.X + _drag.Base / 2 - lw / 2), (float)(_drag.Top + _drag.Base + 4), 0);
         }
 
-        // Хвост: разделитель, ⌃ трей, сеть, звук, батарея, язык, уведомления, часы.
+        // Хвост: разделитель, временные значки, ⌃ трей, сеть, звук, батарея, язык, уведомления, часы.
         var tailY = Headroom + PillH / 2;
         _separator.Translation = new Vector3((float)(x + 10), (float)(tailY - 17), 0);
         x += SepW;
         foreach (var t in _slots)
         {
-            if (!t.Shown) continue;
+            if (t.Width <= 0) continue;
             t.X = x;
-            t.Visual.Translation = new Vector3((float)x, (float)(tailY - 20), 0);
-            x += t.W + TailGap;
+            // Появляющийся значок растёт из середины своего места.
+            t.Visual.Translation = new Vector3((float)(x - t.W * (1 - t.Grow) / 2), (float)(tailY - 20), 0);
+            x += t.Width;
         }
 
         // Подсказка едет за своей иконкой.
@@ -1300,6 +1328,13 @@ public sealed partial class Dock : IBar, IDropZone
         _springLoad.Stop();
         _dropOnto = null;
         if (_gapIndex >= 0) SetGap(-1);
+        _dropOnBin = false;
+        if (_binDrag)
+        {
+            _binDrag = false;
+            HighlightSlot(null);
+            if (UpdateTail()) { Relayout(); Kick(); }
+        }
         // Курсор не над доком: прозрачное место над таблеткой снова пропускает клики.
         if (_drag is null && !(GetCursorPos(out var c) && InHot(c))) SetHover(false);
     }
@@ -1346,6 +1381,11 @@ public sealed partial class Dock : IBar, IDropZone
             var items = await e.DataView.GetStorageItemsAsync();
             _dragPaths = items.Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p)).ToList();
             _dragPrograms = _dragPaths.Count > 0 && _dragPaths.All(ShellConfig.IsProgram);
+            if (_dragPaths.Count > 0 && !_binDrag)
+            {
+                _binDrag = true;
+                if (UpdateTail()) { Relayout(); Kick(); }
+            }
             OnDragOver(sender, e);
         }
         catch { }
@@ -1357,6 +1397,32 @@ public sealed partial class Dock : IBar, IDropZone
         if (!e.DataView.Contains(StandardDataFormats.StorageItems)) { e.AcceptedOperation = DataPackageOperation.None; return; }
         var p = e.GetPosition(_canvas);
         if (!_hover) SetHover(true);
+        // Над корзиной: бросил — файлы в корзину, как Delete в Проводнике.
+        if (_binSlot.Shown && p.X >= _binSlot.X && p.X < _binSlot.X + _binSlot.W && _dragPaths is { Count: > 0 })
+        {
+            SetGap(-1);
+            if (_dropOnto != null) { _dropOnto = null; _springLoad.Stop(); }
+            _dropOnBin = true;
+            HighlightSlot(_binSlot);
+            e.AcceptedOperation = DataPackageOperation.Move;
+            e.DragUIOverride.Caption = "В корзину";
+            return;
+        }
+        if (_dropOnBin) { _dropOnBin = false; HighlightSlot(null); }
+        // Над кнопкой Пуска: подержать — откроется Пуск с категориями.
+        if (_items.FirstOrDefault(i => i.IsStart) is { } start && p.X >= start.X && p.X <= start.X + start.Size)
+        {
+            SetGap(-1);
+            if (_dropOnto != start)
+            {
+                _dropOnto = start;
+                _springLoad.Stop();
+                _springLoad.Start();
+            }
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+        if (_dropOnto is { IsStart: true }) { _dropOnto = null; _springLoad.Stop(); }
         if (_dragPrograms)
         {
             // Программы и ярлыки: между иконками промежуток, отпустил — закрепилось там.
@@ -1385,9 +1451,11 @@ public sealed partial class Dock : IBar, IDropZone
         var onto = _dropOnto;
         var pinAt = PinIndexOfGap();
         var programs = _dragPrograms;
+        var onBin = _dropOnBin;
         _dragPaths = null;
         ClearExternalDrag();
-        if (paths is null || paths.Count == 0) return;
+        if (paths is null || paths.Count == 0 || onto is { IsStart: true }) return;
+        if (onBin) { _s.Bin.Delete(paths); return; }
         if (programs)
         {
             foreach (var path in paths)
@@ -1449,6 +1517,8 @@ public sealed partial class Dock : IBar, IDropZone
     void MiddleClick(object target)
     {
         if (ReferenceEquals(target, _soundSlot)) { _s.Audio.Muted = !_s.Audio.Muted; return; }
+        // Средний клик по «Сейчас играет» — пауза / играть, как было на верхней панели.
+        if (ReferenceEquals(target, _mediaSlot)) { _s.Media.PlayPause(); return; }
         if (target is Item { IsStart: false, Entry.Missing: false } it) Launch(it);
     }
 

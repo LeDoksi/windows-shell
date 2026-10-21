@@ -5,9 +5,9 @@ using Windows.Foundation;
 using WindowsShell.Media;
 using WindowsShell.Ui;
 
-namespace WindowsShell.Panel;
+namespace WindowsShell.Tail;
 
-/// Окошко «Сейчас играет» (раздел 4): обложка, название, исполнитель и кнопки ⏮ ⏯ ⏭.
+/// Окошко «Сейчас играет» над значком в хвосте дока (v2 п. 2): обложка, название, исполнитель и кнопки ⏮ ⏯ ⏭.
 /// Музыка закончилась — окошко закрывается само.
 public sealed class MediaFlyout : Popup
 {
@@ -75,7 +75,7 @@ public sealed class MediaFlyout : Popup
     public void Show(object anchor, Rect anchorPx, object owner)
     {
         Refresh();
-        Open(anchor, anchorPx, Placement.Below, owner: owner);
+        Open(anchor, anchorPx, Placement.Above, owner: owner);
     }
 
     void Refresh()

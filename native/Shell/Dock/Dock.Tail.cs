@@ -8,8 +8,10 @@ using static WindowsShell.Native.Win32;
 
 namespace WindowsShell.Dock;
 
-/// Системный хвост дока (раздел 2, WSH-E9): ⌃ трей · сеть · звук · батарея · язык · уведомления ·
-/// часы. Полный хвост — на мониторе хвоста, на остальных только часы (раздел 9).
+/// Системный хвост дока (раздел 2, WSH-E9): [временные значки] · ⌃ трей · сеть · звук · батарея ·
+/// язык · уведомления · часы. Полный хвост — на мониторе хвоста, на остальных только часы (раздел 9).
+/// Временные значки (design-v2 п. 2) стоят в постоянном порядке: Сейчас играет · Скриншот ·
+/// Корзина · Заряд; видны, когда нужны, появляются и исчезают плавно. Корзина — п. 3.
 public sealed partial class Dock
 {
     /// Значок хвоста: место в доке, вид и показан ли он сейчас.
@@ -20,13 +22,20 @@ public sealed partial class Dock
         public required double W;
         public bool Shown;
         public double X;
+        /// Временный значок: место растёт от 0 до 1 пружиной.
+        public bool Temp;
+        public double Grow = 1, GrowV;
+        /// Сколько места занимает сейчас (с промежутком после себя).
+        public double Width => Temp ? Grow * (W + TailGap) : Shown ? W + TailGap : 0;
     }
 
     readonly List<Slot> _slots = [];
-    Slot _traySlot = null!, _netSlot = null!, _soundSlot = null!, _batSlot = null!, _langSlot = null!, _bellSlot = null!, _clockSlot = null!;
-    FontIcon _soundIcon = null!, _netIcon = null!, _batIcon = null!, _bellIcon = null!;
+    Slot _mediaSlot = null!, _binSlot = null!, _traySlot = null!, _netSlot = null!, _soundSlot = null!, _batSlot = null!, _langSlot = null!, _bellSlot = null!, _clockSlot = null!;
+    FontIcon _binIcon = null!, _soundIcon = null!, _netIcon = null!, _batIcon = null!, _bellIcon = null!;
     Border _trayDot = null!, _bellDot = null!;
     TextBlock _lang = null!, _time = null!, _date = null!;
+    Image _mediaCover = null!;
+    FontIcon _mediaNote = null!;
 
     void CreateTail()
     {
@@ -58,6 +67,22 @@ public sealed partial class Dock
             Visibility = Visibility.Collapsed,
         };
 
+        // Временные — левее ⌃, в постоянном порядке.
+        _mediaCover = new Image { Width = 22, Height = 22, Stretch = Microsoft.UI.Xaml.Media.Stretch.UniformToFill };
+        _mediaNote = Glyph("\uEC4F", 16);
+        _mediaSlot = Add("media", 36, new Grid
+        {
+            Width = 24, Height = 24, CornerRadius = new CornerRadius(5),
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            Children = { _mediaNote, _mediaCover },
+        });
+        _mediaSlot.Temp = true;
+        _mediaSlot.Grow = 0;
+        _binIcon = Glyph("\uE74D", 17);
+        _binSlot = Add("bin", 36, _binIcon);
+        _binSlot.Temp = true;
+        _binSlot.Grow = 0;
+
         _trayDot = Dot();
         _traySlot = Add("tray", 30, Glyph("", 12), _trayDot);
         _netIcon = Glyph("");
@@ -84,6 +109,8 @@ public sealed partial class Dock
         _s.Language.Changed += OnTailChanged;
         _s.Notifications.Changed += OnTailChanged;
         _s.Tray.Changed += OnTailChanged;
+        _s.Media.Changed += OnTailChanged;
+        _s.Bin.Changed += OnTailChanged;
     }
 
     void UnsubscribeTail()
@@ -94,6 +121,8 @@ public sealed partial class Dock
         _s.Language.Changed -= OnTailChanged;
         _s.Notifications.Changed -= OnTailChanged;
         _s.Tray.Changed -= OnTailChanged;
+        _s.Media.Changed -= OnTailChanged;
+        _s.Bin.Changed -= OnTailChanged;
     }
 
     void OnTailChanged()
@@ -111,9 +140,14 @@ public sealed partial class Dock
         {
             if (s.Shown == on) return;
             s.Shown = on;
-            s.Visual.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+            // Временные значки прячет и показывает кадр анимации.
+            if (!s.Temp) s.Visual.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
             changed = true;
         }
+        var media = _s.Media.Current;
+        Show(_mediaSlot, full && _s.Config.TempWidgetVisible("media", media != null));
+        // Корзина: пока не пустая и пока из Проводника тащат файлы (чтобы было куда бросить).
+        Show(_binSlot, full && _s.Config.TempWidgetVisible("bin", !_s.Bin.Empty || _binDrag));
         Show(_traySlot, full && t.Tray && _s.Tray.Running);
         Show(_netSlot, full && t.Network);
         Show(_soundSlot, full && _s.Config.WidgetEnabled("audio"));
@@ -122,6 +156,9 @@ public sealed partial class Dock
         Show(_bellSlot, full && t.Notifications);
         Show(_clockSlot, true);
 
+        _mediaCover.Source = media != null ? _s.Media.Cover : null;
+        _mediaNote.Visibility = _mediaCover.Source is null ? Visibility.Visible : Visibility.Collapsed;
+        _binIcon.Foreground = Theme.Brush(_s.Bin.Empty ? Theme.TextSecondary : Theme.Text);
         _trayDot.Visibility = _s.TrayAttention ? Visibility.Visible : Visibility.Collapsed;
         _netIcon.Glyph = _s.Network.State.Glyph;
         var v = _s.Audio.Volume;
@@ -158,6 +195,14 @@ public sealed partial class Dock
         switch (t.Id)
         {
             case "tray": return "Фоновые приложения";
+            case "media":
+            {
+                var m = _s.Media.Current;
+                if (m is null) return "Сейчас ничего не играет";
+                var title = m.Artist.Length > 0 ? $"{m.Title} — {m.Artist}" : m.Title;
+                return m.Playing ? title : $"{title}\nПауза";
+            }
+            case "bin": return _s.Bin.Empty ? "Корзина пуста" : $"Корзина: {_s.Bin.Summary}";
             case "network":
             {
                 var n = _s.Network.State;
@@ -184,6 +229,13 @@ public sealed partial class Dock
         var key = ("tail", this, t.Id);
         switch (t.Id)
         {
+            case "media":
+                if (_s.Media.Current is null) return;
+                Popups.Toggle(key, () => _s.MediaFlyout.Show(key, AnchorPx(t), this));
+                break;
+            case "bin":
+                Popups.Toggle(key, () => _s.BinFlyout.Show(key, AnchorPx(t), this));
+                break;
             case "tray":
                 _s.Tray.Anchor = AnchorRect(t);
                 if (_s.TrayAttention) { _s.TrayAttention = false; UpdateTail(); }
@@ -231,6 +283,14 @@ public sealed partial class Dock
         var key = ("menu", this, t.Id);
         List<MenuItem>? items = t.Id switch
         {
+            "media" => MediaMenu(),
+            "bin" =>
+            [
+                new() { Text = "Открыть корзину", Glyph = "\uE838", Invoke = RecycleBin.Open },
+                new() { Text = "Очистить корзину", Glyph = "\uE74D", Danger = true, Enabled = !_s.Bin.Empty, Invoke = () => _s.BinFlyout.Show(("tail", this, "bin"), AnchorPx(t), this, confirm: true) },
+                MenuItem.Sep,
+                new() { Text = "Настройки виджета", Glyph = "\uE713", Invoke = () => _s.OpenSettings("widgets") },
+            ],
             "sound" => SoundMenu(),
             "network" =>
             [
@@ -247,6 +307,22 @@ public sealed partial class Dock
         if (t.Id == "tray") { SlotClick(t); return; }
         if (items is null) return;
         Popups.Toggle(key, () => _s.Menu.Show(key, AnchorPx(t), items, owner: this));
+    }
+
+    /// Правый клик по «Сейчас играет»: управление и настройки виджета (п. 2).
+    List<MenuItem> MediaMenu()
+    {
+        var m = _s.Media.Current;
+        var items = new List<MenuItem>();
+        if (m != null)
+        {
+            items.Add(new() { Text = m.Playing ? "Пауза" : "Играть", Glyph = m.Playing ? "\uE769" : "\uE768", Enabled = m.CanPlayPause, Invoke = () => _s.Media.PlayPause() });
+            items.Add(new() { Text = "Следующий", Glyph = "\uE893", Enabled = m.CanNext, Invoke = () => _s.Media.Next() });
+            items.Add(new() { Text = "Предыдущий", Glyph = "\uE892", Enabled = m.CanPrevious, Invoke = () => _s.Media.Previous() });
+            items.Add(MenuItem.Sep);
+        }
+        items.Add(new() { Text = "Настройки виджета", Glyph = "\uE713", Invoke = () => _s.OpenSettings("widgets") });
+        return items;
     }
 
     /// Место значка на экране (для Shell_NotifyIconGetRect).

@@ -58,6 +58,8 @@ public sealed class StartSection
     public bool RecentFiles { get; set; } = true;
     /// Быстрые папки в нижней строке: explorer, documents, downloads, pictures, music, videos, settings.
     public List<string> Folders { get; set; } = ["explorer", "downloads", "settings"];
+    /// Отметка «Новое» у недавно установленных программ (design-v2 п. 10).
+    public bool MarkNew { get; set; } = true;
     /// Сколько раз что запускали из Пуска: частое выше в поиске.
     public Dictionary<string, int> Launches { get; set; } = [];
 }
@@ -415,6 +417,37 @@ public sealed class ShellConfig
     }
 
     public bool WidgetEnabled(string id) => Data.Widgets.FirstOrDefault(x => x.Id == id)?.Enabled ?? true;
+
+    /// Временный значок виджета в хвосте (design-v2 п. 2): «Когда нужно» (по умолчанию),
+    /// «Всегда» или «Никогда» (= виджет выключен).
+    public const string ShowWhenNeeded = "auto", ShowAlways = "always", ShowNever = "never";
+
+    public string TempWidgetMode(string id)
+    {
+        var w = Data.Widgets.FirstOrDefault(x => x.Id == id);
+        if (w is { Enabled: false }) return ShowNever;
+        return w?.Settings["show"]?.GetValue<string>() == ShowAlways ? ShowAlways : ShowWhenNeeded;
+    }
+
+    public void SetTempWidgetMode(string id, string mode)
+    {
+        var w = Widget(id);
+        w.Enabled = mode != ShowNever;
+        w.Settings["show"] = mode == ShowAlways ? ShowAlways : ShowWhenNeeded;
+    }
+
+    /// Виден ли временный значок: `needed` — виджету сейчас есть что показать.
+    public bool TempWidgetVisible(string id, bool needed) => TempWidgetMode(id) switch
+    {
+        ShowAlways => true,
+        ShowNever => false,
+        _ => needed,
+    };
+
+    /// Прятать значок корзины на рабочем столе, пока работает оболочка (по умолчанию да).
+    public bool HideDesktopBin => Data.Widgets.FirstOrDefault(x => x.Id == "bin")?.Settings["hideDesktop"]?.GetValue<bool>() ?? true;
+
+    public void SetHideDesktopBin(bool on) => Widget("bin").Settings["hideDesktop"] = on;
 
     static readonly HashSet<string> Programs = ["exe", "lnk", "url", "appref-ms", "bat", "cmd"];
 

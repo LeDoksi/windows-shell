@@ -43,30 +43,29 @@ public sealed class Services
     public required Tail.BatteryService Battery { get; init; }
     public required Tail.InputLanguage Language { get; init; }
     public required Tail.Notifications Notifications { get; init; }
+    public required Tail.RecycleBin Bin { get; init; }
 
     MenuPopup? _menu;
     SoundFlyout? _sound;
     WindowListPopup? _list;
-    Panel.CategoryWindow? _category;
-    Panel.NameFlyout? _name;
-    Panel.MediaFlyout? _mediaFlyout;
+    Tail.MediaFlyout? _mediaFlyout;
     Start.StartMenu? _start;
     Tray.TrayFlyout? _trayFlyout;
     Tail.NetworkFlyout? _netFlyout;
     Tail.BatteryFlyout? _batFlyout;
     Tail.ClockFlyout? _clockFlyout;
+    Tail.BinFlyout? _binFlyout;
 
     public MenuPopup Menu => _menu ??= new MenuPopup();
     public SoundFlyout SoundFlyout => _sound ??= new SoundFlyout(Audio, Icons, Config);
     public WindowListPopup WindowList => _list ??= new WindowListPopup(Tracker, Icons);
-    public Panel.CategoryWindow CategoryWindow => _category ??= new Panel.CategoryWindow(this);
-    public Panel.NameFlyout NameFlyout => _name ??= new Panel.NameFlyout();
-    public Panel.MediaFlyout MediaFlyout => _mediaFlyout ??= new Panel.MediaFlyout(Media);
+    public Tail.MediaFlyout MediaFlyout => _mediaFlyout ??= new Tail.MediaFlyout(Media);
     public Start.StartMenu StartMenu => _start ??= new Start.StartMenu(this, Catalog);
     public Tray.TrayFlyout TrayFlyout => _trayFlyout ??= new Tray.TrayFlyout(Tray);
     public Tail.NetworkFlyout NetworkFlyout => _netFlyout ??= new Tail.NetworkFlyout(Network);
     public Tail.BatteryFlyout BatteryFlyout => _batFlyout ??= new Tail.BatteryFlyout(Battery);
     public Tail.ClockFlyout ClockFlyout => _clockFlyout ??= new Tail.ClockFlyout();
+    public Tail.BinFlyout BinFlyout => _binFlyout ??= new Tail.BinFlyout(Bin, Icons);
 
     /// На ⌃ точка: программа из трея что-то сообщила, а окошко трея ещё не открывали.
     public bool TrayAttention { get; set; }
@@ -86,16 +85,18 @@ public sealed class Services
 
     /// Программу запустили не из дока (из Пуска): её иконка в доке пульсирует.
     public event Action<string>? Launched;
-    public void NoteLaunch(string target) => Launched?.Invoke(target);
+    public void NoteLaunch(string target)
+    {
+        Catalog.New.Opened(target);
+        Launched?.Invoke(target);
+    }
 
-    /// Открыть окно настроек на странице (null — на последней открытой): меню трея, ⚙ на панели.
+    /// Открыть окно настроек на странице (null — на последней открытой): меню трея, правый клик
+    /// по Пуску, поиск в Пуске.
     public Action<string?> OpenSettings { get; set; } = _ => { };
 
     /// Перезапустить оболочку (кнопка в окне настроек).
     public Action Restart { get; set; } = () => { };
-
-    /// Переименовать категорию: поле под её пилюлей на панели монитора с курсором.
-    public Action<string>? RenameCategory { get; set; }
 
     /// Закрепить программу в доке на место `index` (null — в конец закреплённых).
     public void PinApp(string title, string target, int? index = null)

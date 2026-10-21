@@ -11,7 +11,7 @@ using WindowsShell.Native;
 
 namespace WindowsShell;
 
-/// Оболочка на WinUI 3 (WSH-E14): док и верхняя панель на каждом мониторе, меню и окошки
+/// Оболочка на WinUI 3 (WSH-E14): док на каждом мониторе, Пуск, меню и окошки
 /// со стеклом, виджеты. Интерфейс собран кодом, без .xaml, поэтому метаданные контролов
 /// берём у WinUI напрямую.
 public sealed class App : Application, IXamlMetadataProvider
@@ -22,19 +22,36 @@ public sealed class App : Application, IXamlMetadataProvider
     [STAThread]
     public static void Main(string[] args)
     {
-        // Сторож панели задач и аварийный возврат: без окон и без интерфейса.
+        // Аварийный возврат панели задач, сторож, ярлык и остановка: без окон и без интерфейса.
         if (Native.Taskbar.Cli(args)) return;
-        Log.Write(args.Contains(Native.Autostart.Arg) ? "---- запуск вместе с Windows" : "---- запуск");
-        AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Write($"ОШИБКА (домен): {e.ExceptionObject}");
+        if (Native.Watchdog.Cli(args)) return;
+        Log.Write(args.Contains(Native.Autostart.Arg) ? "---- запуск вместе с Windows"
+            : args.Contains(Native.Watchdog.RecoveredArg) ? "---- запуск после сбоя (сторож)" : "---- запуск");
+        // Без отчёта Windows об ошибке: он держит упавший процесс ещё секунд 7, и сторож дольше
+        // не может поднять оболочку. Отчёт пишет сам сторож.
+        Native.Watchdog.NoErrorReporting();
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            Log.Write($"ОШИБКА (домен): {e.ExceptionObject}");
+            // Пока процесс жив, сторож снимает стеки; потом закрываемся сразу, без Windows.
+            Native.Watchdog.DumpMe();
+            Native.Watchdog.DieNow();
+        };
         TaskScheduler.UnobservedTaskException += (_, e) => Log.Error("задача", e.Exception);
         WinRT.ComWrappersSupport.InitializeComWrappers();
         // Второй экземпляр не нужен: два дока друг на друге. После «Перезапустить» ждём,
         // пока прежний процесс закончит выход.
         using var mutex = new Mutex(false, "WindowsShellNative.Shell");
         bool owned;
-        try { owned = mutex.WaitOne(args.Contains("--restart") ? 10_000 : 0); }
+        try { owned = mutex.WaitOne(args.Contains(Native.Watchdog.RestartArg) ? 10_000 : 0); }
         catch (AbandonedMutexException) { owned = true; }
-        if (!owned) return;
+        if (!owned)
+        {
+            // Ярлык «Windows Shell», а сторожа нет (оболочку запустила старая сборка): просим перезапуститься.
+            if (args.Contains(Native.Watchdog.LaunchArg)) Native.Watchdog.PostShell(Native.Watchdog.ShellRestart);
+            return;
+        }
+        Native.Watchdog.Attach();
         if (args.Contains(Native.Autostart.Arg)) WaitForExplorer();
         Start(p =>
         {
@@ -69,6 +86,8 @@ public sealed class App : Application, IXamlMetadataProvider
             step = "конфиг";
             var config = ShellConfig.Load();
             Autostart.Refresh();
+            // Ярлык «Windows Shell» и имя для уведомлений: в фоне, запуск не ждёт.
+            Task.Run(() => { Toasts.Register(); Shortcuts.Refresh(); });
             step = "окно сообщений";
             var messages = new MessageWindow();
             var monitors = new Monitors(queue, messages);
@@ -96,6 +115,7 @@ public sealed class App : Application, IXamlMetadataProvider
                 Battery = new Tail.BatteryService(queue, messages),
                 Language = new Tail.InputLanguage(queue),
                 Notifications = new Tail.Notifications(queue),
+                Bin = new Tail.RecycleBin(queue, messages),
             };
             Ui.Popup.RestoreForeground = tracker.RestoreForeground;
             tracker.Start();

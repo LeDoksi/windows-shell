@@ -7,8 +7,21 @@ public static class SettingsPages
     static StartEntry S(string title, string uri, string glyph, params string[] words) =>
         new(ResultKind.Setting, title, uri, "Параметры") { Glyph = glyph, Keywords = words };
 
+    /// Страницы окна настроек самой оболочки: `shell-settings:<страница>`.
+    public const string ShellPrefix = "shell-settings:";
+
+    static StartEntry Shell(string title, string page, string glyph, params string[] words) =>
+        new(ResultKind.Setting, title, ShellPrefix + page, "Настройки Windows Shell") { Glyph = glyph, Keywords = words };
+
     public static readonly IReadOnlyList<StartEntry> All =
     [
+        Shell("Настройки оболочки", "", "\uE713", "оболочка", "windows shell", "shell", "настройки оболочки"),
+        Shell("Док и хвост", "dock", "\uE8A9", "док", "dock", "хвост", "трей", "закрепить док", "оболочка"),
+        Shell("Пуск: недавние файлы и папки", "start", "\uE8FC", "пуск", "start", "быстрые папки", "оболочка"),
+        Shell("Стекло или тонировка", "look", "\uE790", "стекло", "тонировка", "прозрачность", "оболочка"),
+        Shell("Виджеты оболочки", "widgets", "\uE8A1", "виджеты", "сейчас играет", "звук", "оболочка"),
+        Shell("Клавиши оболочки", "keys", "\uE765", "клавиши", "сочетания", "win", "оболочка"),
+        Shell("Система: автозапуск и панель задач", "system", "\uE770", "автозапуск", "панель задач", "перезапустить оболочку", "оболочка"),
         S("Параметры", "ms-settings:", "", "settings", "настройки"),
         S("Дисплей", "ms-settings:display", "", "экран", "разрешение", "масштаб", "яркость", "монитор", "display"),
         S("Ночной свет", "ms-settings:nightlight", "", "night", "тёплый", "синий"),

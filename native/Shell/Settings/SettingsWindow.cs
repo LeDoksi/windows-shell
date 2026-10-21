@@ -11,7 +11,7 @@ using static WindowsShell.Settings.Rows;
 
 namespace WindowsShell.Settings;
 
-/// Окно настроек (WSH-39, раздел E8 списка проверки): док и хвост, верхняя панель, Пуск, стекло,
+/// Окно настроек (WSH-39, раздел E8 списка проверки): док и хвост, Пуск, стекло,
 /// виджеты, клавиши, автозапуск. Обычное окно со своей строкой заголовка и в Alt+Tab, одно на
 /// всю оболочку. Всё применяется сразу, без кнопки «Сохранить» и без перезапуска.
 public sealed class SettingsWindow
@@ -34,7 +34,6 @@ public sealed class SettingsWindow
     static readonly (string Id, string Title, string Glyph)[] Pages =
     [
         ("dock", "Док и хвост", ""),
-        ("panel", "Верхняя панель", ""),
         ("start", "Пуск", ""),
         ("look", "Внешний вид", ""),
         ("widgets", "Виджеты", ""),
@@ -176,7 +175,6 @@ public sealed class SettingsWindow
         switch (_page)
         {
             case "dock": BuildDock(); break;
-            case "panel": BuildPanel(); break;
             case "start": BuildStart(); break;
             case "look": BuildLook(); break;
             case "widgets": BuildWidgets(); break;
@@ -229,19 +227,13 @@ public sealed class SettingsWindow
             Row("Часы", "Видны всегда.", null)));
     }
 
-    void BuildPanel()
-    {
-        Add(Card(
-            Switch("Закрепить панель", "Панель всегда видна сверху, окна программ не заходят под неё. Выключено — выезжает у верхнего края любого монитора.",
-                _s.Config.Bars.LauncherPinned, on => Change(c => c.Bars.LauncherPinned = on))));
-        Add(Note("Категории добавляются кнопкой ＋ на самой панели, правый клик по категории — переименовать, цвет, удалить."));
-    }
-
     void BuildStart()
     {
         var start = _s.Config.Start;
         Add(Card(
-            Switch("Недавние файлы", "Блок с последними открытыми файлами под поиском.", start.RecentFiles, on => Change(c => c.Start.RecentFiles = on))));
+            Switch("Недавние файлы", "Блок с последними открытыми файлами под поиском.", start.RecentFiles, on => Change(c => c.Start.RecentFiles = on)),
+            Switch("Отмечать новые программы", "Голубая точка и «Новое» у только что установленных программ во «Всех приложениях» и в поиске, сверху блок «Недавно установленные». Пропадает после первого запуска или через 7 дней.",
+                start.MarkNew, on => Change(c => c.Start.MarkNew = on))));
 
         Add(Section("Быстрые папки"));
         var list = new StackPanel { Padding = new Thickness(0, 6, 0, 6) };
@@ -264,13 +256,29 @@ public sealed class SettingsWindow
     {
         var tint = _s.Config.Tint;
         Add(Card(
-            Row("Фон дока, панели и окошек", null, null),
+            Row("Фон дока и окошек", null, null),
             Choice(
             [
                 ("Стекло (размытие того, что за ним)", !tint, () => Change(c => c.Appearance.Glass = "acrylic")),
                 ("Тонировка (ровная тёмная заливка)", tint, () => Change(c => c.Appearance.Glass = "tint")),
             ])));
         Add(Note("Переключается сразу во всех окнах. Само ничего не меняет: только вручную."));
+    }
+
+    /// Временный значок виджета в хвосте: Когда нужно / Всегда / Никогда (design-v2 п. 2).
+    Grid TempWidget(string id, string title, string hint)
+    {
+        var modes = new[] { (ShellConfig.ShowWhenNeeded, "Когда нужно"), (ShellConfig.ShowAlways, "Всегда"), (ShellConfig.ShowNever, "Никогда") };
+        var combo = new ComboBox { MinWidth = 160 };
+        foreach (var (_, text) in modes) combo.Items.Add(text);
+        combo.SelectedIndex = Array.FindIndex(modes, m => m.Item1 == _s.Config.TempWidgetMode(id));
+        combo.SelectionChanged += (_, _) =>
+        {
+            if (combo.SelectedIndex < 0) return;
+            var mode = modes[combo.SelectedIndex].Item1;
+            Change(_ => _s.Config.SetTempWidgetMode(id, mode));
+        };
+        return Row(title, hint, combo);
     }
 
     void BuildWidgets()
@@ -282,8 +290,11 @@ public sealed class SettingsWindow
                 Change(_ => _s.Config.Widget("audio").Enabled = on);
                 Build();
             }),
-            Switch("Сейчас играет", "Музыка и видео в верхней панели, пока играют.", _s.Config.WidgetEnabled("media"), on =>
-                Change(_ => _s.Config.Widget("media").Enabled = on))));
+            TempWidget("media", "Сейчас играет", "Значок в хвосте дока, пока открыт плеер или вкладка с музыкой (играет или на паузе). Клик — обложка и кнопки, средний клик — пауза."),
+            TempWidget("bin", "Корзина", "Значок в хвосте дока, пока в корзине что-то есть, и пока тащишь файлы из Проводника: брось на него — файлы уйдут в корзину. Клик — последние удалённые и «Восстановить»."),
+            Switch("Убрать корзину с рабочего стола", "Пока работает оболочка. При выходе или если оболочка не поднимается, значок возвращается.", _s.Config.HideDesktopBin,
+                on => Change(_ => _s.Config.SetHideDesktopBin(on)))));
+        Add(Note("Временные значки стоят в хвосте левее ⌃. «Когда нужно» — появляются сами, «Всегда» — видны постоянно."));
         if (!audioOn) return;
 
         var a = _s.AudioSettings;
@@ -375,7 +386,7 @@ public sealed class SettingsWindow
         Add(Card(
             Switch("Прятать панель задач Windows", "Её работу делают док и хвост. Вернуть на время: Ctrl+Alt+Shift+T или меню значка оболочки.",
                 _s.Config.Tail.HideTaskbar, on => Change(c => c.Tail.HideTaskbar = on))));
-        Add(Note("Если оболочка закроется или упадёт, панель задач Windows вернётся сама."));
+        Add(Note("Если оболочка упадёт или зависнет, она запустится снова сама. Если падает раз за разом, вернётся панель задач Windows."));
 
         Add(Card(
             Switch("Запускать вместе с Windows", "Оболочка появляется сама после входа в систему.", Autostart.IsOn, on =>
@@ -387,8 +398,8 @@ public sealed class SettingsWindow
 
         Add(Section("Оболочка"));
         Add(Card(
-            Row("Перезапустить оболочку", "Если что-то выглядит не так.", Button("Перезапустить", () => _s.Restart())),
-            Row("Папка оболочки", "Настройки (config.json), журнал (log.txt) и ярлыки, брошенные в категории.", Button("Открыть", () =>
+            Row("Перезапустить оболочку", "Если что-то выглядит не так. Ctrl+Alt+Shift+R или ярлык «Windows Shell» работают, даже когда оболочка зависла или закрыта.", Button("Перезапустить", () => _s.Restart())),
+            Row("Папка оболочки", "Настройки (config.json), журнал (log.txt), отчёты о сбоях (crashes) и ярлыки, брошенные в категории.", Button("Открыть", () =>
                 WindowsShell.Apps.Launcher.Run("explorer.exe", args: $"\"{ShellConfig.Dir}\"")))));
     }
 }
