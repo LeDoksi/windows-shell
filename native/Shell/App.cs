@@ -26,6 +26,7 @@ public sealed class App : Application, IXamlMetadataProvider
         if (Native.Taskbar.Cli(args)) return;
         if (Native.Watchdog.Cli(args)) return;
         if (Shots.SelfTest.Cli(args)) return;
+        if (Clips.SelfTest.Cli(args)) return;
         Log.Write(args.Contains(Native.Autostart.Arg) ? "---- запуск вместе с Windows"
             : args.Contains(Native.Watchdog.RecoveredArg) ? "---- запуск после сбоя (сторож)" : "---- запуск");
         // Без отчёта Windows об ошибке: он держит упавший процесс ещё секунд 7, и сторож дольше
@@ -119,6 +120,7 @@ public sealed class App : Application, IXamlMetadataProvider
                 Notifications = new Tail.Notifications(queue),
                 Bin = bin,
                 Shots = new Shots.ShotsService(queue, config, monitors, bin, messages),
+                Clips = new Clips.ClipsService(queue, config, messages),
             };
             Ui.Popup.RestoreForeground = tracker.RestoreForeground;
             tracker.Start();

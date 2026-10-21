@@ -169,12 +169,14 @@ public sealed class ShellHost
         _s.Keys.DockKeys = k.DockKeys;
         _s.Keys.PrintScreen = _s.Shots.Enabled;
         _s.Keys.WinShiftS = _s.Shots.Enabled && _s.Shots.Settings.WinShiftS;
+        _s.Keys.WinV = _s.Clips.Enabled;
     }
 
     void ApplyWidgets()
     {
         if (_s.Config.WidgetEnabled("media")) _s.Media.Start();
         else _s.Media.Stop();
+        _s.Clips.Apply();
     }
 
     /// Горячие клавиши профилей звука и «следующее устройство».
@@ -252,6 +254,7 @@ public sealed class ShellHost
         {
             case 'X': ToggleTools(null); break;
             case 'S' when shift: _s.Shots.Snap(); break;
+            case 'V': ToggleClips(); break;
             case 'S' or 'Q': ToggleStart(null, search: true); break;
             case 'T' or 'B':
                 Popups.CloseAll();
@@ -263,6 +266,18 @@ public sealed class ShellHost
                 CursorDock()?.ClickIndex(vk - '0', newWindow: shift && !ctrl, admin: shift && ctrl);
                 break;
         }
+    }
+
+    /// Win+V: окошко буфера у текстового курсора окна, где печатали. Если сейчас активно наше
+    /// окошко (Пуск, меню), вставлять будем в окно, которое было до него.
+    void ToggleClips()
+    {
+        var flyout = _s.ClipsFlyout;
+        if (flyout.IsOpen) { flyout.Toggle(IntPtr.Zero); return; }
+        var target = GetForegroundWindow();
+        if (Popups.Current is { IsOpen: true } p && p.Hwnd == target) target = _s.Tracker.Foreground;
+        foreach (var d in _docks.Values) d.EndKeyboard();
+        flyout.Toggle(target);
     }
 
     /// Служебное меню (3.7): пункты как в Win+X Windows 11, буквы-ускорители справа.

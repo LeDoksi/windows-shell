@@ -329,6 +329,34 @@ public sealed class SettingsWindow
         }
         Add(Card(shotRows.ToArray()));
         Add(Note("Снимки и записи старше 3 дней удаляются сами, насовсем. Нужное сохрани: «Сохранить как…» или просто перетащи в папку."));
+
+        Add(Section("Буфер обмена"));
+        var clipsOn = _s.Clips.Enabled;
+        var clipRows = new List<UIElement>
+        {
+            Switch("История буфера обмена (Win+V)", "Win+V — окошко у текстового курсора: закреплённое и всё скопированное за 3 дня, печатаешь — поиск, Enter — вставить. Выключено — Win+V открывает историю Windows, а оболочка ничего не запоминает.", clipsOn, on =>
+            {
+                Change(_ => _s.Config.Widget("clipboard").Enabled = on);
+                Build();
+            }),
+        };
+        if (clipsOn)
+        {
+            var store = _s.Clips.Store;
+            Button? clear = null;
+            var confirm = false;
+            clear = Button("Очистить", () =>
+            {
+                // Первое нажатие спрашивает, второе очищает.
+                if (!confirm) { confirm = true; clear!.Content = Text("Точно очистить?", 13); return; }
+                _s.Clips.ClearHistory();
+                Build();
+            });
+            clear.IsEnabled = store.History.Count > 0;
+            clipRows.Add(Row("История", $"Сейчас {store.History.Count}, закреплённых {store.Pinned.Count}. Очистка не трогает закреплённое.", clear));
+        }
+        Add(Card(clipRows.ToArray()));
+        Add(Note("История хранится только на этом компьютере, 3 дня; закреплённое — всегда. Пароли из менеджеров паролей не запоминаются (они сами помечают такие данные)."));
         if (!audioOn) return;
 
         var a = _s.AudioSettings;
@@ -412,7 +440,7 @@ public sealed class SettingsWindow
                 k.WinSearch, on => Change(c => c.Keys.WinSearch = on)),
             Switch("Win+1…9, Win+T, Win+B — док", "Цифра открывает программу из дока по порядку, Win+T и Win+B — ходить по доку и хвосту стрелками.",
                 k.DockKeys, on => Change(c => c.Keys.DockKeys = on))));
-        Add(Note("Выключенное сочетание работает как в Windows. Остальные (Win+E, Win+D, Win+L…) всегда как в Windows. Горячие клавиши звука — на странице «Виджеты»."));
+        Add(Note("Выключенное сочетание работает как в Windows. Остальные (Win+E, Win+D, Win+L…) всегда как в Windows. Горячие клавиши звука, снимков (PrtSc) и буфера обмена (Win+V) — на странице «Виджеты»."));
     }
 
     void BuildSystem()

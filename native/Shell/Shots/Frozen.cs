@@ -143,7 +143,7 @@ public static class Clip
     }
 
     /// DIB 32 бита, строки снизу вверх (так ждут почти все программы).
-    static unsafe byte[] Dib(D.Bitmap bmp)
+    public static unsafe byte[] Dib(D.Bitmap bmp)
     {
         var w = bmp.Width;
         var h = bmp.Height;
@@ -165,7 +165,8 @@ public static class Clip
         return result;
     }
 
-    static bool Put(IReadOnlyList<(uint Format, byte[] Data)> items)
+    /// Положить в буфер сразу несколько форматов (всё прежнее из буфера уходит).
+    public static bool Put(IReadOnlyList<(uint Format, byte[] Data)> items)
     {
         // Буфер может держать другая программа: пробуем несколько раз.
         var opened = false;
@@ -195,6 +196,9 @@ public static class Clip
     [DllImport("user32.dll")] static extern bool CloseClipboard();
     [DllImport("user32.dll")] static extern bool EmptyClipboard();
     [DllImport("user32.dll")] static extern IntPtr SetClipboardData(uint format, IntPtr mem);
+    /// Номер формата по имени («PNG», «HTML Format»).
+    public static uint Format(string name) => RegisterClipboardFormatW(name);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern uint RegisterClipboardFormatW(string name);
     [DllImport("kernel32.dll")] static extern IntPtr GlobalAlloc(uint flags, UIntPtr size);
     [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr mem);

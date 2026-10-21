@@ -191,7 +191,7 @@ public sealed class BinFlyout : Popup
     }
 
     /// «только что», «5 мин назад», «3 ч назад», «вчера в 14:30», «12.10 в 14:30».
-    static string When(DateTime t)
+    public static string When(DateTime t)
     {
         var ago = DateTime.Now - t;
         if (ago.TotalMinutes < 1) return "только что";
