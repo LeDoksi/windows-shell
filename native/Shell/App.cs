@@ -25,6 +25,7 @@ public sealed class App : Application, IXamlMetadataProvider
         // Аварийный возврат панели задач, сторож, ярлык и остановка: без окон и без интерфейса.
         if (Native.Taskbar.Cli(args)) return;
         if (Native.Watchdog.Cli(args)) return;
+        if (Shots.SelfTest.Cli(args)) return;
         Log.Write(args.Contains(Native.Autostart.Arg) ? "---- запуск вместе с Windows"
             : args.Contains(Native.Watchdog.RecoveredArg) ? "---- запуск после сбоя (сторож)" : "---- запуск");
         // Без отчёта Windows об ошибке: он держит упавший процесс ещё секунд 7, и сторож дольше
@@ -96,6 +97,7 @@ public sealed class App : Application, IXamlMetadataProvider
             step = "звук";
             var audio = new AudioService(queue);
             var tray = new Tray.TrayHost(queue);
+            var bin = new Tail.RecycleBin(queue, messages);
             var services = new Services
             {
                 Queue = queue,
@@ -115,7 +117,8 @@ public sealed class App : Application, IXamlMetadataProvider
                 Battery = new Tail.BatteryService(queue, messages),
                 Language = new Tail.InputLanguage(queue),
                 Notifications = new Tail.Notifications(queue),
-                Bin = new Tail.RecycleBin(queue, messages),
+                Bin = bin,
+                Shots = new Shots.ShotsService(queue, config, monitors, bin, messages),
             };
             Ui.Popup.RestoreForeground = tracker.RestoreForeground;
             tracker.Start();

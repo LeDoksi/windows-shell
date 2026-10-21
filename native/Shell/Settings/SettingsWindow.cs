@@ -295,6 +295,40 @@ public sealed class SettingsWindow
             Switch("Убрать корзину с рабочего стола", "Пока работает оболочка. При выходе или если оболочка не поднимается, значок возвращается.", _s.Config.HideDesktopBin,
                 on => Change(_ => _s.Config.SetHideDesktopBin(on)))));
         Add(Note("Временные значки стоят в хвосте левее ⌃. «Когда нужно» — появляются сами, «Всегда» — видны постоянно."));
+
+        Add(Section("Снимки и запись экрана"));
+        var shotsOn = _s.Shots.Enabled;
+        var shots = _s.Shots.Settings;
+        var shotRows = new List<UIElement>
+        {
+            Switch("Снимки и запись экрана", "PrtSc — снимок (область, окно или весь монитор), Shift+PrtSc — запись, ещё раз Shift+PrtSc — стоп. Выключено — клавиши работают как в Windows.", shotsOn, on =>
+            {
+                Change(_ => _s.Config.Widget("shots").Enabled = on);
+                Build();
+            }),
+        };
+        if (shotsOn)
+        {
+            shotRows.Add(Switch("Значок «Снимки» в хвосте", "Клик — последние снимки и записи, наведение — крупное превью последнего. Во время записи на его месте красная точка с таймером.",
+                shots.Icon, on => Change(_ => _s.Shots.Settings.Icon = on)));
+            shotRows.Add(Switch("Win+Shift+S — тоже наш снимок", "Выключено — Win+Shift+S открывает «Ножницы» Windows.",
+                shots.WinShiftS, on => Change(_ => _s.Shots.Settings.WinShiftS = on)));
+            shotRows.Add(Switch("Звук системы в записи", "То, что слышно в колонках или наушниках. Можно включить и выключить прямо во время записи.",
+                shots.SystemSound, on => Change(_ => _s.Shots.Settings.SystemSound = on)));
+            shotRows.Add(Switch("Микрофон в записи", "Можно включить и выключить прямо во время записи.",
+                shots.Mic, on => Change(_ => _s.Shots.Settings.Mic = on)));
+            shotRows.Add(Row("Папки", "Снимки — «Изображения\\Windows Shell», записи — «Видео\\Записи экрана».", new StackPanel
+            {
+                Orientation = Orientation.Horizontal, Spacing = 8,
+                Children =
+                {
+                    Button("Снимки", WindowsShell.Shots.ShotsService.OpenFolder),
+                    Button("Записи", () => WindowsShell.Apps.Launcher.Run("explorer.exe", args: $"\"{WindowsShell.Shots.ShotFiles.VideosDir}\"")),
+                },
+            }));
+        }
+        Add(Card(shotRows.ToArray()));
+        Add(Note("Снимки и записи старше 3 дней удаляются сами, насовсем. Нужное сохрани: «Сохранить как…» или просто перетащи в папку."));
         if (!audioOn) return;
 
         var a = _s.AudioSettings;

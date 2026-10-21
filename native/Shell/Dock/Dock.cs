@@ -1039,6 +1039,7 @@ public sealed partial class Dock : IBar, IDropZone
         if (Equals(_hovered, target)) return;
         var hadTooltip = _tooltip.Visibility == Visibility.Visible && !Equals(_tooltipFor, "volume");
         _hovered = target;
+        _s.ShotPeek.Hide();
         _hoverTimer.Stop();
         HighlightSlot(target as Slot);
         if (!Equals(_tooltipFor, "volume")) HideTooltip();
@@ -1069,6 +1070,12 @@ public sealed partial class Dock : IBar, IDropZone
         if (_hovered is null || _pressed != null || _drag != null) return;
         if (Popups.Current is { IsOpen: true } p && p != _s.WindowList) return;
         if (_hovered is Item { Entry.Windows.Count: >= 2 } it) { ShowWindowList(it); return; }
+        // Наведение на «Снимки» — крупное превью последнего (design-v2 п. 4).
+        if (_hovered is Slot { Id: "shots" } shots && !_s.Shots.Recording && _s.Shots.Items.Count > 0)
+        {
+            _s.ShotPeek.Show(_s.Shots.Items[0], AnchorPx(shots));
+            return;
+        }
         ShowTooltip(_hovered, TooltipText(_hovered));
     }
 
@@ -1146,6 +1153,7 @@ public sealed partial class Dock : IBar, IDropZone
         var p = e.GetCurrentPoint(_canvas);
         _pressed = HitTest(p.Position);
         _hoverTimer.Stop();
+        _s.ShotPeek.Hide();
         if (!Equals(_tooltipFor, "volume")) HideTooltip();
         e.Handled = true;
         // Иконку можно потащить (кнопку Пуска и хвост нельзя).

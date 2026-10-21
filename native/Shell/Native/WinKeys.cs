@@ -17,7 +17,7 @@ public sealed class WinKeys
     const int WH_KEYBOARD_LL = 13;
     const int WM_KEYDOWN = 0x100, WM_SYSKEYDOWN = 0x104;
     const uint LLKHF_INJECTED = 0x10;
-    const int VK_LWIN = 0x5B, VK_RWIN = 0x5C, VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_MENU = 0x12, VK_MASK = 0xE8;
+    const int VK_LWIN = 0x5B, VK_RWIN = 0x5C, VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_MENU = 0x12, VK_MASK = 0xE8, VK_SNAPSHOT = 0x2C;
     const uint WM_QUIT = 0x12;
 
     readonly DispatcherQueue _queue;
@@ -30,10 +30,15 @@ public sealed class WinKeys
     // Сочетание забрали себе: Windows видела только Win и на отпускании открыла бы свой Пуск.
     bool _swallowedCombo;
     readonly HashSet<int> _swallowUp = [];
+    bool _snapDown;
 
     /// Что из наших сочетаний включено (окно настроек → «Клавиши»). Выключенное Windows
     /// получает как обычно: Win одна — родной Пуск, Win+X — родное меню.
     public volatile bool WinStart = true, WinX = true, WinSearch = true, DockKeys = true;
+
+    /// PrtSc и Shift+PrtSc — наши «Снимки» (design-v2 п. 4); Win+Shift+S — тоже наш снимок.
+    /// Alt+PrtSc, Ctrl+PrtSc и Win+PrtSc остаются Windows.
+    public volatile bool PrintScreen, WinShiftS;
 
     /// Клавиши-стрелки уходят доку (Win+T, Win+B), а не активному окну.
     public volatile bool Capturing;
@@ -43,6 +48,9 @@ public sealed class WinKeys
 
     /// Наше сочетание: клавиша (VK), Shift, Ctrl. Win+X, Win+S, Win+Q, Win+T, Win+B, Win+1…9.
     public event Action<int, bool, bool>? Combo;
+
+    /// PrtSc (false) или Shift+PrtSc (true).
+    public event Action<bool>? Snapshot;
 
     /// Клавиша для дока, пока он в режиме клавиатуры: VK и Shift.
     public event Action<int, bool>? Captured;
@@ -84,6 +92,7 @@ public sealed class WinKeys
     bool Ours(int vk, bool shift, bool ctrl)
     {
         if (vk is >= 0x31 and <= 0x39) return DockKeys && (!ctrl || shift); // Win+цифра, Win+Shift+цифра, Win+Ctrl+Shift+цифра
+        if (vk == 'S' && shift && !ctrl) return WinShiftS;
         if (shift || ctrl) return false;
         return vk switch
         {
@@ -109,6 +118,20 @@ public sealed class WinKeys
             if ((k.flags & LLKHF_INJECTED) != 0 && k.dwExtraInfo == Mark) return CallNextHookEx(IntPtr.Zero, code, w, l);
             var vk = (int)k.vkCode;
             var down = (int)w is WM_KEYDOWN or WM_SYSKEYDOWN;
+
+            // PrtSc: забираем себе, Windows («Ножницы» по PrtSc) его не видит. Автоповтор, пока
+            // держат, — не новый снимок. Если нажатие не пришло, а пришло только отпускание — снимок по нему.
+            if (vk == VK_SNAPSHOT && PrintScreen && !_winDown && !Down(VK_CONTROL) && !Down(VK_MENU))
+            {
+                var fire = !_snapDown;
+                _snapDown = down;
+                if (fire)
+                {
+                    var shift = Down(VK_SHIFT);
+                    Post(() => Snapshot?.Invoke(shift));
+                }
+                return 1;
+            }
 
             if (vk is VK_LWIN or VK_RWIN)
             {
