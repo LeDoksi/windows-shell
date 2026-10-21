@@ -10,8 +10,8 @@ using static WindowsShell.Native.Win32;
 
 namespace WindowsShell.Shots;
 
-/// Миниатюра над доком после снимка или записи (design-v2 п. 4): видна 5 секунд, даже если док
-/// спрятан. Полоска снизу показывает, сколько ещё; навёл курсор — не исчезает. Потянул — файл
+/// Миниатюра в правом нижнем углу экрана после снимка или записи (design-v2 п. 4): видна 5 секунд.
+/// Полоска снизу показывает, сколько ещё; навёл курсор — не исчезает. Потянул — файл
 /// перетаскивается в любое окно; клик — редактор (у записи — открыть); правый клик — убрать.
 public sealed class ShotThumb
 {
@@ -60,7 +60,7 @@ public sealed class ShotThumb
 
     public bool Visible => _win.Visible;
 
-    /// Показать над прямоугольником (значок «Снимки» в хвосте), физические пиксели.
+    /// Показать в правом нижнем углу монитора, где `anchorPx` (значок «Снимки» в хвосте), физические пиксели.
     public async void Show(ShotItem item, string caption, Rect anchorPx)
     {
         var v = ++_version;
@@ -94,11 +94,9 @@ public sealed class ShotThumb
         var area = MonitorInfo(mon).rcMonitor;
         var w = (int)Math.Ceiling(W * scale);
         var h = (int)Math.Ceiling((_imageH + 34 + 3) * scale);
-        var margin = (int)(8 * scale);
-        var x = (int)(_anchor.X + _anchor.Width / 2 - w / 2.0);
-        x = Math.Clamp(x, area.Left + margin, area.Right - margin - w);
-        var y = Math.Max(area.Top + margin, (int)(_anchor.Y - 10 * scale - h));
-        _win.Place(x, y, w, h);
+        // В правом нижнем углу экрана: над спрятанным доком миниатюра висела в воздухе.
+        var margin = (int)(16 * scale);
+        _win.Place(area.Right - margin - w, area.Bottom - margin - h, w, h);
     }
 
     void Tick()

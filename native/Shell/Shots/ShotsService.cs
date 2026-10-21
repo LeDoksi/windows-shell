@@ -10,7 +10,7 @@ using D = System.Drawing;
 namespace WindowsShell.Shots;
 
 /// Виджет «Снимки» (design-v2 п. 4, замена ShareX): PrtSc — снимок, Shift+PrtSc — запись
-/// (повторно — стоп), история за 3 дня, миниатюра над доком, редактор.
+/// (повторно — стоп), история за 3 дня, миниатюра в углу экрана, редактор.
 public sealed class ShotsService
 {
     readonly DispatcherQueue _queue;
