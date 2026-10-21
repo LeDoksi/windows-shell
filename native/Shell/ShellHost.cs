@@ -77,10 +77,18 @@ public sealed class ShellHost
             _s.Tracker.Scan();
         };
         _s.Messages.Flash += _s.Tracker.Flash;
-        _s.Messages.Message += (msg, _, _) =>
+        _s.Messages.Message += (msg, w, _) =>
         {
-            // Windows завершает работу: убираем резерв места и значок.
-            if (msg == 0x0016 /* WM_ENDSESSION */) Shutdown();
+            // Windows завершает работу: убираем резерв места и значок, сторож не поднимает.
+            if (msg == 0x0016 /* WM_ENDSESSION */ && w != IntPtr.Zero)
+            {
+                Watchdog.Leaving(Watchdog.Leave.Session);
+                Shutdown();
+            }
+            // Просьбы сторожа: ярлык «Windows Shell» или Ctrl+Alt+Shift+R, остановка перед обновлением.
+            else if (msg == Watchdog.ShellRestart) Restart();
+            else if (msg == Watchdog.ShellQuit) Quit();
+            else if (msg == Watchdog.ShellSimulate) Watchdog.Simulate((int)w);
         };
         ApplyWidgets();
         ApplyKeys();
@@ -136,7 +144,8 @@ public sealed class ShellHost
     void ApplyTaskbar()
     {
         if (_s.Config.Tail.HideTaskbar && !_taskbarReturned) Taskbar.Hide(tray: _s.Tray.Running);
-        else if (Taskbar.Hidden) Taskbar.Restore("выключено в настройках");
+        // Leftover: спрятал прошлый процесс, упавший до выхода (сторож поднял нас, а прятать уже не надо).
+        else if (Taskbar.Hidden || Taskbar.Leftover) Taskbar.Restore("выключено в настройках");
     }
 
     /// Новым окнам говорим «у тебя есть кнопка на панели задач»: тогда программы шлют нам
@@ -351,6 +360,7 @@ public sealed class ShellHost
     /// окна на экране и процесс живым).
     public void Quit()
     {
+        Watchdog.Leaving(Watchdog.Leave.Quit);
         Shutdown();
         Log.Write("выход");
         Environment.Exit(0);
@@ -358,11 +368,16 @@ public sealed class ShellHost
 
     void Restart()
     {
+        // Новый процесс запускает сторож; его нет — запускаемся сами.
+        var watchdog = Watchdog.Leaving(Watchdog.Leave.Restart);
         _restarting = Taskbar.Hidden;
         Shutdown();
         Log.Write("перезапуск");
-        try { Process.Start(new ProcessStartInfo(Environment.ProcessPath!, "--restart") { UseShellExecute = false }); }
-        catch (Exception e) { Log.Error("перезапуск", e); }
+        if (!watchdog)
+        {
+            try { Process.Start(new ProcessStartInfo(Environment.ProcessPath!, Watchdog.RestartArg) { UseShellExecute = false }); }
+            catch (Exception e) { Log.Error("перезапуск", e); }
+        }
         Environment.Exit(0);
     }
 }

@@ -375,7 +375,7 @@ public sealed class SettingsWindow
         Add(Card(
             Switch("Прятать панель задач Windows", "Её работу делают док и хвост. Вернуть на время: Ctrl+Alt+Shift+T или меню значка оболочки.",
                 _s.Config.Tail.HideTaskbar, on => Change(c => c.Tail.HideTaskbar = on))));
-        Add(Note("Если оболочка закроется или упадёт, панель задач Windows вернётся сама."));
+        Add(Note("Если оболочка упадёт или зависнет, она запустится снова сама. Если падает раз за разом, вернётся панель задач Windows."));
 
         Add(Card(
             Switch("Запускать вместе с Windows", "Оболочка появляется сама после входа в систему.", Autostart.IsOn, on =>
@@ -387,8 +387,8 @@ public sealed class SettingsWindow
 
         Add(Section("Оболочка"));
         Add(Card(
-            Row("Перезапустить оболочку", "Если что-то выглядит не так.", Button("Перезапустить", () => _s.Restart())),
-            Row("Папка оболочки", "Настройки (config.json), журнал (log.txt) и ярлыки, брошенные в категории.", Button("Открыть", () =>
+            Row("Перезапустить оболочку", "Если что-то выглядит не так. Ctrl+Alt+Shift+R или ярлык «Windows Shell» работают, даже когда оболочка зависла или закрыта.", Button("Перезапустить", () => _s.Restart())),
+            Row("Папка оболочки", "Настройки (config.json), журнал (log.txt), отчёты о сбоях (crashes) и ярлыки, брошенные в категории.", Button("Открыть", () =>
                 WindowsShell.Apps.Launcher.Run("explorer.exe", args: $"\"{ShellConfig.Dir}\"")))));
     }
 }

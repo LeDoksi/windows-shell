@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using static WindowsShell.Native.Win32;
 
@@ -6,14 +5,13 @@ namespace WindowsShell.Native;
 
 /// Панель задач Windows (WSH-41, WSH-42): прячем на всех мониторах и гарантированно возвращаем.
 /// Как спайк WSH-43 (`spike_taskbar.rs`): сначала сохраняем исходное автоскрытие в файл, потом
-/// поднимаем сторожа, потом прячем. Возврат, от частого к аварийному:
-/// 1. выход и перезапуск оболочки, Ctrl+Alt+Shift+T, пункт меню трея;
-/// 2. процесс-сторож (тот же exe с `--taskbar-watchdog <pid>`): ждёт смерти оболочки и возвращает;
+/// прячем. Возврат, от частого к аварийному:
+/// 1. выход оболочки, Ctrl+Alt+Shift+T, пункт меню трея;
+/// 2. сторож (`Watchdog`, WSH-101): оболочка упала и не поднимается — возвращает он;
 /// 3. следующий запуск: файл состояния остался — значит, прошлый раз не вернули;
 /// 4. `scripts/restore-taskbar.cmd` — вообще без нашего exe (тот же файл состояния).
 public static class Taskbar
 {
-    public const string WatchdogArg = "--taskbar-watchdog";
     public const string RestoreArg = "--restore-taskbar";
 
     /// Файл с исходным автоскрытием. Есть файл — панель сейчас «наша» и её надо вернуть.
@@ -23,7 +21,6 @@ public static class Taskbar
 
     static volatile bool _hiding;
     static Thread? _poll;
-    static Process? _watchdog;
 
     /// Сейчас прячем.
     public static bool Hidden => _hiding;
@@ -36,21 +33,11 @@ public static class Taskbar
             Restore("--restore-taskbar");
             return true;
         }
-        var i = Array.IndexOf(args, WatchdogArg);
-        if (i < 0) return false;
-        var pid = i + 1 < args.Length && int.TryParse(args[i + 1], out var p) ? p : 0;
-        Log.Write($"сторож панели задач ждёт процесс {pid}");
-        try
-        {
-            using var shell = Process.GetProcessById(pid);
-            shell.WaitForExit();
-        }
-        catch { }
-        // Оболочка ушла сама и всё вернула — файла нет. Перезапуск: файл уже у нового процесса.
-        if (Owner() == pid) Restore("сторож: оболочка завершилась");
-        else Log.Write("сторож: оболочка завершилась, панель уже возвращена");
-        return true;
+        return false;
     }
+
+    /// Файл состояния есть: панель спрятана нами (может быть, прошлым процессом оболочки).
+    public static bool Leftover => File.Exists(StateFile);
 
     /// Спрятать панель задач на всех мониторах. `tray` — работает ли наш трей (тогда при
     /// возврате программы перерегистрируют иконки у Проводника).
@@ -73,7 +60,6 @@ public static class Taskbar
             Log.Error("файл состояния панели задач", e);
             return;
         }
-        StartWatchdog();
         // Автоскрытие отдаёт место панели под окна программ; само окно прячем поверх.
         AppBar(ABM_SETSTATE, ABS_AUTOHIDE);
         _hiding = true;
@@ -122,18 +108,6 @@ public static class Taskbar
         }
     }
 
-    /// Процесс оболочки, который сейчас прячет панель (из файла состояния), 0 — никто.
-    static int Owner()
-    {
-        try
-        {
-            if (!File.Exists(StateFile)) return 0;
-            var line = File.ReadAllLines(StateFile).FirstOrDefault(l => l.StartsWith("pid="));
-            return line != null && int.TryParse(line[4..], out var pid) ? pid : 0;
-        }
-        catch { return 0; }
-    }
-
     /// Проводник перезапустился (TaskbarCreated): новая панель снова видна и без автоскрытия.
     public static void OnTaskbarCreated()
     {
@@ -153,24 +127,6 @@ public static class Taskbar
         if (now - _loggedAgain < 10_000) return;
         _loggedAgain = now;
         Log.Write($"панель задач спрятана снова ({reason})");
-    }
-
-    static void StartWatchdog()
-    {
-        if (_watchdog is { HasExited: false }) return;
-        try
-        {
-            _watchdog = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, $"{WatchdogArg} {Environment.ProcessId}")
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            });
-        }
-        catch (Exception e)
-        {
-            // Без сторожа панель всё равно вернётся при следующем запуске или скриптом.
-            Log.Error("сторож панели задач", e);
-        }
     }
 
     /// Окна панели задач на всех мониторах (наше окно трея тоже класса Shell_TrayWnd — его не берём).
