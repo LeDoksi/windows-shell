@@ -25,15 +25,18 @@ public sealed class NewApps
         {
             _seen ??= Load();
             var first = _seen.Count == 0;
+            // Ярлык самой оболочки «Windows Shell» (создаёт она сама при первом запуске) — не новость.
+            if (_seen.TryGetValue(Native.Toasts.Aumid, out var own) && own != null) { _seen[Native.Toasts.Aumid] = null; Save(); }
             var unseen = apps.Where(a => !_seen.ContainsKey(a.Target)).Select(a => a.Target).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             if (unseen.Count == 0) return false;
             var old = first || unseen.Count > Burst;
             if (!first && old) Log.Write($"Пуск: {unseen.Count} незнакомых программ сразу — не отмечаю как новые");
             var now = DateTime.Now;
-            foreach (var t in unseen) _seen[t] = old ? null : now;
+            foreach (var t in unseen) _seen[t] = old || string.Equals(t, Native.Toasts.Aumid, StringComparison.OrdinalIgnoreCase) ? null : now;
             Save();
-            if (!old) Log.Write($"Пуск: новые программы: {string.Join(", ", apps.Where(a => unseen.Contains(a.Target)).Select(a => a.Title))}");
-            return !old;
+            var fresh = unseen.Where(t => _seen[t] != null).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (fresh.Count > 0) Log.Write($"Пуск: новые программы: {string.Join(", ", apps.Where(a => fresh.Contains(a.Target)).Select(a => a.Title))}");
+            return fresh.Count > 0;
         }
     }
 

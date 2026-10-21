@@ -27,11 +27,15 @@ public sealed class App : Application, IXamlMetadataProvider
         if (Native.Watchdog.Cli(args)) return;
         Log.Write(args.Contains(Native.Autostart.Arg) ? "---- запуск вместе с Windows"
             : args.Contains(Native.Watchdog.RecoveredArg) ? "---- запуск после сбоя (сторож)" : "---- запуск");
+        // Без отчёта Windows об ошибке: он держит упавший процесс ещё секунд 7, и сторож дольше
+        // не может поднять оболочку. Отчёт пишет сам сторож.
+        Native.Watchdog.NoErrorReporting();
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
             Log.Write($"ОШИБКА (домен): {e.ExceptionObject}");
-            // Процесс сейчас закроется: сторож успевает снять отчёт и потом поднимет оболочку.
+            // Пока процесс жив, сторож снимает стеки; потом закрываемся сразу, без Windows.
             Native.Watchdog.DumpMe();
+            Native.Watchdog.DieNow();
         };
         TaskScheduler.UnobservedTaskException += (_, e) => Log.Error("задача", e.Exception);
         WinRT.ComWrappersSupport.InitializeComWrappers();

@@ -6,9 +6,9 @@ using Microsoft.Diagnostics.Runtime;
 namespace WindowsShell.Native;
 
 /// Отчёты о сбоях (WSH-101): папка оболочки `crashes`. Каждый сбой или зависание — текстовый
-/// отчёт (что случилось, где стоял каждый поток .NET, хвост журнала), при зависании и исключении
-/// ещё снимок памяти процесса (.dmp). Пишет сторож, пока процесс оболочки ещё жив.
-/// Хранятся последние 5 отчётов и 3 снимка (снимок весит сотни мегабайт).
+/// отчёт (что случилось, где стоял каждый поток .NET, хвост журнала), при зависании ещё снимок
+/// памяти процесса (.dmp). Пишет сторож, пока процесс оболочки ещё жив.
+/// Хранятся последние 5 отчётов и 2 снимка (снимок весит 150 МБ).
 public static class CrashReports
 {
     public static readonly string Dir = Path.Combine(Config.ShellConfig.Dir, "crashes");
@@ -37,7 +37,7 @@ public static class CrashReports
             File.WriteAllText(txt, sb.ToString());
             Log.Write($"отчёт о сбое: {txt}");
             Prune("*.txt", 5);
-            Prune("*.dmp", 3);
+            Prune("*.dmp", 2);
         }
         catch (Exception e)
         {
@@ -87,8 +87,15 @@ public static class CrashReports
             // Как `dotnet-dump --type Heap`: кучи .NET и стеки есть, картинки и код библиотек — нет.
             const uint type = 0x1 /* DataSegs */ | 0x4 /* HandleData */ | 0x20 /* UnloadedModules */ | 0x200 /* PrivateReadWriteMemory */
                 | 0x800 /* FullMemoryInfo */ | 0x1000 /* ThreadInfo */ | 0x20000 /* IgnoreInaccessibleMemory */;
-            if (MiniDumpWriteDump(p.Handle, (uint)pid, fs.SafeFileHandle, type, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero)) return null;
-            var error = Marshal.GetLastWin32Error();
+            var error = 0;
+            // ERROR_PARTIAL_COPY: процесс в этот момент читает кто-то ещё (служба отчётов Windows) — ещё раз.
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                if (attempt > 0) { Thread.Sleep(500); fs.SetLength(0); fs.Position = 0; }
+                if (MiniDumpWriteDump(p.Handle, (uint)pid, fs.SafeFileHandle, type, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero)) return null;
+                error = Marshal.GetLastWin32Error();
+                if (error != 299 && error != unchecked((int)0x8007012B)) break;
+            }
             fs.Close();
             File.Delete(file);
             return $"ошибка {error}";

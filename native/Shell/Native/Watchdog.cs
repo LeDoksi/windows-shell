@@ -128,6 +128,12 @@ public static class Watchdog
         if (h != IntPtr.Zero) SendMessageTimeoutW(h, WM_DUMP, Environment.ProcessId, IntPtr.Zero, SMTO_ABORTIFHUNG, 60_000, out _);
     }
 
+    /// Падение не отдаём службе отчётов Windows (SEM_NOGPFAULTERRORBOX).
+    public static void NoErrorReporting() => SetErrorMode(SetErrorMode(0) | 0x1 /* FAILCRITICALERRORS */ | 0x2 /* NOGPFAULTERRORBOX */);
+
+    /// Необработанное исключение записано: закрыться сразу, с кодом исключения .NET.
+    public static void DieNow() => TerminateProcess(GetCurrentProcess(), 0xE0434352);
+
     /// Проверка сторожа (`--simulate`): 1 — падение, 2 — зависание потока интерфейса.
     public static void Simulate(int what)
     {
@@ -248,6 +254,9 @@ public static class Watchdog
         if (!ReferenceEquals(_shell, shell)) _shell?.Dispose();
         _shell = shell;
         _pid = shell?.Id ?? 0;
+        // Открыть процесс сразу: иначе у оболочки, запущенной не сторожем (задача входа), код выхода
+        // уже не прочитать, когда она закончится.
+        try { _ = shell?.SafeHandle; } catch (Exception e) { Log.Error("сторож: открыть процесс оболочки", e); }
         _probe = IntPtr.Zero;
         _leaving = null;
         _reported = false;
@@ -283,7 +292,8 @@ public static class Watchdog
                 if ((int)w == _pid && !_reported)
                 {
                     _reported = true;
-                    CrashReports.Write("необработанное исключение", _pid, stacks: true, dump: true);
+                    // Исключение и его стек уже в журнале; снимок памяти (150 МБ, 10 с) — только при зависании.
+                    CrashReports.Write("необработанное исключение", _pid, stacks: true, dump: false);
                 }
                 return new IntPtr(1);
             }
@@ -523,6 +533,9 @@ public static class Watchdog
     struct MSG { public IntPtr hwnd; public uint message; public IntPtr wParam, lParam; public uint time; public int x, y; }
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern uint RegisterWindowMessageW(string name);
+    [DllImport("kernel32.dll")] static extern uint SetErrorMode(uint mode);
+    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll")] static extern bool TerminateProcess(IntPtr process, uint code);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindowW(string cls, string? title);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindowExW(IntPtr parent, IntPtr after, string cls, string? title);
     [DllImport("user32.dll")] static extern bool PostMessageW(IntPtr h, uint msg, IntPtr w, IntPtr l);
