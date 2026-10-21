@@ -266,7 +266,7 @@ public sealed class SettingsWindow
     }
 
     /// Временный значок виджета в хвосте: Когда нужно / Всегда / Никогда (design-v2 п. 2).
-    Grid TempWidget(string id, string title, string hint)
+    Grid TempWidget(string id, string title, string hint, bool rebuild = false)
     {
         var modes = new[] { (ShellConfig.ShowWhenNeeded, "Когда нужно"), (ShellConfig.ShowAlways, "Всегда"), (ShellConfig.ShowNever, "Никогда") };
         var combo = new ComboBox { MinWidth = 160 };
@@ -277,6 +277,7 @@ public sealed class SettingsWindow
             if (combo.SelectedIndex < 0) return;
             var mode = modes[combo.SelectedIndex].Item1;
             Change(_ => _s.Config.SetTempWidgetMode(id, mode));
+            if (rebuild) Build();
         };
         return Row(title, hint, combo);
     }
@@ -357,6 +358,38 @@ public sealed class SettingsWindow
         }
         Add(Card(clipRows.ToArray()));
         Add(Note("История хранится только на этом компьютере, 3 дня; закреплённое — всегда. Пароли из менеджеров паролей не запоминаются (они сами помечают такие данные)."));
+
+        Add(Section("Заряд устройств"));
+        var charge = _s.Charge;
+        var chargeRows = new List<UIElement>
+        {
+            TempWidget("charge", "Значок «Заряд»", "Сам находит Bluetooth-клавиатуры, мыши, геймпады, наушники, гарнитуры и мыши Logitech (без G HUB). «Когда нужно» — значок появляется, когда что-то садится. «Никогда» — ни значка, ни уведомлений.", rebuild: true),
+        };
+        if (charge.Enabled)
+        {
+            var thresholds = ChargeSettings.Thresholds;
+            var combo = new ComboBox { MinWidth = 120 };
+            foreach (var t in thresholds) combo.Items.Add($"{t} %");
+            combo.SelectedIndex = Math.Max(0, Array.IndexOf(thresholds, charge.Threshold));
+            combo.SelectionChanged += (_, _) =>
+            {
+                if (combo.SelectedIndex < 0) return;
+                var value = thresholds[combo.SelectedIndex];
+                Change(_ => _s.Charge.Settings.Threshold = value);
+            };
+            chargeRows.Add(Row("Порог «пора зарядить»", $"Уведомление при этом заряде и ещё одно при {WindowsShell.Charge.ChargeService.Second} %. Снова — только после зарядки.", combo));
+            chargeRows.Add(Switch("Сигнал в игре", "В полноэкранной игре Windows прячет уведомления: тогда мягкий сигнал в наушники и плашка в правом верхнем углу на 5 секунд.",
+                charge.Settings.GameSound, on => Change(_ => _s.Charge.Settings.GameSound = on)));
+            chargeRows.Add(Row("Как это выглядит", "Сигнал и плашка, как в игре.", Button("Показать", () => _s.Charge.Preview())));
+            foreach (var (key, name) in charge.Settings.Ignored)
+            {
+                var k = key;
+                chargeRows.Add(Row(name, "Не следим (скрыто правым кликом в окошке).", Button("Вернуть", () => { _s.Charge.Unignore(k); Build(); })));
+            }
+        }
+        Add(Card(chargeRows.ToArray()));
+        if (charge.Enabled)
+            Add(Note(charge.Watched.Any() ? "Сейчас: " + string.Join(", ", charge.Watched.Select(d => d.Percent is { } p ? $"{d.Name} {p} %" : $"{d.Name} (не подключено)")) + "." : "Пока не найдено ни одного устройства с батареей."));
         if (!audioOn) return;
 
         var a = _s.AudioSettings;
