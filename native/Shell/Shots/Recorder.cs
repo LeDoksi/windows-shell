@@ -128,31 +128,27 @@ public sealed class Recorder
         if (await Task.WhenAny(_firstFrame.Task, Task.Delay(2000)) != _firstFrame.Task)
             throw new InvalidOperationException("захват экрана не дал ни одного кадра");
 
-        var video = new VideoStreamDescriptor(VideoEncodingProperties.CreateUncompressed(MediaEncodingSubtypes.Bgra8, (uint)_w, (uint)_h));
-        var audio = new AudioStreamDescriptor(AudioEncodingProperties.CreatePcm(AudioMix.Rate, 2, 16));
-        var source = new MediaStreamSource(video, audio) { BufferTime = TimeSpan.Zero, CanSeek = false };
-        source.Starting += (_, a) => a.Request.SetActualStartPosition(TimeSpan.Zero);
-        source.SampleRequested += OnSampleRequested;
-
-        var profile = new MediaEncodingProfile
+        // Не все кодировщики принимают любой набор (на mephPC: MF_E_TRANSFORM_TYPE_NOT_SET):
+        // пробуем по очереди, от лучшего к простому. Без звука — только если со звуком никак.
+        PrepareTranscodeResult? prepared = null;
+        foreach (var (sound, hardware, template) in Variants)
         {
-            Container = new ContainerEncodingProperties { Subtype = MediaEncodingSubtypes.Mpeg4 },
-            Video = VideoEncodingProperties.CreateH264(),
-            Audio = AudioEncodingProperties.CreateAac(AudioMix.Rate, 2, 192_000),
-        };
-        profile.Video.Width = (uint)_w;
-        profile.Video.Height = (uint)_h;
-        profile.Video.FrameRate.Numerator = Fps;
-        profile.Video.FrameRate.Denominator = 1;
-        profile.Video.PixelAspectRatio.Numerator = 1;
-        profile.Video.PixelAspectRatio.Denominator = 1;
-        // ~0,15 бита на пиксель: текст на экране остаётся чётким.
-        profile.Video.Bitrate = (uint)Math.Clamp((long)_w * _h * Fps * 15 / 100, 2_000_000, 40_000_000);
-
-        _file = await FileRandomAccessStream.OpenAsync(_path, FileAccessMode.ReadWrite, StorageOpenOptions.None, FileOpenDisposition.CreateAlways);
-        var transcoder = new MediaTranscoder { HardwareAccelerationEnabled = true };
-        var prepared = await transcoder.PrepareMediaStreamSourceTranscodeAsync(source, _file, profile);
-        if (!prepared.CanTranscode) throw new InvalidOperationException($"кодировщик не готов: {prepared.FailureReason}");
+            try
+            {
+                prepared = await Prepare(sound, hardware, template);
+                Variant = $"{(sound ? "со звуком" : "без звука")}, {(hardware ? "видеокарта" : "процессор")}, {(template ? "профиль Windows" : "свой профиль")}";
+                HasSound = sound;
+                if (!sound) { _audio.SystemOn = false; _audio.MicOn = false; }
+                break;
+            }
+            catch (Exception e)
+            {
+                var line = $"{(sound ? "звук" : "без звука")}/{(hardware ? "видеокарта" : "процессор")}/{(template ? "профиль Windows" : "свой профиль")}: 0x{e.HResult:X8} {e.Message.Trim()}";
+                Attempts.Add(line);
+                Log.Write($"запись: кодировщик не принял {line}");
+            }
+        }
+        if (prepared is null) throw new InvalidOperationException("кодировщик видео не принял ни один вариант (подробности в журнале)");
         _audio.Reset();
         _clock.Start();
         _transcode = prepared.TranscodeAsync().AsTask();
@@ -160,7 +156,61 @@ public sealed class Recorder
         {
             if (t.IsFaulted && !_stopping) Failed?.Invoke(t.Exception?.InnerException?.Message ?? "ошибка кодировщика");
         }, TaskScheduler.Default);
-        Log.Write($"запись: {_w}×{_h}, {Fps} кадров/с, {profile.Video.Bitrate / 1000} кбит/с → {System.IO.Path.GetFileName(_path)}");
+        Log.Write($"запись: {_w}×{_h}, {Fps} кадров/с, {Bitrate / 1000} кбит/с, {Variant} → {System.IO.Path.GetFileName(_path)}");
+    }
+
+    static readonly (bool Sound, bool Hardware, bool Template)[] Variants =
+        [(true, true, false), (true, true, true), (true, false, false), (true, false, true), (false, true, false), (false, false, false)];
+
+    /// Как в итоге пишется (для журнала и проверки).
+    public string Variant { get; private set; } = "";
+    /// Варианты, которые кодировщик не принял.
+    public List<string> Attempts { get; } = [];
+    /// В файле есть звук.
+    public bool HasSound { get; private set; }
+
+    /// ~0,15 бита на пиксель: текст на экране остаётся чётким.
+    uint Bitrate => (uint)Math.Clamp((long)_w * _h * Fps * 15 / 100, 2_000_000, 40_000_000);
+
+    async Task<PrepareTranscodeResult> Prepare(bool sound, bool hardware, bool template)
+    {
+        var input = VideoEncodingProperties.CreateUncompressed(MediaEncodingSubtypes.Bgra8, (uint)_w, (uint)_h);
+        input.FrameRate.Numerator = Fps;
+        input.FrameRate.Denominator = 1;
+        input.PixelAspectRatio.Numerator = 1;
+        input.PixelAspectRatio.Denominator = 1;
+        var video = new VideoStreamDescriptor(input);
+        var source = sound
+            ? new MediaStreamSource(video, new AudioStreamDescriptor(AudioEncodingProperties.CreatePcm(AudioMix.Rate, 2, 16)))
+            : new MediaStreamSource(video);
+        source.BufferTime = TimeSpan.Zero;
+        source.CanSeek = false;
+        source.Starting += (_, a) => a.Request.SetActualStartPosition(TimeSpan.Zero);
+        source.SampleRequested += OnSampleRequested;
+
+        var profile = template
+            ? MediaEncodingProfile.CreateMp4(VideoEncodingQuality.HD1080p)
+            : new MediaEncodingProfile
+            {
+                Container = new ContainerEncodingProperties { Subtype = MediaEncodingSubtypes.Mpeg4 },
+                Video = VideoEncodingProperties.CreateH264(),
+                Audio = AudioEncodingProperties.CreateAac(AudioMix.Rate, 2, 192_000),
+            };
+        profile.Video.Width = (uint)_w;
+        profile.Video.Height = (uint)_h;
+        profile.Video.FrameRate.Numerator = Fps;
+        profile.Video.FrameRate.Denominator = 1;
+        profile.Video.PixelAspectRatio.Numerator = 1;
+        profile.Video.PixelAspectRatio.Denominator = 1;
+        profile.Video.Bitrate = Bitrate;
+        if (!sound) profile.Audio = null;
+
+        _file?.Dispose();
+        _file = await FileRandomAccessStream.OpenAsync(_path, FileAccessMode.ReadWrite, StorageOpenOptions.None, FileOpenDisposition.CreateAlways);
+        var transcoder = new MediaTranscoder { HardwareAccelerationEnabled = hardware };
+        var prepared = await transcoder.PrepareMediaStreamSourceTranscodeAsync(source, _file, profile);
+        if (!prepared.CanTranscode) throw new InvalidOperationException($"кодировщик не готов: {prepared.FailureReason}");
+        return prepared;
     }
 
     /// Новый кадр монитора: вырезаем свою область в «последний кадр».

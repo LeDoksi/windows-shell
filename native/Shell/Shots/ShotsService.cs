@@ -180,6 +180,8 @@ public sealed class ShotsService
                 Toasts.Show("Запись экрана остановилась", reason, silent: true);
                 StopRecording();
             });
+            if (!rec.HasSound && (s.SystemSound || s.Mic))
+                Toasts.Show("Запись идёт без звука", "Кодировщик Windows не принял звук. Подробности в журнале оболочки.", silent: true);
             _rec = rec;
             _frame = new RecordFrame(this, r, screen);
             _tick.Start();

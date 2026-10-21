@@ -85,7 +85,8 @@ public static class SelfTest
         var videoPath = ShotFiles.NewPath(ShotKind.Video);
         sw.Restart();
         var rec = await Recorder.Start(mon, bounds, region, videoPath, system: true, mic: false);
-        say($"запись началась за {sw.ElapsedMilliseconds} мс");
+        foreach (var line in rec.Attempts) say($"не принят вариант {line}");
+        say($"запись началась за {sw.ElapsedMilliseconds} мс: {rec.Variant}");
         await Task.Delay(4000);
         rec.Paused = true;
         await Task.Delay(2000);
