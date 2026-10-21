@@ -11,7 +11,7 @@ using static WindowsShell.Settings.Rows;
 
 namespace WindowsShell.Settings;
 
-/// Окно настроек (WSH-39, раздел E8 списка проверки): док и хвост, верхняя панель, Пуск, стекло,
+/// Окно настроек (WSH-39, раздел E8 списка проверки): док и хвост, Пуск, стекло,
 /// виджеты, клавиши, автозапуск. Обычное окно со своей строкой заголовка и в Alt+Tab, одно на
 /// всю оболочку. Всё применяется сразу, без кнопки «Сохранить» и без перезапуска.
 public sealed class SettingsWindow
@@ -34,7 +34,6 @@ public sealed class SettingsWindow
     static readonly (string Id, string Title, string Glyph)[] Pages =
     [
         ("dock", "Док и хвост", ""),
-        ("panel", "Верхняя панель", ""),
         ("start", "Пуск", ""),
         ("look", "Внешний вид", ""),
         ("widgets", "Виджеты", ""),
@@ -176,7 +175,6 @@ public sealed class SettingsWindow
         switch (_page)
         {
             case "dock": BuildDock(); break;
-            case "panel": BuildPanel(); break;
             case "start": BuildStart(); break;
             case "look": BuildLook(); break;
             case "widgets": BuildWidgets(); break;
@@ -229,14 +227,6 @@ public sealed class SettingsWindow
             Row("Часы", "Видны всегда.", null)));
     }
 
-    void BuildPanel()
-    {
-        Add(Card(
-            Switch("Закрепить панель", "Панель всегда видна сверху, окна программ не заходят под неё. Выключено — выезжает у верхнего края любого монитора.",
-                _s.Config.Bars.LauncherPinned, on => Change(c => c.Bars.LauncherPinned = on))));
-        Add(Note("Категории добавляются кнопкой ＋ на самой панели, правый клик по категории — переименовать, цвет, удалить."));
-    }
-
     void BuildStart()
     {
         var start = _s.Config.Start;
@@ -264,7 +254,7 @@ public sealed class SettingsWindow
     {
         var tint = _s.Config.Tint;
         Add(Card(
-            Row("Фон дока, панели и окошек", null, null),
+            Row("Фон дока и окошек", null, null),
             Choice(
             [
                 ("Стекло (размытие того, что за ним)", !tint, () => Change(c => c.Appearance.Glass = "acrylic")),

@@ -11,7 +11,7 @@ using WindowsShell.Native;
 
 namespace WindowsShell;
 
-/// Оболочка на WinUI 3 (WSH-E14): док и верхняя панель на каждом мониторе, меню и окошки
+/// Оболочка на WinUI 3 (WSH-E14): док на каждом мониторе, Пуск, меню и окошки
 /// со стеклом, виджеты. Интерфейс собран кодом, без .xaml, поэтому метаданные контролов
 /// берём у WinUI напрямую.
 public sealed class App : Application, IXamlMetadataProvider

@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
 using WindowsShell.Apps;
 using WindowsShell.Config;
@@ -16,7 +17,9 @@ using VirtualKey = Windows.System.VirtualKey;
 namespace WindowsShell.Start;
 
 /// Свой Пуск (раздел 3): поиск сверху, вкладки категорий и «Все приложения», недавние файлы,
-/// внизу пользователь, быстрые папки и питание. Фокус всё время в поле поиска: печать сразу
+/// внизу пользователь, быстрые папки и питание. Категориями управляют здесь же (v2, верхней
+/// панели больше нет): ＋ новая, правый клик — переименовать, цвет, удалить, перетаскивание
+/// вкладок, файлы из Проводника на вкладку или в сетку. Фокус всё время в поле поиска: печать сразу
 /// ищет, а стрелки, Tab и Enter ходят по Пуску (выделение видно, только когда работаешь
 /// с клавиатуры). Иконки можно перетащить на док (закрепить) и на другую вкладку.
 public sealed class StartMenu : Popup
@@ -36,6 +39,8 @@ public sealed class StartMenu : Popup
         public string? FromCategory;
         /// Вкладка (для броска на неё).
         public string? Tab;
+        /// Вкладка категории: её можно перетащить выше или ниже.
+        public bool IsCategory;
         public StartEntry? Entry;
         public string? Tip;
     }
@@ -85,6 +90,20 @@ public sealed class StartMenu : Popup
     IDropZone? _zoneUnder;
     readonly DragGhost _ghost = new();
     readonly DispatcherTimer _dragPoll = new() { Interval = TimeSpan.FromMilliseconds(16) };
+
+    // Вкладка с полем названия: id категории или NewTab (＋).
+    const string NewTab = "+new";
+    string? _editing;
+    TextBox? _editBox;
+
+    // Перетаскивание вкладки категории вверх-вниз.
+    Cell? _tabDrag;
+    int _tabFrom, _tabTo, _tabStartY;
+    double _tabStep;
+
+    // Файлы из Проводника над вкладкой: держишь 0,6 с — она открывается.
+    Cell? _fileTab;
+    readonly DispatcherTimer _springTab = new() { Interval = TimeSpan.FromMilliseconds(600) };
 
     public StartMenu(Services services, Catalog catalog) : base(activating: true)
     {
@@ -194,10 +213,32 @@ public sealed class StartMenu : Popup
         };
         Win.Root.PointerReleased += (_, e) =>
         {
+            if (_tabDrag != null) { e.Handled = true; FinishTabDrag(commit: true); }
             if (_dragCell != null) { e.Handled = true; FinishDrag(commit: true); }
+        };
+        _springTab.Tick += (_, _) =>
+        {
+            _springTab.Stop();
+            if (_fileTab?.Tab is { } id && !Searching) SelectTab(id);
+        };
+        // Файлы из Проводника в сетку категории: на то место, куда бросили.
+        _main.AllowDrop = true;
+        _main.DragEnter += OnGridFileOver;
+        _main.DragOver += OnGridFileOver;
+        _main.Drop += (_, e) =>
+        {
+            if (_tab == All || Searching) return;
+            OnFileDrop(e, _tab, GridIndexAt(e.GetPosition(_grid)));
         };
         _dragPoll.Tick += (_, _) =>
         {
+            if (_tabDrag != null)
+            {
+                if (GetAsyncKeyState(0x1B) < 0) FinishTabDrag(commit: false);
+                else if (GetAsyncKeyState(0x01) >= 0) FinishTabDrag(commit: true);
+                else { GetCursorPos(out var t); UpdateTabDrag(t); }
+                return;
+            }
             if (_dragCell is null) { _dragPoll.Stop(); return; }
             if (GetAsyncKeyState(0x1B) < 0) { FinishDrag(commit: false); return; }
             if (GetAsyncKeyState(0x01) >= 0) { FinishDrag(commit: true); return; }
@@ -205,7 +246,7 @@ public sealed class StartMenu : Popup
             UpdateDrag(c);
         };
         _filesDelay.Tick += (_, _) => { _filesDelay.Stop(); SearchFiles(); };
-        _s.Config.Changed += () => { if (IsOpen && _dragCell is null) Refresh(); };
+        _s.Config.Changed += () => { if (IsOpen && _dragCell is null && _tabDrag is null) Refresh(); };
         _catalog.Changed += () => { if (IsOpen && _dragCell is null) Refresh(); };
     }
 
@@ -228,6 +269,8 @@ public sealed class StartMenu : Popup
         _zone = Zone.Main;
         _sel = -1;
         _letters.Visibility = Visibility.Collapsed;
+        _editing = null;
+        _editBox = null;
         var start = _s.Config.Start;
         _tab = start.LastTab is { } t && (t == All || _s.Config.CategoryById(t) != null) ? t : _s.Config.Categories.FirstOrDefault()?.Id ?? All;
         // Высота: не больше экрана над доком.
@@ -284,11 +327,158 @@ public sealed class StartMenu : Popup
         _tabsPanel.Children.Clear();
         var cells = new List<Cell>();
         foreach (var cat in _s.Config.Categories)
-            cells.Add(TabCell(cat.Id, cat.Name, Theme.Parse(cat.Color)));
-        cells.Add(TabCell(All, "Все приложения", null));
-        foreach (var c in cells) _tabsPanel.Children.Add(c.Visual);
+        {
+            // Переименовывают: на месте вкладки поле названия (с клавиатуры его не выбрать).
+            if (_editing == cat.Id) { _tabsPanel.Children.Add(EditBox(cat.Name, Theme.Parse(cat.Color))); continue; }
+            var cell = TabCell(cat.Id, cat.Name, Theme.Parse(cat.Color));
+            cells.Add(cell);
+            _tabsPanel.Children.Add(cell.Visual);
+        }
+        _tabsPanel.Children.Add(_editing == NewTab ? EditBox("", null) : NewTabButton());
+        var all = TabCell(All, "Все приложения", null);
+        cells.Add(all);
+        _tabsPanel.Children.Add(all.Visual);
         SetCells(Zone.Tabs, cells, cols: 1);
     }
+
+    /// ＋ под вкладками категорий: на её месте поле названия, Enter создаёт, Esc отменяет.
+    Border NewTabButton()
+    {
+        var content = new Grid { ColumnSpacing = 10, VerticalAlignment = VerticalAlignment.Center };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        content.Children.Add(new FontIcon { Glyph = "\uE710", FontFamily = Theme.Icons, FontSize = 12, Foreground = Theme.Brush(Theme.TextSecondary) });
+        var text = new TextBlock { Text = "Новая категория", FontFamily = Theme.Font, FontSize = 13, Foreground = Theme.Brush(Theme.TextSecondary), VerticalAlignment = VerticalAlignment.Center };
+        Grid.SetColumn(text, 1);
+        content.Children.Add(text);
+        var b = new Border { Height = 36, Padding = new Thickness(10, 0, 10, 0), CornerRadius = new CornerRadius(6), Child = content, Background = Theme.Brush(Microsoft.UI.Colors.Transparent) };
+        b.PointerEntered += (_, _) => b.Background = Theme.Brush(Theme.Hover);
+        b.PointerExited += (_, _) => b.Background = Theme.Brush(Microsoft.UI.Colors.Transparent);
+        b.PointerPressed += (_, e) => e.Handled = true;
+        b.PointerReleased += (_, e) =>
+        {
+            e.Handled = true;
+            if (e.GetCurrentPoint(b).Properties.PointerUpdateKind == PointerUpdateKind.LeftButtonReleased) BeginEdit(NewTab);
+        };
+        return b;
+    }
+
+    Border EditBox(string name, Windows.UI.Color? color)
+    {
+        var content = new Grid { ColumnSpacing = 6, VerticalAlignment = VerticalAlignment.Center };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        if (color is { } c) content.Children.Add(new Ellipse { Width = 8, Height = 8, Fill = Theme.Brush(c), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
+        else content.Children.Add(new FontIcon { Glyph = "\uE710", FontFamily = Theme.Icons, FontSize = 12, Foreground = Theme.Brush(Theme.TextSecondary) });
+        var box = new TextBox
+        {
+            Text = name,
+            PlaceholderText = "Название категории",
+            FontFamily = Theme.Font,
+            FontSize = 13,
+            MinHeight = 30,
+            Padding = new Thickness(8, 5, 8, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        Grid.SetColumn(box, 1);
+        content.Children.Add(box);
+        _editBox = box;
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key == VirtualKey.Enter) { e.Handled = true; EndEdit(box, commit: true); }
+            else if (e.Key == VirtualKey.Escape) { e.Handled = true; EndEdit(box, commit: false); }
+        };
+        // Кликнул в другое место Пуска: название сохраняется, как в Проводнике.
+        box.LostFocus += (_, _) => EndEdit(box, commit: true);
+        box.Loaded += (_, _) => { box.Focus(FocusState.Programmatic); box.SelectAll(); };
+        return new Border { Height = 36, Padding = new Thickness(4, 0, 4, 0), CornerRadius = new CornerRadius(6), Child = content, Background = Theme.Brush(Theme.Selected) };
+    }
+
+    void BeginEdit(string id)
+    {
+        _editing = id;
+        BuildTabs();
+        Paint();
+    }
+
+    void EndEdit(TextBox box, bool commit)
+    {
+        if (_editBox != box || _editing is not { } id) return;
+        _editing = null;
+        _editBox = null;
+        var name = box.Text.Trim();
+        if (commit && name.Length > 0)
+        {
+            if (id == NewTab)
+            {
+                var newId = "";
+                _s.Config.Update(c =>
+                {
+                    newId = _s.Config.NewId("category");
+                    var used = c.Categories.Select(x => x.Color.ToUpperInvariant()).ToHashSet();
+                    var color = ShellConfig.Colors.FirstOrDefault(x => !used.Contains(x)) ?? ShellConfig.Colors[c.Categories.Count % ShellConfig.Colors.Length];
+                    c.Categories.Add(new Category { Id = newId, Name = name, Color = color });
+                });
+                // Новая категория сразу открыта: можно бросать в неё файлы.
+                SelectTab(newId);
+            }
+            else _s.Config.Update(c => { if (c.Categories.FirstOrDefault(x => x.Id == id) is { } cat) cat.Name = name; });
+        }
+        // Поле убирается из дерева не прямо в его же событии.
+        _s.Queue.TryEnqueue(() =>
+        {
+            if (!IsOpen) return;
+            BuildTabs();
+            Paint();
+            _search.Focus(FocusState.Programmatic);
+        });
+    }
+
+    /// Меню вкладки категории (правый клик): переименовать, цвет, удалить с подтверждением.
+    List<MenuItem> CategoryMenu(Category cat) =>
+    [
+        new() { Text = "Переименовать", Glyph = "\uE8AC", Invoke = () => BeginEdit(cat.Id) },
+        new()
+        {
+            Text = "Цвет",
+            Glyph = "\uE790",
+            Children = ShellConfig.Colors.Select(color => new MenuItem
+            {
+                Text = ColorName(color),
+                Checked = string.Equals(cat.Color, color, StringComparison.OrdinalIgnoreCase),
+                Invoke = () => _s.Config.Update(_ => cat.Color = color),
+            }).ToList(),
+        },
+        MenuItem.Sep,
+        new()
+        {
+            Text = "Удалить категорию",
+            Glyph = "\uE74D",
+            Danger = true,
+            Children =
+            [
+                new()
+                {
+                    Text = cat.Items.Count > 0 ? $"Удалить «{cat.Name}» и {cat.Items.Count} плиток" : $"Удалить «{cat.Name}»",
+                    Danger = true,
+                    Invoke = () => _s.Config.Update(c => c.Categories.Remove(cat)),
+                },
+            ],
+        },
+    ];
+
+    static string ColorName(string hex) => hex.ToUpperInvariant() switch
+    {
+        "#43B4F5" => "Голубой",
+        "#B07CF0" => "Фиолетовый",
+        "#56D27A" => "Зелёный",
+        "#F0A64A" => "Оранжевый",
+        "#F06B8E" => "Розовый",
+        "#4CC3D9" => "Бирюзовый",
+        "#F2C94C" => "Жёлтый",
+        "#8E9AAF" => "Серый",
+        _ => hex,
+    };
 
     Cell TabCell(string id, string name, Windows.UI.Color? color)
     {
@@ -301,7 +491,24 @@ public sealed class StartMenu : Popup
         Grid.SetColumn(text, 1);
         content.Children.Add(text);
         var border = new Border { Height = 36, Padding = new Thickness(10, 0, 10, 0), CornerRadius = new CornerRadius(6), Child = content, HorizontalAlignment = HorizontalAlignment.Stretch };
-        var cell = new Cell { Visual = border, Invoke = () => SelectTab(id), Tab = id };
+        var cell = new Cell { Visual = border, Invoke = () => SelectTab(id), Tab = id, IsCategory = id != All };
+        if (cell.IsCategory)
+        {
+            cell.Menu = at => { if (_s.Config.CategoryById(id) is { } cat) ShowMenu(at, CategoryMenu(cat)); };
+            border.AllowDrop = true;
+            border.DragEnter += (_, e) => OnTabFileOver(cell, e);
+            border.DragOver += (_, e) => OnTabFileOver(cell, e);
+            border.DragLeave += (_, _) =>
+            {
+                // Переход между точкой и текстом вкладки — не уход с неё.
+                if (GetCursorPos(out var c) && TabAt(c) == cell) return;
+                if (_fileTab != cell) return;
+                _fileTab = null;
+                _springTab.Stop();
+                Paint();
+            };
+            border.Drop += (_, e) => { e.Handled = true; OnFileDrop(e, id, null); };
+        }
         Wire(cell);
         return cell;
     }
@@ -371,7 +578,7 @@ public sealed class StartMenu : Popup
         }
         if (items.Count == 0)
         {
-            _empty.Text = "Здесь пока пусто. Добавить программу: правый клик в «Все приложения» → «Добавить в категорию» или перетащи иконку на эту вкладку";
+            _empty.Text = "Здесь пока пусто. Добавить программу: правый клик в «Все приложения» → «Добавить в категорию» или перетащи иконку на эту вкладку. Файлы и папки можно бросить сюда из Проводника";
             _empty.Visibility = Visibility.Visible;
         }
         _gridScroll.ChangeView(null, 0, null, true);
@@ -977,6 +1184,11 @@ public sealed class StartMenu : Popup
             case ResultKind.File when admin:
                 Launcher.Run(e.Target, null, admin: true);
                 break;
+            case ResultKind.Setting when e.Target.StartsWith(SettingsPages.ShellPrefix):
+                // Настройки самой оболочки (верхней панели с ⚙ больше нет).
+                var page = e.Target[SettingsPages.ShellPrefix.Length..];
+                _s.OpenSettings(page.Length > 0 ? page : null);
+                break;
             default:
                 Launcher.Open(e.Target);
                 break;
@@ -1024,6 +1236,7 @@ public sealed class StartMenu : Popup
         b.PointerReleased += (_, e) =>
         {
             e.Handled = true;
+            if (_tabDrag != null) { FinishTabDrag(commit: true); return; }
             if (_dragCell != null) { FinishDrag(commit: true); return; }
             var kind = e.GetCurrentPoint(b).Properties.PointerUpdateKind;
             var pressed = _pressCell;
@@ -1051,7 +1264,7 @@ public sealed class StartMenu : Popup
                 var bg = showSel ? Theme.Selected : c == _hoverCell ? Theme.Hover : tabOn ? Theme.Selected : Microsoft.UI.Colors.Transparent;
                 c.Visual.Background = Theme.Brush(bg);
                 c.Visual.BorderBrush = Theme.Brush(selected && _keyboard ? Windows.UI.Color.FromArgb(0xB0, 255, 255, 255) : tabOn && zone == Zone.Tabs ? Theme.Stroke : Microsoft.UI.Colors.Transparent);
-                if (_dropTab == c) c.Visual.Background = Theme.Brush(Windows.UI.Color.FromArgb(0x40, 0x4C, 0xC2, 0xFF));
+                if (_dropTab == c || _fileTab == c) c.Visual.Background = Theme.Brush(Windows.UI.Color.FromArgb(0x40, 0x4C, 0xC2, 0xFF));
             }
         }
     }
@@ -1146,6 +1359,9 @@ public sealed class StartMenu : Popup
         {
             case VirtualKey.Escape when _dragCell != null:
                 FinishDrag(commit: false);
+                break;
+            case VirtualKey.Escape when _tabDrag != null:
+                FinishTabDrag(commit: false);
                 break;
             case VirtualKey.Escape when _letters.Visibility == Visibility.Visible:
                 _letters.Visibility = Visibility.Collapsed;
@@ -1249,12 +1465,13 @@ public sealed class StartMenu : Popup
 
     void OnPressMoved()
     {
-        if (_pressCell?.Drag is null) return;
+        if (_pressCell is not { } pressed || pressed.Drag is null && !pressed.IsCategory) return;
         if (GetAsyncKeyState(0x01) >= 0) { _pressCell = null; return; }
         GetCursorPos(out var c);
         if (Math.Abs(c.X - _pressAt.X) + Math.Abs(c.Y - _pressAt.Y) < 6 * Win.Scale) return;
-        _dragCell = _pressCell;
         _pressCell = null;
+        if (pressed.IsCategory) { BeginTabDrag(pressed, c); return; }
+        _dragCell = pressed;
         if (_pointer != null) Win.Root.CapturePointer(_pointer);
         _ghost.Show(FindImage(_dragCell.Visual), c.X, c.Y);
         _dragCell.Visual.Opacity = 0.35;
@@ -1342,6 +1559,109 @@ public sealed class StartMenu : Popup
         Paint();
     }
 
+    // ---------- порядок вкладок ----------
+
+    List<Cell> CategoryTabs => Cells(Zone.Tabs).Where(t => t.IsCategory).ToList();
+
+    void BeginTabDrag(Cell cell, POINT c)
+    {
+        var tabs = CategoryTabs;
+        _tabFrom = _tabTo = tabs.IndexOf(cell);
+        if (_tabFrom < 0) return;
+        _tabDrag = cell;
+        _tabStartY = c.Y;
+        _tabStep = cell.Visual.ActualHeight + _tabsPanel.Spacing;
+        cell.Visual.Opacity = 0.6;
+        if (_pointer != null) Win.Root.CapturePointer(_pointer);
+        _dragPoll.Start();
+    }
+
+    /// Вкладка едет за курсором, соседи расступаются; в дереве ничего не переставляем
+    /// (иначе теряется захват мыши), только сдвигаем отрисовку.
+    void UpdateTabDrag(POINT c)
+    {
+        var tabs = CategoryTabs;
+        var dy = (c.Y - _tabStartY) / Win.Scale;
+        _tabTo = Math.Clamp(_tabFrom + (int)Math.Round(dy / _tabStep), 0, tabs.Count - 1);
+        for (var i = 0; i < tabs.Count; i++)
+        {
+            var v = tabs[i].Visual;
+            if (v.RenderTransform is not TranslateTransform t) v.RenderTransform = t = new TranslateTransform();
+            t.Y = i == _tabFrom ? dy
+                : i > _tabFrom && i <= _tabTo ? -_tabStep
+                : i < _tabFrom && i >= _tabTo ? _tabStep
+                : 0;
+        }
+    }
+
+    void FinishTabDrag(bool commit)
+    {
+        var cell = _tabDrag;
+        _tabDrag = null;
+        _dragPoll.Stop();
+        Win.Root.ReleasePointerCaptures();
+        if (cell is null) return;
+        foreach (var t in CategoryTabs) { t.Visual.RenderTransform = null; t.Visual.Opacity = 1; }
+        if (!commit || _tabTo == _tabFrom) return;
+        var order = CategoryTabs.Select(t => t.Tab!).ToList();
+        var id = order[_tabFrom];
+        order.RemoveAt(_tabFrom);
+        order.Insert(Math.Clamp(_tabTo, 0, order.Count), id);
+        _s.Config.Update(c => c.Categories = order.Select(x => c.Categories.FirstOrDefault(y => y.Id == x)).OfType<Category>()
+            .Concat(c.Categories.Where(y => !order.Contains(y.Id))).ToList());
+    }
+
+    // ---------- файлы из Проводника ----------
+
+    void OnTabFileOver(Cell cell, DragEventArgs e)
+    {
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems)) { e.AcceptedOperation = DataPackageOperation.None; return; }
+        e.AcceptedOperation = DataPackageOperation.Copy;
+        e.DragUIOverride.Caption = $"Добавить в «{_s.Config.CategoryById(cell.Tab!)?.Name}»";
+        if (_fileTab == cell) return;
+        _fileTab = cell;
+        _springTab.Stop();
+        if (cell.Tab != _tab) _springTab.Start();
+        Paint();
+    }
+
+    void OnGridFileOver(object sender, DragEventArgs e)
+    {
+        if (_tab == All || Searching || !e.DataView.Contains(StandardDataFormats.StorageItems)) { e.AcceptedOperation = DataPackageOperation.None; return; }
+        e.AcceptedOperation = DataPackageOperation.Copy;
+        e.DragUIOverride.Caption = $"Добавить в «{_s.Config.CategoryById(_tab)?.Name}»";
+        if (_fileTab != null) { _fileTab = null; _springTab.Stop(); Paint(); }
+    }
+
+    /// Место в сетке под точкой (в координатах сетки).
+    int GridIndexAt(Point p)
+    {
+        var count = _s.Config.CategoryById(_tab)?.Items.Count ?? 0;
+        var col = Math.Clamp((int)((p.X + Spacing / 2) / (TileW + Spacing)), 0, (int)Cols - 1);
+        var row = Math.Max(0, (int)(p.Y / (TileH + Spacing)));
+        return Math.Clamp(row * (int)Cols + col, 0, count);
+    }
+
+    async void OnFileDrop(DragEventArgs e, string categoryId, int? index)
+    {
+        _springTab.Stop();
+        _fileTab = null;
+        Paint();
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems)) return;
+        var deferral = e.GetDeferral();
+        try
+        {
+            var files = await e.DataView.GetStorageItemsAsync();
+            var items = files.Select(f => f.Path).Where(p => !string.IsNullOrEmpty(p))
+                .Select(p => ShellConfig.ItemFromPath(ShellConfig.KeepShortcut(p))).ToList();
+            if (items.Count == 0) return;
+            _s.AddToCategory(categoryId, items, index);
+            if (_tab != categoryId) SelectTab(categoryId);
+        }
+        catch (Exception ex) { Log.Error("файлы в категорию", ex); }
+        finally { deferral.Complete(); }
+    }
+
     // ---------- общее ----------
 
     /// Картинку учётной записи читаем сами: по пути file:// WinUI в распакованном приложении
@@ -1381,6 +1701,11 @@ public sealed class StartMenu : Popup
     protected override void OnClosing()
     {
         if (_dragCell != null) FinishDrag(commit: false);
+        if (_tabDrag != null) FinishTabDrag(commit: false);
+        _springTab.Stop();
+        _fileTab = null;
+        _editing = null;
+        _editBox = null;
         _pressCell = null;
         _hoverCell = null;
         _filesCancel?.Cancel();

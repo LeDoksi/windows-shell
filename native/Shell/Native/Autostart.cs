@@ -84,7 +84,7 @@ public static class Autostart
         var xml = $"""
             <?xml version="1.0" encoding="UTF-16"?>
             <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-              <RegistrationInfo><Description>Windows Shell: док, верхняя панель и Пуск при входе в систему.</Description></RegistrationInfo>
+              <RegistrationInfo><Description>Windows Shell: док и Пуск при входе в систему.</Description></RegistrationInfo>
               <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>{user}</UserId></LogonTrigger></Triggers>
               <Principals><Principal id="Author"><UserId>{user}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
               <Settings>

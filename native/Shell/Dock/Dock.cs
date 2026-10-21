@@ -188,6 +188,8 @@ public sealed partial class Dock : IBar, IDropZone
         _springLoad.Interval = TimeSpan.FromMilliseconds(600);
         _springLoad.Tick += (_, _) =>
         {
+            // Файл держат над кнопкой Пуска: Пуск открывается, файл можно бросить в категорию (v2 п. 1).
+            if (_dropOnto is { IsStart: true }) { if (!_s.StartMenu.IsOpen) _s.ToggleStart(this); return; }
             if (_dropOnto?.Entry?.Windows.FirstOrDefault() is { } w) _s.Tracker.Activate(w.Hwnd);
         };
 
@@ -1368,6 +1370,20 @@ public sealed partial class Dock : IBar, IDropZone
         if (!e.DataView.Contains(StandardDataFormats.StorageItems)) { e.AcceptedOperation = DataPackageOperation.None; return; }
         var p = e.GetPosition(_canvas);
         if (!_hover) SetHover(true);
+        // Над кнопкой Пуска: подержать — откроется Пуск с категориями.
+        if (_items.FirstOrDefault(i => i.IsStart) is { } start && p.X >= start.X && p.X <= start.X + start.Size)
+        {
+            SetGap(-1);
+            if (_dropOnto != start)
+            {
+                _dropOnto = start;
+                _springLoad.Stop();
+                _springLoad.Start();
+            }
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+        if (_dropOnto is { IsStart: true }) { _dropOnto = null; _springLoad.Stop(); }
         if (_dragPrograms)
         {
             // Программы и ярлыки: между иконками промежуток, отпустил — закрепилось там.
@@ -1398,7 +1414,7 @@ public sealed partial class Dock : IBar, IDropZone
         var programs = _dragPrograms;
         _dragPaths = null;
         ClearExternalDrag();
-        if (paths is null || paths.Count == 0) return;
+        if (paths is null || paths.Count == 0 || onto is { IsStart: true }) return;
         if (programs)
         {
             foreach (var path in paths)

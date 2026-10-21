@@ -47,8 +47,6 @@ public sealed class Services
     MenuPopup? _menu;
     SoundFlyout? _sound;
     WindowListPopup? _list;
-    Panel.CategoryWindow? _category;
-    Panel.NameFlyout? _name;
     Panel.MediaFlyout? _mediaFlyout;
     Start.StartMenu? _start;
     Tray.TrayFlyout? _trayFlyout;
@@ -59,8 +57,6 @@ public sealed class Services
     public MenuPopup Menu => _menu ??= new MenuPopup();
     public SoundFlyout SoundFlyout => _sound ??= new SoundFlyout(Audio, Icons, Config);
     public WindowListPopup WindowList => _list ??= new WindowListPopup(Tracker, Icons);
-    public Panel.CategoryWindow CategoryWindow => _category ??= new Panel.CategoryWindow(this);
-    public Panel.NameFlyout NameFlyout => _name ??= new Panel.NameFlyout();
     public Panel.MediaFlyout MediaFlyout => _mediaFlyout ??= new Panel.MediaFlyout(Media);
     public Start.StartMenu StartMenu => _start ??= new Start.StartMenu(this, Catalog);
     public Tray.TrayFlyout TrayFlyout => _trayFlyout ??= new Tray.TrayFlyout(Tray);
@@ -88,14 +84,12 @@ public sealed class Services
     public event Action<string>? Launched;
     public void NoteLaunch(string target) => Launched?.Invoke(target);
 
-    /// Открыть окно настроек на странице (null — на последней открытой): меню трея, ⚙ на панели.
+    /// Открыть окно настроек на странице (null — на последней открытой): меню трея, правый клик
+    /// по Пуску, поиск в Пуске.
     public Action<string?> OpenSettings { get; set; } = _ => { };
 
     /// Перезапустить оболочку (кнопка в окне настроек).
     public Action Restart { get; set; } = () => { };
-
-    /// Переименовать категорию: поле под её пилюлей на панели монитора с курсором.
-    public Action<string>? RenameCategory { get; set; }
 
     /// Закрепить программу в доке на место `index` (null — в конец закреплённых).
     public void PinApp(string title, string target, int? index = null)

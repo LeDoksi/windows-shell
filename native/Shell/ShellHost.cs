@@ -3,19 +3,18 @@ using Windows.Foundation;
 using WindowsShell.Apps;
 using WindowsShell.Audio;
 using WindowsShell.Native;
-using WindowsShell.Panel;
 using WindowsShell.Ui;
 using static WindowsShell.Native.Win32;
 
 namespace WindowsShell;
 
-/// Оболочка целиком: док и верхняя панель на каждом мониторе (раздел 9), значок в трее с
-/// меню (раздел 5), горячие клавиши звука, стекло. Следит за мониторами и конфигом.
+/// Оболочка целиком: док на каждом мониторе (раздел 9), значок в трее с меню (раздел 5),
+/// горячие клавиши звука, стекло. Следит за мониторами и конфигом. Верхней панели в v2 нет:
+/// категории живут в Пуске (design-v2 п. 1).
 public sealed class ShellHost
 {
     readonly Services _s;
     readonly Dictionary<string, Dock.Dock> _docks = [];
-    readonly Dictionary<string, TopPanel> _panels = [];
     readonly Hotkeys _hotkeys;
     TrayIcon? _tray;
     PathWatch? _pathWatch;
@@ -38,17 +37,6 @@ public sealed class ShellHost
             _taskbarReturned = true;
             Taskbar.Restore("вручную");
             foreach (var d in _docks.Values) d.Move(d.Screen, d.FullTail, force: true);
-        };
-        _s.RenameCategory = id =>
-        {
-            // Поле появляется под пилюлей на мониторе, где курсор.
-            GetCursorPos(out var p);
-            var screen = _s.Monitors.At(p.X, p.Y);
-            if (_panels.TryGetValue(screen.Name, out var panel))
-            {
-                _s.Bars.Reveal(panel);
-                panel.Rename(id);
-            }
         };
     }
 
@@ -104,7 +92,7 @@ public sealed class ShellHost
     /// Монитор системного хвоста: выбранный в меню трея, иначе основной.
     Screen TailScreen => _s.Monitors.ByName(_s.Config.Bars.Monitor) ?? _s.Monitors.Primary;
 
-    /// Док и панель на каждом подключённом мониторе; пропавшие мониторы — их окна убираются.
+    /// Док на каждом подключённом мониторе; пропавшие мониторы — их окна убираются.
     void Sync()
     {
         var screens = _s.Monitors.All;
@@ -113,11 +101,6 @@ public sealed class ShellHost
         {
             _docks[name].Close();
             _docks.Remove(name);
-        }
-        foreach (var name in _panels.Keys.Where(n => screens.All(s => s.Name != n)).ToList())
-        {
-            _panels[name].Close();
-            _panels.Remove(name);
         }
         foreach (var screen in screens)
         {
@@ -128,13 +111,6 @@ public sealed class ShellHost
                 dock = new Dock.Dock(_s, screen, full);
                 _docks[screen.Name] = dock;
                 dock.Show();
-            }
-            if (_panels.TryGetValue(screen.Name, out var panel)) panel.Move(screen);
-            else
-            {
-                panel = new TopPanel(_s, screen);
-                _panels[screen.Name] = panel;
-                panel.Show();
             }
         }
         _s.Bars.Publish();
@@ -164,7 +140,7 @@ public sealed class ShellHost
         Glass.Set(_s.Config.Tint);
         ApplyTaskbar();
         ApplyKeys();
-        // Сменили монитор хвоста — хвост переезжает; закрепили док или панель — резерв места.
+        // Сменили монитор хвоста — хвост переезжает; закрепили док — резерв места.
         Sync();
         _s.Bars.Update();
         ApplyWidgets();
@@ -303,6 +279,9 @@ public sealed class ShellHost
             MenuItem.Sep,
             new() { Text = "Завершение работы или выход из системы", Glyph = "\uE7E8", Key = 'U', Children = WindowsShell.Start.StartMenu.PowerMenu(signOut: true) },
             new() { Text = "Рабочий стол", Glyph = "\uE8FC", Key = 'D', Invoke = () => WinKeys.SendWinCombo('D') },
+            MenuItem.Sep,
+            // Настройки самой оболочки: после ухода верхней панели с ⚙ они здесь, в поиске Пуска и в трее.
+            new() { Text = "Настройки оболочки", Glyph = "\uE713", Invoke = () => _s.OpenSettings(null) },
         ]);
         return items;
     }
@@ -327,7 +306,6 @@ public sealed class ShellHost
             new() { Text = "Настройки…", Glyph = "", Invoke = () => _s.OpenSettings(null) },
             new() { Text = "Монитор для хвоста", Glyph = "", Children = screens },
             new() { Text = "Закрепить док", Checked = bars.DockPinned, Glyph = "", Invoke = () => _s.Config.Update(c => c.Bars.DockPinned = !c.Bars.DockPinned) },
-            new() { Text = "Закрепить панель", Checked = bars.LauncherPinned, Glyph = "", Invoke = () => _s.Config.Update(c => c.Bars.LauncherPinned = !c.Bars.LauncherPinned) },
             new()
             {
                 Text = "Стекло",
