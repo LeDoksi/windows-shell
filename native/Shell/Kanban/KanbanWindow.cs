@@ -68,6 +68,7 @@ public sealed class KanbanWindow
         _config = config;
         _window = new Window { Title = "Канбан" };
         _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(_window);
+        Apps.OwnWindows.Register(_hwnd, "kanban", "Канбан", "\uE9D5");
         _project = kanban.Settings.Project;
         _quick = new TextBox { PlaceholderText = "Новая задача… Enter", FontFamily = Theme.Font, FontSize = 14, MaxLength = 300, VerticalAlignment = VerticalAlignment.Center };
         _quick.KeyDown += (_, e) => { if (e.Key == VirtualKey.Enter) { e.Handled = true; AddQuick(); } };
@@ -121,8 +122,6 @@ public sealed class KanbanWindow
         ApplySurface();
         Glass.Changed += ApplySurface;
         _presenter = OverlappedPresenter.Create();
-        // Панели задач Windows нет: свёрнутое окно было бы негде найти.
-        _presenter.IsMinimizable = false;
         _window.AppWindow.SetPresenter(_presenter);
         SetDark(_hwnd);
         try { _window.AppWindow.SetIcon(System.IO.Path.Combine(AppContext.BaseDirectory, "shell.ico")); } catch { }

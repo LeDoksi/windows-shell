@@ -149,7 +149,7 @@ public sealed class ShellHost
     /// полоску загрузки и значки поверх иконки (как Проводнику).
     void AnnounceButtons()
     {
-        var windows = _s.Tracker.Windows.Select(w => w.Hwnd).ToList();
+        var windows = _s.Tracker.Windows.Where(w => w.Own == null).Select(w => w.Hwnd).ToList();
         _announced.IntersectWith(windows);
         var fresh = windows.Where(_announced.Add).ToList();
         if (fresh.Count > 0) _s.Tray.AnnounceButtons(fresh);

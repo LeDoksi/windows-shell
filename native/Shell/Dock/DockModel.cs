@@ -15,6 +15,10 @@ public sealed class DockEntry
     /// Окна приложения, последнее активное — первым.
     public required IReadOnlyList<WindowInfo> Windows { get; init; }
     public bool Missing { get; init; }
+    /// Окна самой оболочки: их не запускают заново, не закрепляют и не открывают в них файлы.
+    public bool Own { get; init; }
+    /// Значок из шрифта вместо иконки программы (для окон оболочки).
+    public string? Glyph { get; init; }
     public bool Running => Windows.Count > 0;
 }
 
@@ -72,7 +76,7 @@ public static partial class DockModel
     }
 
     public static string AppKey(WindowInfo w) =>
-        Norm(w.Aumid) is { Length: > 0 } a ? a : Norm(w.Exe) is { Length: > 0 } e ? e : $"hwnd:{w.Hwnd}";
+        w.Own != null ? $"own:{w.Own}" : Norm(w.Aumid) is { Length: > 0 } a ? a : Norm(w.Exe) is { Length: > 0 } e ? e : $"hwnd:{w.Hwnd}";
 
     [GeneratedRegex(@"\\windowsapps\\|\\applicationframehost\.exe$", RegexOptions.IgnoreCase)]
     private static partial Regex PackagedExe();
@@ -96,7 +100,7 @@ public static partial class DockModel
         {
             foreach (var w in windows)
             {
-                if (owner.ContainsKey(w.Hwnd)) continue;
+                if (owner.ContainsKey(w.Hwnd) || w.Own != null) continue;
                 var pin = pins.FirstOrDefault(p => pass switch
                 {
                     "aumid" => w.Aumid != null && Norm(w.Aumid) == Norm(p.Target) || w.PackageAumid != null && Norm(w.PackageAumid) == Norm(p.Target),
@@ -141,6 +145,8 @@ public static partial class DockModel
                 Pinned = false,
                 Target = LaunchTarget(first),
                 Windows = ByRecent(own),
+                Own = first.Own != null,
+                Glyph = first.Glyph,
             });
         }
         return result;

@@ -46,6 +46,7 @@ public sealed class PerfWindow
         _config = config;
         _window = new Window { Title = "Монитор ПК" };
         _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(_window);
+        Apps.OwnWindows.Register(_hwnd, "perf", "Монитор ПК", "\uE9D9");
         _fps = new Card("FPS", wide: true);
         _cpu = new Card("Процессор");
         _gpu = new Card("Видеокарта");
@@ -73,7 +74,6 @@ public sealed class PerfWindow
         ApplySurface();
         Glass.Changed += ApplySurface;
         _presenter = OverlappedPresenter.Create();
-        _presenter.IsMinimizable = false;
         _presenter.IsMaximizable = false;
         _presenter.IsResizable = true;
         // Рамка остаётся (за неё тянут размер), заголовка нет.
