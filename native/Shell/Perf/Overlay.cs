@@ -169,15 +169,19 @@ internal sealed class Overlay : IDisposable
             var lw = s.Column ? labelW : W(label, labelFont);
             cur.Add((x, new Run(label, Kind.Label, Label), lw));
             x += lw + gapLabel;
+            // Внутри группы всё вплотную; запас под длинные числа (99 → 100) — в конце группы,
+            // чтобы следующие группы не дёргались.
+            float reserve = 0;
             for (var i = 0; i < runs.Count; i++)
             {
                 var r = runs[i];
                 if (i > 0) x += r.Kind == Kind.Unit ? gapRun * 0.6f : gapRun * 1.6f;
-                // Цифры одной ширины по шаблону: оверлей не дёргается, когда 99 сменяется на 100.
-                var w = Math.Max(W(r.Text, FontOf(r.Kind)), r.Template is { } t ? W(t, FontOf(r.Kind)) : 0);
+                var w = W(r.Text, FontOf(r.Kind));
+                if (r.Template is { } t) reserve += Math.Max(0, W(t, FontOf(r.Kind)) - w);
                 cur.Add((x, r, w));
                 x += w;
             }
+            x += reserve;
         }
         lines.Add(cur);
         widths.Add(x);

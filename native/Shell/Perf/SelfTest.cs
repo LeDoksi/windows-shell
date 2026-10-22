@@ -206,8 +206,17 @@ public static class SelfTest
         try
         {
             var area = new System.Drawing.Rectangle(game.Left, game.Top, Math.Min(400, game.Right - game.Left), 120);
-            using var bmp = new System.Drawing.Bitmap(area.Width, area.Height);
-            using (var g = System.Drawing.Graphics.FromImage(bmp)) g.CopyFromScreen(area.Location, System.Drawing.Point.Empty, area.Size, System.Drawing.CopyPixelOperation.SourceCopy | System.Drawing.CopyPixelOperation.CaptureBlt);
+            // BitBlt с CAPTUREBLT: «слоистые» окна (оверлей) попадают в снимок.
+            var screen = Shots.Gdi.GetDC(IntPtr.Zero);
+            var mem = Shots.Gdi.CreateCompatibleDC(screen);
+            var hbmp = Shots.Gdi.CreateCompatibleBitmap(screen, area.Width, area.Height);
+            var old = Shots.Gdi.SelectObject(mem, hbmp);
+            Shots.Gdi.BitBlt(mem, 0, 0, area.Width, area.Height, screen, area.Left, area.Top, Shots.Gdi.SRCCOPY | Shots.Gdi.CAPTUREBLT);
+            Shots.Gdi.SelectObject(mem, old);
+            using var bmp = System.Drawing.Image.FromHbitmap(hbmp);
+            Shots.Gdi.DeleteObject(hbmp);
+            Shots.Gdi.DeleteDC(mem);
+            Shots.Gdi.ReleaseDC(IntPtr.Zero, screen);
             var file = Path.Combine(AppContext.BaseDirectory, "perf-overlay-screen.png");
             bmp.Save(file, ImageFormat.Png);
             say($"   снимок экрана с оверлеем: {Path.GetFileName(file)}");
