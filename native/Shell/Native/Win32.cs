@@ -359,6 +359,11 @@ public static partial class Win32
         SetWindowPos(h, IntPtr.Zero, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     }
 
+    /// Свой обработчик сообщений окна. Делегат должен жить, пока живо окно.
+    public static void Subclass(IntPtr h, SubclassProc proc, uint id) => SetWindowSubclass(h, proc, (UIntPtr)id, UIntPtr.Zero);
+
+    public static IntPtr DefProc(IntPtr h, uint msg, IntPtr w, IntPtr l) => DefSubclassProc(h, msg, w, l);
+
     public static void AddExStyle(IntPtr h, long add, long remove = 0)
     {
         var ex = (ExStyle(h) | add) & ~remove;
