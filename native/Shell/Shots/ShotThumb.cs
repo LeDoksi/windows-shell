@@ -137,7 +137,7 @@ public sealed class ShotThumb
         _pressed = false;
         _win.Root.ReleasePointerCaptures();
         // Пока тащим, миниатюра стоит; бросили — пропадает (своё дело сделала).
-        _dragging = FileDrag.Start(_win.Hwnd, item.Path, dropped =>
+        _dragging = FileDrag.Start(_win.Root, p, item.Path, dropped =>
         {
             _dragging = false;
             if (dropped && _item == item) Hide();

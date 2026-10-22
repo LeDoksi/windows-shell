@@ -1,122 +1,83 @@
-using System.Runtime.InteropServices;
-using Microsoft.UI.Dispatching;
+using Microsoft.UI.Input;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Windows.ApplicationModel.DataTransfer;
+using Windows.Foundation;
 using Windows.Storage;
 using Windows.Storage.FileProperties;
 using Windows.Storage.Streams;
 
 namespace WindowsShell.Shots;
 
-/// Перетащить файл из нашего окна в любую программу (чат, Проводник, браузер), как из
-/// Проводника: данные и картинку под курсором даёт сам Проводник (SHDoDragDrop).
+/// Перетащить файл из нашего окна в любую программу (чат, Проводник, браузер): своим
+/// перетаскиванием WinUI (StartDragAsync), файл — StorageFile, как его отдаёт Проводник.
 ///
-/// Перетаскивание идёт в своём потоке, а не в потоке интерфейса. В потоке WinUI мышь приходит
-/// указателем (WM_POINTER), и цикл перетаскивания OLE не видел зажатую кнопку: бросал файл
-/// «в никуда» сразу после начала, обработчик тут же начинал новое — 3–4 раза в секунду, а у
-/// окна под курсором оставалась картинка недоделанного перетаскивания. Теперь отпускание
-/// кнопки проверяем сами по её настоящему состоянию, а интерфейс оболочки (и док как место,
-/// куда можно бросить) во время перетаскивания живёт как обычно.
+/// Раньше здесь был SHDoDragDrop прямо из PointerMoved. Его цикл OLE берёт кнопку мыши из
+/// мышиных сообщений, а WinUI получает мышь указателем (WM_POINTER): цикл считал кнопку
+/// отпущенной и бросал файл «в никуда» сразу после начала, обработчик тут же начинал снова —
+/// 3–4 раза в секунду, а у окна под курсором оставалась картинка недоделанного перетаскивания.
+/// В своём потоке цикл OLE не получает мышь вовсе и ждёт вечно. StartDragAsync ведёт
+/// перетаскивание вводом самого WinUI и не держит поток интерфейса.
 public static class FileDrag
 {
-    static int _busy;
+    static bool _busy;
 
-    /// Начать тащить файл; сразу возвращается. `done(true)` — файл куда-то бросили; зовётся в
-    /// потоке, который начал перетаскивание (без очереди — в потоке перетаскивания).
-    /// false — уже тащим другой файл.
-    public static bool Start(IntPtr hwnd, string path, Action<bool>? done = null) => Start(hwnd, path, done, null);
-
-    /// `decide` — для проверки (--shots-test): вместо кнопки мыши решает, когда бросить.
-    internal static bool Start(IntPtr hwnd, string path, Action<bool>? done, Func<int>? decide)
+    /// Начать тащить файл из `element`; `point` — точка указателя из PointerMoved, кнопка ещё
+    /// зажата. Сразу возвращается; `done(true)` — файл куда-то бросили. false — уже тащим.
+    public static bool Start(UIElement element, PointerPoint point, string path, Action<bool>? done = null)
     {
-        if (Interlocked.Exchange(ref _busy, 1) == 1) return false;
-        var queue = DispatcherQueue.GetForCurrentThread();
-        var thread = new Thread(() =>
+        if (_busy) return false;
+        _busy = true;
+        var name = Path.GetFileName(path);
+        async void OnStarting(UIElement sender, DragStartingEventArgs e)
         {
-            var dropped = false;
-            try { dropped = Run(hwnd, path, decide); }
-            finally { Volatile.Write(ref _busy, 0); }
-            if (done is null) return;
-            if (queue is null || !queue.TryEnqueue(() => done(dropped))) done(dropped);
-        }) { IsBackground = true, Name = "перетаскивание" };
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.Start();
-        return true;
-    }
-
-    static bool Run(IntPtr hwnd, string path, Func<int>? decide)
-    {
-        try
-        {
-            OleInitialize(IntPtr.Zero);
-            var iidItem = typeof(IShellItem).GUID;
-            if (SHCreateItemFromParsingName(path, IntPtr.Zero, ref iidItem, out var item) != 0) return false;
+            var deferral = e.GetDeferral();
             try
             {
-                var bhid = BHID_DataObject;
-                var iidData = IID_IDataObject;
-                if (item.BindToHandler(IntPtr.Zero, ref bhid, ref iidData, out var data) != 0 || data == IntPtr.Zero) return false;
-                try
-                {
-                    var hr = SHDoDragDrop(hwnd, data, new DropSource(decide), DROPEFFECT_COPY | DROPEFFECT_LINK, out var effect);
-                    var dropped = hr == DRAGDROP_S_DROP && effect != 0;
-                    Log.Write($"снимки: перетащили {Path.GetFileName(path)} → {(dropped ? $"брошен ({effect})" : hr == DRAGDROP_S_DROP ? "отпустили не над окном, которое его берёт" : $"отмена (0x{hr:X})")}");
-                    return dropped;
-                }
-                finally { Marshal.Release(data); }
+                var file = await StorageFile.GetFileFromPathAsync(path);
+                e.Data.SetStorageItems([file]);
+                e.Data.RequestedOperation = DataPackageOperation.Copy;
+                e.AllowedOperations = DataPackageOperation.Copy | DataPackageOperation.Link;
             }
-            finally { Marshal.ReleaseComObject(item); }
+            catch (Exception ex)
+            {
+                Log.Write($"снимки: перетащить {name} не получилось ({ex.Message})");
+                e.Cancel = true;
+            }
+            finally { deferral.Complete(); }
         }
-        catch (Exception e)
+        element.DragStarting += OnStarting;
+        try
         {
-            Log.Error("снимки: перетаскивание", e);
-            return false;
+            var op = element.StartDragAsync(point);
+            op.Completed = (o, status) =>
+            {
+                var result = DataPackageOperation.None;
+                try { if (status == AsyncStatus.Completed) result = o.GetResults(); }
+                catch { }
+                var problem = status == AsyncStatus.Completed ? null : status.ToString();
+                if (element.DispatcherQueue.HasThreadAccess) Finish(result, problem);
+                else element.DispatcherQueue.TryEnqueue(() => Finish(result, problem));
+            };
         }
-        finally { OleUninitialize(); }
-    }
-
-    /// Когда бросать: по настоящему состоянию кнопки (GetAsyncKeyState), а не по тому, что
-    /// цикл OLE насобирал из сообщений, — в потоке перетаскивания он кнопку не видит.
-    [ComVisible(true)]
-    sealed class DropSource(Func<int>? decide) : IDropSource
-    {
-        public int QueryContinueDrag(int escapePressed, int keyState)
+        catch (Exception ex)
         {
-            if (decide != null) return decide();
-            if (escapePressed != 0 || (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0) return DRAGDROP_S_CANCEL;
-            // Кнопки поменяны местами в настройках мыши — тащат физической правой.
-            var button = GetSystemMetrics(SM_SWAPBUTTON) != 0 ? VK_RBUTTON : VK_LBUTTON;
-            return (GetAsyncKeyState(button) & 0x8000) != 0 ? 0 : DRAGDROP_S_DROP;
+            Log.Error("снимки: перетаскивание", ex);
+            Finish(DataPackageOperation.None, "ошибка");
         }
+        return true;
 
-        public int GiveFeedback(int effect) => DRAGDROP_S_USEDEFAULTCURSORS;
+        void Finish(DataPackageOperation result, string? problem)
+        {
+            if (!_busy) return;
+            _busy = false;
+            element.DragStarting -= OnStarting;
+            var dropped = result != DataPackageOperation.None;
+            Log.Write($"снимки: перетащили {name} → {(dropped ? $"брошен ({result})" : problem ?? "не брошен")}");
+            done?.Invoke(dropped);
+        }
     }
-
-    const uint DROPEFFECT_COPY = 1, DROPEFFECT_LINK = 4;
-    internal const int DRAGDROP_S_DROP = 0x00040100, DRAGDROP_S_CANCEL = 0x00040101, DRAGDROP_S_USEDEFAULTCURSORS = 0x00040102;
-    const int VK_LBUTTON = 0x01, VK_RBUTTON = 0x02, VK_ESCAPE = 0x1B, SM_SWAPBUTTON = 23;
-    static readonly Guid BHID_DataObject = new("B8C0BD9F-ED24-455C-83E6-D5390C4FE8C4");
-    static readonly Guid IID_IDataObject = new("0000010E-0000-0000-C000-000000000046");
-
-    [ComImport, Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    interface IShellItem
-    {
-        [PreserveSig] int BindToHandler(IntPtr bc, ref Guid bhid, ref Guid iid, out IntPtr result);
-    }
-
-    [ComImport, Guid("00000121-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    interface IDropSource
-    {
-        [PreserveSig] int QueryContinueDrag(int escapePressed, int keyState);
-        [PreserveSig] int GiveFeedback(int effect);
-    }
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern int SHCreateItemFromParsingName(string path, IntPtr bc, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IShellItem item);
-    [DllImport("shell32.dll")] static extern int SHDoDragDrop(IntPtr hwnd, IntPtr data, [MarshalAs(UnmanagedType.Interface)] IDropSource source, uint effects, out uint effect);
-    [DllImport("ole32.dll")] static extern int OleInitialize(IntPtr reserved);
-    [DllImport("ole32.dll")] static extern void OleUninitialize();
-    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
-    [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
 }
 
 /// Картинки для миниатюр: снимок читаем целиком в память (файл не держим открытым — его можно

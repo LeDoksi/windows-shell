@@ -313,11 +313,12 @@ public sealed class ShotEditor
         grip.PointerMoved += (_, e) =>
         {
             if (!gripPressed) return;
-            var p = e.GetCurrentPoint(grip).Position;
+            var point = e.GetCurrentPoint(grip);
+            var p = point.Position;
             if (Math.Abs(p.X - gripAt.X) + Math.Abs(p.Y - gripAt.Y) < 6) return;
             gripPressed = false;
             grip.ReleasePointerCaptures();
-            if (Save()) FileDrag.Start(_hwnd, _item.Path);
+            if (Save()) FileDrag.Start(grip, point, _item.Path);
         };
         grip.PointerReleased += (_, _) => { gripPressed = false; grip.ReleasePointerCaptures(); };
         right.Children.Add(grip);
