@@ -32,7 +32,21 @@
     <!-- Значок в трее берётся из файла рядом с exe. -->
     <Content Include="shell.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Sounds\*.mp3" CopyToOutputDirectory="PreserveNewest" />
+    <!-- FPS: Intel PresentMon (MIT), скачивается при сборке, сверяется по SHA-256. -->
+    <Content Include="$(PresentMonExe)" Link="Tools\PresentMon.exe" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <PropertyGroup>
+    <PresentMonVersion>2.3.1</PresentMonVersion>
+    <PresentMonSha256>364E5D98D4D134BD54DD25C22ED2CA2F4883F8BC3ED6502BEE0C151E3436D30C</PresentMonSha256>
+    <PresentMonDir>$(MSBuildProjectDirectory)\obj\tools\PresentMon-$(PresentMonVersion)</PresentMonDir>
+    <PresentMonExe>$(PresentMonDir)\PresentMon.exe</PresentMonExe>
+  </PropertyGroup>
+  <Target Name="FetchPresentMon" BeforeTargets="BeforeBuild;AssignTargetPaths" Condition="!Exists('$(PresentMonExe)')">
+    <DownloadFile SourceUrl="https://github.com/GameTechDev/PresentMon/releases/download/v$(PresentMonVersion)/PresentMon-$(PresentMonVersion)-x64.exe"
+                  DestinationFolder="$(PresentMonDir)" DestinationFileName="PresentMon.download" Retries="3" />
+    <VerifyFileHash File="$(PresentMonDir)\PresentMon.download" Hash="$(PresentMonSha256)" Algorithm="SHA256" />
+    <Move SourceFiles="$(PresentMonDir)\PresentMon.download" DestinationFiles="$(PresentMonExe)" />
+  </Target>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
     <PackageReference Include="WinUIEx" Version="2.9.3" />

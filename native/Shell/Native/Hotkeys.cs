@@ -7,11 +7,13 @@ public sealed class Hotkeys
 {
     readonly MessageWindow _window;
     readonly Dictionary<int, Action> _actions = [];
-    int _next = 1;
+    int _next;
 
-    public Hotkeys(MessageWindow window)
+    /// `firstId` — свой диапазон номеров: у каждого набора клавиш на одном окне сообщений свои.
+    public Hotkeys(MessageWindow window, int firstId = 1)
     {
         _window = window;
+        _next = firstId;
         window.Hotkey += id => { if (_actions.TryGetValue(id, out var a)) a(); };
     }
 
