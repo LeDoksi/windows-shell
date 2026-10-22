@@ -220,11 +220,12 @@ public sealed class ShotsFlyout : Popup
         tile.PointerMoved += (_, e) =>
         {
             if (!pressed) return;
-            var p = e.GetCurrentPoint(tile).Position;
+            var point = e.GetCurrentPoint(tile);
+            var p = point.Position;
             if (Math.Abs(p.X - at.X) + Math.Abs(p.Y - at.Y) < 6) return;
             pressed = false;
             tile.ReleasePointerCaptures();
-            if (FileDrag.Start(Hwnd, item.Path)) Close(restoreFocus: false);
+            FileDrag.Start(tile, point, item.Path, dropped => { if (dropped) Close(restoreFocus: false); });
         };
         tile.PointerReleased += (_, e) =>
         {
