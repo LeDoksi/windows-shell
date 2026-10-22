@@ -234,6 +234,13 @@ public sealed class KanbanService
     public List<KEpic> ActiveEpics(string project) =>
         Epics.Where(e => e.ProjectId == project && e.Status == "active").OrderBy(e => e.Seq).ToList();
 
+    /// Эпики, куда имеет смысл добавлять задачи: «active» и не всё в них сделано (или пусто).
+    public List<KEpic> OpenEpics(string project) => ActiveEpics(project).Where(e =>
+    {
+        var (done, total) = Progress(project, e.Id);
+        return total == 0 || done < total;
+    }).ToList();
+
     /// Сделано / всего: архивные «Готово» считаются, архивные недоделанные (брошенные) — нет.
     public (int Done, int Total) Progress(string project, string? epic = null)
     {
