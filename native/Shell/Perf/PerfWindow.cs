@@ -1,4 +1,5 @@
 using System.Globalization;
+using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -32,6 +33,8 @@ public sealed class PerfWindow
     readonly TextBlock _game = Text(12, Muted);
     readonly Card _fps, _cpu, _gpu, _ram, _vram, _net;
     readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _save;
+    readonly Microsoft.UI.Input.InputNonClientPointerSource _caption;
+    readonly SubclassProc _proc;
     bool _closing, _narrow = true;
 
     /// Окно закрыли (крестиком меню, Alt+F4 или выключили в настройках).
@@ -80,26 +83,28 @@ public sealed class PerfWindow
         SetCorner(_hwnd, DWMWCP_ROUND);
         try { _window.AppWindow.SetIcon(System.IO.Path.Combine(AppContext.BaseDirectory, "shell.ico")); } catch { }
 
-        // Тянуть окно можно за любое место, как за заголовок.
-        _root.AddHandler(UIElement.PointerPressedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_, e) =>
+        // Тянуть окно можно за любое место: всё окно — заголовок, его двигает сама Windows.
+        // WM_NCLBUTTONDOWN из PointerPressed трогался с места только через секунду-две (WSH-125).
+        _caption = InputNonClientPointerSource.GetForWindowId(_window.AppWindow.Id);
+        // Правый клик по заголовку — системное меню окна; показываем своё.
+        _proc = (h, msg, w, l, _, _) =>
         {
-            var pt = e.GetCurrentPoint(_root);
-            if (!pt.Properties.IsLeftButtonPressed) return;
-            ReleaseCapture();
-            SendMessageW(_hwnd, 0xA1 /* WM_NCLBUTTONDOWN */, 2 /* HTCAPTION */, IntPtr.Zero);
-        }), handledEventsToo: true);
-        _root.RightTapped += (_, e) =>
-        {
+            if (msg != 0x007B /* WM_CONTEXTMENU */) return DefProc(h, msg, w, l);
             GetCursorPos(out var p);
-            _perf.ShowMenu(p.X, p.Y, Menu());
-            e.Handled = true;
+            _window.DispatcherQueue.TryEnqueue(() => _perf.ShowMenu(p.X, p.Y, Menu()));
+            return IntPtr.Zero;
         };
+        Subclass(_hwnd, _proc, 2);
 
         _save = _window.DispatcherQueue.CreateTimer();
         _save.Interval = TimeSpan.FromSeconds(1);
         _save.IsRepeating = false;
         _save.Tick += (_, _) => SaveRect();
-        _window.AppWindow.Changed += (_, e) => { if (e.DidPositionChange || e.DidSizeChange) { _save.Stop(); _save.Start(); } };
+        _window.AppWindow.Changed += (_, e) =>
+        {
+            if (e.DidSizeChange) Caption();
+            if (e.DidPositionChange || e.DidSizeChange) { _save.Stop(); _save.Start(); }
+        };
         _window.Closed += (_, _) =>
         {
             Glass.Changed -= ApplySurface;
@@ -111,6 +116,7 @@ public sealed class PerfWindow
         };
 
         Place();
+        Caption();
         Apply(perf.Settings);
         _perf.Updated += Refresh;
         Refresh();
@@ -168,6 +174,12 @@ public sealed class PerfWindow
         var h = (int)(470 * scale);
         var m = (int)(24 * scale);
         _window.AppWindow.MoveAndResize(new RectInt32(work.Right - w - m, work.Top + m, w, h));
+    }
+
+    void Caption()
+    {
+        var s = _window.AppWindow.ClientSize;
+        _caption.SetRegionRects(NonClientRegionKind.Caption, [new RectInt32(0, 0, s.Width, s.Height)]);
     }
 
     void SaveRect()
@@ -338,7 +350,4 @@ public sealed class PerfWindow
                 _line2.Points.Add(new Windows.Foundation.Point(x1 + i * step, h - 1 - (h - 2) * Math.Clamp(_b[i] / top, 0, 1)));
         }
     }
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool ReleaseCapture();
-    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr SendMessageW(IntPtr h, uint msg, nint w, IntPtr l);
 }
