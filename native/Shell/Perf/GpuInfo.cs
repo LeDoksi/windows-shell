@@ -53,14 +53,29 @@ internal sealed class GpuInfo
         return list.GroupBy(g => (g.LuidLow, g.LuidHigh)).Select(g => g.First()).OrderByDescending(g => g.Vram).ToList();
     }
 
-    /// Температура видеокарты, °C (null — драйвер не отдаёт).
+    /// Откуда температура и почему её нет (для проверки).
+    public string TempSource { get; private set; } = "нет";
+    public string TempNote { get; private set; } = "";
+
+    /// Температура видеокарты, °C (null — ни один источник не отдал): ядро графики (D3DKMT),
+    /// у NVIDIA ещё NVML из драйвера, потом MSI Afterburner.
     public double? Temperature()
+    {
+        if (Kernel() is { } k) { TempSource = "Windows (D3DKMT)"; return k; }
+        if (Name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase) && Nvml.Temperature(LuidLow, LuidHigh) is { } n) { TempSource = "NVIDIA NVML"; return n; }
+        if (Afterburner.Temperature(0x00, "GPU") is { } a) { TempSource = "MSI Afterburner"; return a; }
+        TempSource = "нет";
+        return null;
+    }
+
+    double? Kernel()
     {
         if (_noTemp) return null;
         if (_adapter == 0)
         {
             var open = new D3DKMT_OPENADAPTERFROMLUID { LowPart = LuidLow, HighPart = LuidHigh };
-            if (D3DKMTOpenAdapterFromLuid(ref open) != 0) { _noTemp = true; return null; }
+            var r0 = D3DKMTOpenAdapterFromLuid(ref open);
+            if (r0 != 0) { _noTemp = true; TempNote = $"D3DKMTOpenAdapterFromLuid 0x{r0:X8}"; return null; }
             _adapter = open.hAdapter;
         }
         var data = new D3DKMT_ADAPTER_PERFDATA();
@@ -73,13 +88,17 @@ internal sealed class GpuInfo
             var r = D3DKMTQueryAdapterInfo(ref q);
             if (r != 0)
             {
-                Log.Write($"видеокарта {Name}: температуру не отдаёт (0x{r:X8})");
+                TempNote = $"D3DKMTQueryAdapterInfo 0x{r:X8} (размер {size})";
+                Log.Write($"видеокарта {Name}: ядро температуру не отдаёт ({TempNote})");
                 _noTemp = true;
                 return null;
             }
             data = Marshal.PtrToStructure<D3DKMT_ADAPTER_PERFDATA>(buf);
-            // Десятые доли градуса; 0 — датчика нет.
-            return data.Temperature is > 0 and < 2000 ? data.Temperature / 10.0 : null;
+            TempNote = $"D3DKMT: температура {data.Temperature}, мощность {data.Power}, вентилятор {data.FanRPM}";
+            // Десятые доли градуса; 0 — датчика нет (тогда дальше не спрашиваем).
+            if (data.Temperature is > 0 and < 2000) return data.Temperature / 10.0;
+            _noTemp = true;
+            return null;
         }
         finally { Marshal.FreeHGlobal(buf); }
     }

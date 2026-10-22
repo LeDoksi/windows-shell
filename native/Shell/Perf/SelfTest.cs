@@ -36,7 +36,10 @@ public static class SelfTest
     {
         say("== Видеокарты (DXGI)");
         foreach (var g in GpuInfo.All())
-            say($"   {g.Name}: {g.Vram / 1024 / 1024} МБ, {g.PdhLuid}, температура {g.Temperature()?.ToString("0.0") ?? "нет"}");
+        {
+            var t = g.Temperature();
+            say($"   {g.Name}: {g.Vram / 1024 / 1024} МБ, {g.PdhLuid}, температура {t?.ToString("0.0") ?? "нет"} ({g.TempSource}; {g.TempNote})");
+        }
 
         say("== Датчики (3 чтения раз в секунду)");
         var sw = Stopwatch.StartNew();
@@ -65,7 +68,7 @@ public static class SelfTest
 
         say("== Права на FPS");
         say($"   {PerfAccess.Current} (группа «{PerfAccess.GroupName}»)");
-        say($"   PresentMon: {(File.Exists(Frames.Tool) ? FileVersionInfo.GetVersionInfo(Frames.Tool).FileVersion : "НЕТ ФАЙЛА")}");
+        say($"   PresentMon: {(File.Exists(Frames.Tool) ? $"есть, {new FileInfo(Frames.Tool).Length} байт" : "НЕТ ФАЙЛА")}");
 
         say("== Картинки оверлея");
         var entry = new WidgetEntry { Id = "perf" };
@@ -143,6 +146,11 @@ public static class SelfTest
 
         using var frames = new Frames();
         frames.Track(Environment.ProcessId);
+        // Настоящее окно оверлея над окном «игры»: снимок экрана с ним и проверка, что клики проходят сквозь.
+        var overlay = new Overlay();
+        var ovSettings = new PerfSettings(new WidgetEntry { Id = "perf" }) { Shown = ["fps", "frametime", "cpu", "gpu"] };
+        var gameRect = new Native.Win32.RECT { Left = 120, Top = 120, Right = 760, Bottom = 480 };
+        var shot = false;
         var sw = Stopwatch.StartNew();
         long presents = 0, occluded = 0;
         var nextReport = 3000L;
@@ -159,6 +167,13 @@ public static class SelfTest
             var r = present(chain, 1, 0);
             presents++;
             if (r == 0x087A0001) occluded++; // DXGI_STATUS_OCCLUDED
+            if (sw.ElapsedMilliseconds > 2000 && sw.ElapsedMilliseconds % 500 < 20)
+                overlay.Show(ovSettings, new PerfNow(frames.Fps ?? 0, null, null, "Проверка"), gameRect, 1.0);
+            if (!shot && sw.ElapsedMilliseconds > 6000 && overlay.Visible)
+            {
+                shot = true;
+                OverlayCheck(say, overlay, gameRect);
+            }
             if (sw.ElapsedMilliseconds >= nextReport)
             {
                 nextReport += 1000;
@@ -170,6 +185,7 @@ public static class SelfTest
         say($"   итог: средний FPS {(samples.Count > 0 ? samples.Average().ToString("0.0") : "—")}, 1% low {frames.Low1?.ToString("0.0") ?? "—"}, Present {presents} за 10 с, закрыто окнами {occluded}");
         if (frames.AccessDenied) say("   НЕТ ПРАВ: PresentMon не открыл сессию событий");
         if (frames.Error.Length > 0) say($"   PresentMon: {frames.Error.Trim().Replace('\n', ' ')}");
+        overlay.Dispose();
         Marshal.Release(rtv);
         Marshal.Release(context);
         Marshal.Release(chain);
@@ -178,6 +194,28 @@ public static class SelfTest
         frames.Track(0);
         Thread.Sleep(1500);
     }
+
+    /// Снимок экрана в углу «игры», где стоит оверлей, и кто под курсором в центре оверлея.
+    static void OverlayCheck(Action<string> say, Overlay overlay, Native.Win32.RECT game)
+    {
+        var hwnd = overlay.Hwnd;
+        Native.Win32.GetWindowRect(hwnd, out var r);
+        say($"   оверлей: окно {r.Left},{r.Top} {r.Width}×{r.Height}, видно {Native.Win32.IsWindowVisible(hwnd)}");
+        var under = WindowFromPoint(new Native.Win32.POINT { X = (r.Left + r.Right) / 2, Y = (r.Top + r.Bottom) / 2 });
+        say($"   клик в центр оверлея попадёт в: {(under == hwnd ? "ОВЕРЛЕЙ (плохо)" : Native.Win32.ClassName(under))}");
+        try
+        {
+            var area = new System.Drawing.Rectangle(game.Left, game.Top, Math.Min(400, game.Right - game.Left), 120);
+            using var bmp = new System.Drawing.Bitmap(area.Width, area.Height);
+            using (var g = System.Drawing.Graphics.FromImage(bmp)) g.CopyFromScreen(area.Location, System.Drawing.Point.Empty, area.Size, System.Drawing.CopyPixelOperation.SourceCopy | System.Drawing.CopyPixelOperation.CaptureBlt);
+            var file = Path.Combine(AppContext.BaseDirectory, "perf-overlay-screen.png");
+            bmp.Save(file, ImageFormat.Png);
+            say($"   снимок экрана с оверлеем: {Path.GetFileName(file)}");
+        }
+        catch (Exception e) { say($"   снимок не вышел: {e.Message}"); }
+    }
+
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Native.Win32.POINT p);
 
     static T Method<T>(IntPtr com, int slot) where T : Delegate =>
         Marshal.GetDelegateForFunctionPointer<T>(Marshal.ReadIntPtr(Marshal.ReadIntPtr(com), slot * IntPtr.Size));

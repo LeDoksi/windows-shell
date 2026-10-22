@@ -25,6 +25,7 @@ internal sealed class Overlay : IDisposable
     long _raisedAt;
 
     public bool Visible => _shown;
+    public IntPtr Hwnd => _hwnd;
 
     /// Нарисовать и поставить в угол монитора `screen` (физические пиксели), показать.
     public void Show(PerfSettings s, PerfNow now, RECT screen, double scale)
@@ -95,10 +96,10 @@ internal sealed class Overlay : IDisposable
                     runs.Add(new("мс", Kind.Unit, Label));
                     break;
                 case "cpu":
-                    runs.Add(new(smp is null ? "—" : $"{smp.Cpu:0}%", Kind.Value, Value, "100%"));
+                    runs.Add(new(smp is null ? "—" : $"{smp.Cpu:0}%", Kind.Value, Value, "00%"));
                     break;
                 case "gpu":
-                    runs.Add(new(smp?.Gpu is { } g ? $"{g:0}%" : "—", Kind.Value, Value, "100%"));
+                    runs.Add(new(smp?.Gpu is { } g ? $"{g:0}%" : "—", Kind.Value, Value, "00%"));
                     break;
                 case "cputemp":
                     runs.Add(Temp(smp?.CpuTemp));
@@ -200,12 +201,11 @@ internal sealed class Overlay : IDisposable
         for (var li = 0; li < lines.Count; li++)
         {
             var baseline = padY + li * lineH + (lineH + valueAscent * 0.78f) / 2;
-            foreach (var (rx, run, rw) in lines[li])
+            foreach (var (rx, run, _) in lines[li])
             {
                 var font = FontOf(run.Kind);
-                var tw = W(run.Text, font);
-                // Значения прижаты вправо в своей ширине, метки и единицы — влево.
-                var dx = run.Kind == Kind.Value ? rw - tw : 0;
+                // Всё прижато влево; запас ширины значения — справа от него.
+                const float dx = 0;
                 var y = baseline - (run.Kind == Kind.Value ? valueAscent : labelAscent);
                 if (alpha < 100)
                 {

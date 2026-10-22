@@ -1,5 +1,3 @@
-using System.IO.MemoryMappedFiles;
-
 namespace WindowsShell.Perf;
 
 /// Температура процессора. Windows её напрямую не отдаёт: датчик читается только драйвером
@@ -25,51 +23,10 @@ internal sealed class CpuTemp
     /// Зовётся после Pdh.Collect.
     public double? Read()
     {
-        if (Afterburner() is { } ab) { Source = "MSI Afterburner"; return ab; }
+        if (Afterburner.Temperature(0x80, "CPU") is { } ab) { Source = "MSI Afterburner"; return ab; }
         if (AcpiZone() is { } z) { Source = "ACPI"; return z; }
         Source = "нет";
         return null;
-    }
-
-    /// MSI Afterburner: «CPU temperature» в общей памяти мониторинга.
-    static double? Afterburner()
-    {
-        try
-        {
-            using var mmf = MemoryMappedFile.OpenExisting("MAHMSharedMemory", MemoryMappedFileRights.Read);
-            using var v = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
-            if (v.ReadUInt32(0) != 0x4D41484D) return null; // 'MAHM'; 0xDEAD — Afterburner закрыт
-            var header = v.ReadUInt32(8);
-            var count = v.ReadUInt32(12);
-            var size = v.ReadUInt32(16);
-            if (count > 512 || size < 1324) return null;
-            double? best = null;
-            for (var i = 0; i < count; i++)
-            {
-                long e = header + i * (long)size;
-                var src = v.ReadUInt32(e + 1320);
-                var name = ReadAnsi(v, e, 260);
-                // 0x80 — MONITORING_SOURCE_ID_CPU_TEMPERATURE; «CPU1 temperature»… — по ядрам.
-                if (src != 0x80 && !name.StartsWith("CPU temperature", StringComparison.OrdinalIgnoreCase)) continue;
-                var t = v.ReadSingle(e + 1300);
-                if (t is > 1 and < 130 && (best is null || t > best)) best = t;
-            }
-            return best;
-        }
-        catch (FileNotFoundException) { return null; }
-        catch (Exception e)
-        {
-            Log.Write($"температура ЦП: Afterburner: {e.Message}");
-            return null;
-        }
-    }
-
-    static string ReadAnsi(MemoryMappedViewAccessor v, long at, int max)
-    {
-        var bytes = new byte[max];
-        v.ReadArray(at, bytes, 0, max);
-        var n = Array.IndexOf(bytes, (byte)0);
-        return System.Text.Encoding.ASCII.GetString(bytes, 0, n < 0 ? max : n);
     }
 
     /// Зона ACPI: Кельвины. Многие платы держат там постоянное число (27,8 °C) — такое не берём.
