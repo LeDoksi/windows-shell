@@ -29,6 +29,7 @@ public sealed class App : Application, IXamlMetadataProvider
         if (Clips.SelfTest.Cli(args)) return;
         if (Charge.SelfTest.Cli(args)) return;
         if (Perf.SelfTest.Cli(args)) return;
+        if (Kanban.SelfTest.Cli(args)) return;
         if (Perf.PerfAccess.Cli(args)) return;
         Log.Write(args.Contains(Native.Autostart.Arg) ? "---- запуск вместе с Windows"
             : args.Contains(Native.Watchdog.RecoveredArg) ? "---- запуск после сбоя (сторож)" : "---- запуск");
@@ -126,6 +127,7 @@ public sealed class App : Application, IXamlMetadataProvider
                 Clips = new Clips.ClipsService(queue, config, messages),
                 Charge = new Charge.ChargeService(queue, config, messages),
                 Perf = new Perf.PerfService(queue, config, tracker, messages),
+                Kanban = new Kanban.KanbanService(queue, config, messages),
             };
             Ui.Popup.RestoreForeground = tracker.RestoreForeground;
             tracker.Start();

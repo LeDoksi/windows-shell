@@ -10,6 +10,9 @@ public static class SettingsPages
     /// Страницы окна настроек самой оболочки: `shell-settings:<страница>`.
     public const string ShellPrefix = "shell-settings:";
 
+    /// Не страница настроек, а окно канбана.
+    public const string KanbanBoard = "kanban-board";
+
     static StartEntry Shell(string title, string page, string glyph, params string[] words) =>
         new(ResultKind.Setting, title, ShellPrefix + page, "Настройки Windows Shell") { Glyph = glyph, Keywords = words };
 
@@ -22,6 +25,8 @@ public static class SettingsPages
         Shell("Виджеты оболочки", "widgets", "\uE8A1", "виджеты", "сейчас играет", "звук", "оболочка"),
         Shell("Снимки и запись экрана", "widgets", "\uE722", "снимок", "скриншот", "screenshot", "запись экрана", "prtsc", "sharex", "оболочка"),
         Shell("Монитор ПК: FPS, оверлей и датчики", "perf", "\uE9D9", "монитор пк", "fps", "фпс", "оверлей", "overlay", "температура", "нагрузка", "видеокарта", "процессор", "оболочка"),
+        Shell("Канбан: окно с задачами", KanbanBoard, "\uE9D5", "канбан", "kanban", "задачи", "доска", "таск", "task", "задача"),
+        Shell("Настройки канбана", "kanban", "\uE713", "канбан", "kanban", "войти в канбан", "оболочка"),
         Shell("Клавиши оболочки", "keys", "\uE765", "клавиши", "сочетания", "win", "оболочка"),
         Shell("Система: автозапуск и панель задач", "system", "\uE770", "автозапуск", "панель задач", "перезапустить оболочку", "оболочка"),
         S("Параметры", "ms-settings:", "", "settings", "настройки"),

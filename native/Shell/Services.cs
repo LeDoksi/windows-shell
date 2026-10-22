@@ -48,6 +48,7 @@ public sealed class Services
     public required Clips.ClipsService Clips { get; init; }
     public required Charge.ChargeService Charge { get; init; }
     public required Perf.PerfService Perf { get; init; }
+    public required Kanban.KanbanService Kanban { get; init; }
 
     MenuPopup? _menu;
     SoundFlyout? _sound;
@@ -63,6 +64,7 @@ public sealed class Services
     Shots.ShotPeek? _shotPeek;
     Clips.ClipsFlyout? _clipsFlyout;
     Charge.ChargeFlyout? _chargeFlyout;
+    Kanban.KanbanFlyout? _kanbanFlyout;
 
     public MenuPopup Menu => _menu ??= new MenuPopup();
     public SoundFlyout SoundFlyout => _sound ??= new SoundFlyout(Audio, Icons, Config);
@@ -78,6 +80,7 @@ public sealed class Services
     public Shots.ShotPeek ShotPeek => _shotPeek ??= new Shots.ShotPeek();
     public Clips.ClipsFlyout ClipsFlyout => _clipsFlyout ??= new Clips.ClipsFlyout(Clips);
     public Charge.ChargeFlyout ChargeFlyout => _chargeFlyout ??= new Charge.ChargeFlyout(Charge) { OpenSettings = () => OpenSettings("widgets") };
+    public Kanban.KanbanFlyout KanbanFlyout => _kanbanFlyout ??= new Kanban.KanbanFlyout(Kanban);
 
     /// На ⌃ точка: программа из трея что-то сообщила, а окошко трея ещё не открывали.
     public bool TrayAttention { get; set; }

@@ -93,6 +93,9 @@ public sealed class ShellHost
         // «Монитор ПК»: правый клик по окну — меню оболочки, «Настройки…» — его страница.
         _s.Perf.OpenSettings = () => _s.OpenSettings("perf");
         _s.Perf.ShowMenu = (x, y, items) => _s.Menu.Show("perf-window", new Rect(x, y, 0, 0), items, Placement.AtPoint);
+        // Канбан: то же для его окна.
+        _s.Kanban.OpenSettings = () => _s.OpenSettings("kanban");
+        _s.Kanban.ShowMenu = (x, y, items) => _s.Menu.Show("kanban-window", new Rect(x, y, 0, 0), items, Placement.AtPoint);
         _s.Keys.Combo += OnWinCombo;
         _s.Keys.Captured += (vk, shift) => { foreach (var d in _docks.Values) if (d.KeyboardActive) d.KeyboardKey(vk, shift); };
         _s.Keys.CaptureBroken += () => { foreach (var d in _docks.Values) d.EndKeyboard(); };
@@ -186,6 +189,7 @@ public sealed class ShellHost
         _s.Clips.Apply();
         _s.Charge.Apply();
         _s.Perf.Apply();
+        _s.Kanban.Apply();
     }
 
     /// Горячие клавиши профилей звука и «следующее устройство».

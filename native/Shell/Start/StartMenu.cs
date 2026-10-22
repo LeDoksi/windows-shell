@@ -1232,7 +1232,8 @@ public sealed class StartMenu : Popup
             case ResultKind.Setting when e.Target.StartsWith(SettingsPages.ShellPrefix):
                 // Настройки самой оболочки (верхней панели с ⚙ больше нет).
                 var page = e.Target[SettingsPages.ShellPrefix.Length..];
-                _s.OpenSettings(page.Length > 0 ? page : null);
+                if (page == SettingsPages.KanbanBoard) _s.Kanban.OpenWindow();
+                else _s.OpenSettings(page.Length > 0 ? page : null);
                 break;
             default:
                 Launcher.Open(e.Target);
