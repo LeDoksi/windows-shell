@@ -29,7 +29,7 @@ public sealed class ShotThumb
     Rect _anchor;
     double _imageH = 135;
     long _shownAt;
-    bool _hover, _pressed;
+    bool _hover, _pressed, _dragging;
     Point _pressPoint;
     int _version;
 
@@ -102,7 +102,7 @@ public sealed class ShotThumb
     void Tick()
     {
         if (!_win.Visible) { _timer.Stop(); return; }
-        if (_hover || _pressed) return;
+        if (_hover || _pressed || _dragging) return;
         var left = ShowMs - (Environment.TickCount64 - _shownAt);
         if (left <= 0) { Hide(); return; }
         _bar.Width = W * left / ShowMs;
@@ -137,8 +137,12 @@ public sealed class ShotThumb
         _pressed = false;
         _win.Root.ReleasePointerCaptures();
         // Пока тащим, миниатюра стоит; бросили — пропадает (своё дело сделала).
-        if (FileDrag.Start(_win.Hwnd, item.Path)) Hide();
-        else _shownAt = Environment.TickCount64;
+        _dragging = FileDrag.Start(_win.Hwnd, item.Path, dropped =>
+        {
+            _dragging = false;
+            if (dropped && _item == item) Hide();
+            else _shownAt = Environment.TickCount64;
+        });
     }
 
     void OnReleased(object sender, PointerRoutedEventArgs e)

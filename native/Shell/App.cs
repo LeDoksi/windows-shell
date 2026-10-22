@@ -26,6 +26,7 @@ public sealed class App : Application, IXamlMetadataProvider
         if (Native.Taskbar.Cli(args)) return;
         if (Native.Watchdog.Cli(args)) return;
         if (Shots.SelfTest.Cli(args)) return;
+        if (Shots.DragTest.Cli(args)) return;
         if (Clips.SelfTest.Cli(args)) return;
         if (Charge.SelfTest.Cli(args)) return;
         if (Perf.SelfTest.Cli(args)) return;
