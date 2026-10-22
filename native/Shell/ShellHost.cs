@@ -87,7 +87,12 @@ public sealed class ShellHost
         // Миниатюра снимка — над значком «Снимки» в доке монитора хвоста.
         _s.Shots.Anchor = () => _docks.Values.FirstOrDefault(d => d.FullTail)?.ShotsAnchorPx();
         // Предупреждения о заряде в игре: сигнал и плашка на мониторе с полноэкранной игрой.
-        _s.Charge.GameScreen = () => _s.Monitors.All.FirstOrDefault(_s.Bars.IsFullscreen);
+        _s.Charge.GameScreen = () =>
+            _s.Perf.GameScreen is { } game ? _s.Monitors.All.FirstOrDefault(m => m.Bounds.Left == game.Left && m.Bounds.Top == game.Top)
+            : _s.Monitors.All.FirstOrDefault(_s.Bars.IsFullscreen);
+        // «Монитор ПК»: правый клик по окну — меню оболочки, «Настройки…» — его страница.
+        _s.Perf.OpenSettings = () => _s.OpenSettings("perf");
+        _s.Perf.ShowMenu = (x, y, items) => _s.Menu.Show("perf-window", new Rect(x, y, 0, 0), items, Placement.AtPoint);
         _s.Keys.Combo += OnWinCombo;
         _s.Keys.Captured += (vk, shift) => { foreach (var d in _docks.Values) if (d.KeyboardActive) d.KeyboardKey(vk, shift); };
         _s.Keys.CaptureBroken += () => { foreach (var d in _docks.Values) d.EndKeyboard(); };
@@ -180,6 +185,7 @@ public sealed class ShellHost
         else _s.Media.Stop();
         _s.Clips.Apply();
         _s.Charge.Apply();
+        _s.Perf.Apply();
     }
 
     /// Горячие клавиши профилей звука и «следующее устройство».
@@ -358,6 +364,7 @@ public sealed class ShellHost
     void Shutdown()
     {
         _s.Keys.Stop();
+        _s.Perf.Shutdown();
         Popups.CloseAll();
         _s.Bars.Shutdown();
         _tray?.Remove();

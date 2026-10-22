@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
 using WindowsShell.Config;
 using WindowsShell.Native;
+using WindowsShell.Perf;
 using WindowsShell.Ui;
 using static WindowsShell.Native.Win32;
 using static WindowsShell.Settings.Rows;
@@ -178,6 +179,7 @@ public sealed class SettingsWindow
             case "start": BuildStart(); break;
             case "look": BuildLook(); break;
             case "widgets": BuildWidgets(); break;
+            case "perf": BuildPerf(); break;
             case "keys": BuildKeys(); break;
             case "system": BuildSystem(); break;
         }
@@ -459,6 +461,175 @@ public sealed class SettingsWindow
         rows.Add(Row("Следующее устройство вывода", "Горячая клавиша переключает звук на следующее устройство.", next));
         Add(Card(rows.ToArray()));
         Add(Note("Клик по полю клавиши, потом нужное сочетание. Backspace убирает сочетание, Esc отменяет."));
+    }
+
+    void BuildPerf()
+    {
+        var perf = _s.Perf;
+        var p = perf.Settings;
+        var overlayRows = new List<UIElement>
+        {
+            Switch("Оверлей в игре", "Цифры в углу экрана, только когда в фокусе игра. Клики проходят сквозь него, фокус он не берёт.", p.Overlay, on =>
+            {
+                Change(_ => _s.Perf.Settings.Overlay = on);
+                Build();
+            }),
+        };
+        if (p.Overlay)
+        {
+            overlayRows.Add(Row("Что показывать", "Галочки — что видно, стрелки — порядок. Соседние пары (FPS и время кадра, процессор % и °C) стоят вместе.", null));
+            var order = p.Order;
+            var shown = p.Shown;
+            for (var i = 0; i < order.Count; i++)
+            {
+                var id = order[i];
+                var index = i;
+                var line = new Grid { ColumnSpacing = 4, Margin = new Thickness(0, -6, 0, 0) };
+                line.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                line.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                line.Children.Add(Check(PerfSettings.MetricName(id), shown.Contains(id), on => Change(_ =>
+                {
+                    var set = _s.Perf.Settings.Shown;
+                    if (on) set.Add(id); else set.Remove(id);
+                    _s.Perf.Settings.Shown = set;
+                })));
+                var up = Arrow("", "Выше", index > 0, () => Move(index, -1));
+                var down = Arrow("", "Ниже", index < order.Count - 1, () => Move(index, 1));
+                Grid.SetColumn(up, 1);
+                Grid.SetColumn(down, 2);
+                line.Children.Add(up);
+                line.Children.Add(down);
+                overlayRows.Add(line);
+            }
+            overlayRows.Add(Row("Расположение", null, Combo(["В строку", "Столбиком"], p.Column ? 1 : 0, i => _s.Perf.Settings.Column = i == 1)));
+            string[] corners = [PerfSettings.TopLeft, PerfSettings.TopRight, PerfSettings.BottomLeft, PerfSettings.BottomRight];
+            overlayRows.Add(Row("Угол экрана", null, Combo(["Левый верхний", "Правый верхний", "Левый нижний", "Правый нижний"],
+                Array.IndexOf(corners, p.Corner), i => _s.Perf.Settings.Corner = corners[i])));
+            var sizes = PerfSettings.FontSizes;
+            overlayRows.Add(Row("Размер текста", null, Combo(["Мелкий", "Средний", "Крупный"],
+                Math.Max(0, Array.IndexOf(sizes, p.FontSize)), i => _s.Perf.Settings.FontSize = sizes[i])));
+            var bgValue = Text($"{p.Background} %", 13, secondary: true);
+            var bg = new Slider { Minimum = 0, Maximum = 100, StepFrequency = 5, Value = p.Background, IsThumbToolTipEnabled = false, Width = 180 };
+            bg.ValueChanged += (_, e) =>
+            {
+                bgValue.Text = $"{(int)e.NewValue} %";
+                Change(_ => _s.Perf.Settings.Background = (int)e.NewValue);
+            };
+            overlayRows.Add(Row("Фон", "0 % — только цифры с тенью.", new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Children = { bg, bgValue } }));
+            int[] warns = [0, 30, 45, 60, 90, 120];
+            overlayRows.Add(Row("FPS ниже — жёлтым", "Температура от 80 °C жёлтая, от 90 °C красная.",
+                Combo(warns.Select(w => w == 0 ? "Не подсвечивать" : $"{w}").ToArray(), Math.Max(0, Array.IndexOf(warns, p.FpsWarn)), i => _s.Perf.Settings.FpsWarn = warns[i])));
+            overlayRows.Add(Row("Включить и выключить в игре", "Сочетание работает, только пока в фокусе игра.",
+                new HotkeyBox(p.Hotkey, k => Change(_ => _s.Perf.Settings.Hotkey = k)) { Width = 200 }));
+            overlayRows.Add(Row("Как это выглядит", "Оверлей на 5 секунд на этом мониторе, FPS для примера.", Button("Показать", () => _s.Perf.Preview())));
+        }
+        Add(Card(overlayRows.ToArray()));
+
+        Add(Section("Окно «Монитор ПК»"));
+        var windowRows = new List<UIElement>
+        {
+            Switch("Окно «Монитор ПК»", "Всё сразу с графиками за минуту: FPS (когда идёт игра), процессор, видеокарта, память, видеопамять, сеть. Тянется за любое место, помнит, где стоит.", p.Window,
+                on => Change(_ => _s.Perf.Settings.Window = on)),
+        };
+        if (p.Window)
+            windowRows.Add(Switch("Поверх всех окон", "Выключено — обычное окно.", p.WindowTopmost, on => Change(_ => _s.Perf.Settings.WindowTopmost = on)));
+        Add(Card(windowRows.ToArray()));
+        Add(Note("Правый клик по окну — «Поверх всех окон», настройки, закрыть."));
+
+        Add(Section("FPS"));
+        var state = PerfAccess.Current;
+        UIElement? grant = null;
+        if (state == PerfAccess.State.Needed)
+            grant = Button("Разрешить", async () =>
+            {
+                if (await PerfAccess.Grant()) Build();
+            });
+        Add(Card(Row(state switch
+        {
+            PerfAccess.State.Ready => "Разрешение есть",
+            PerfAccess.State.AfterSignIn => "Разрешение дано",
+            _ => "Нужно разрешение администратора",
+        }, state switch
+        {
+            PerfAccess.State.Ready => "Кадры считаются по событиям Windows, как в Intel PresentMon. В игру ничего не встраивается.",
+            PerfAccess.State.AfterSignIn => "Заработает после выхода из Windows и входа снова (или перезагрузки).",
+            _ => $"Один раз: оболочка добавит тебя в группу «{PerfAccess.GroupName}», чтобы читать события показа кадров. В игру ничего не встраивается.",
+        }, grant)));
+        Add(Note("Считаются кадры, реально показанные на экране, среднее за полсекунды. Генерация кадров (DLSS FG, AFMF) входит в число, поэтому оно может отличаться от счётчика в игре."));
+
+        Add(Section("Что считается игрой"));
+        var gameRows = new List<UIElement>();
+        foreach (var (exe, game) in p.Marks.OrderBy(m => Path.GetFileName(m.Key)))
+        {
+            var e = exe;
+            gameRows.Add(Row(Path.GetFileName(exe), (game ? "Игра (отмечено вручную) · " : "Не игра (отмечено вручную) · ") + Path.GetDirectoryName(exe),
+                Button("Убрать", () => { _s.Perf.Mark(e, null); Build(); })));
+        }
+        var pick = new Button { Content = Text("Выбрать программу…", 13), MinWidth = 120 };
+        pick.Click += (_, _) =>
+        {
+            var menu = new MenuFlyout();
+            foreach (var (exe, name) in _s.Perf.RunningApps())
+            {
+                var e = exe;
+                var sub = new MenuFlyoutSubItem { Text = $"{name} — {(_s.Perf.Why(exe) is { } why ? "игра (" + why + ")" : "не игра")}" };
+                var yes = new MenuFlyoutItem { Text = "Это игра" };
+                yes.Click += (_, _) => { _s.Perf.Mark(e, true); Build(); };
+                var no = new MenuFlyoutItem { Text = "Не игра" };
+                no.Click += (_, _) => { _s.Perf.Mark(e, false); Build(); };
+                sub.Items.Add(yes);
+                sub.Items.Add(no);
+                menu.Items.Add(sub);
+            }
+            if (menu.Items.Count == 0) menu.Items.Add(new MenuFlyoutItem { Text = "Нет открытых программ", IsEnabled = false });
+            menu.ShowAt(pick);
+        };
+        gameRows.Add(Row("Отметить вручную", "Из открытых сейчас программ: «это игра» или «не игра».", pick));
+        Add(Card(gameRows.ToArray()));
+        Add(Note($"Сама: игры, которые знает Windows (игровая панель), и всё из папок Steam, Epic, GOG, Ubisoft, Xbox, EA и Riot. Браузеры и плееры не считаются никогда. Сейчас: папок игр {Games.Roots.Count}, игр в списке Windows {Games.KnownCount}."));
+        if (perf.CpuTempSource != "нет" || perf.GpuName.Length > 0)
+            Add(Note($"Видеокарта: {(perf.GpuName.Length > 0 ? perf.GpuName : "—")}. Температура процессора: {perf.CpuTempSource}."));
+
+        void Move(int index, int delta)
+        {
+            Change(_ =>
+            {
+                var list = _s.Perf.Settings.Order;
+                (list[index], list[index + delta]) = (list[index + delta], list[index]);
+                _s.Perf.Settings.Order = list;
+            });
+            Build();
+        }
+
+        ComboBox Combo(string[] items, int selected, Action<int> pick)
+        {
+            var combo = new ComboBox { MinWidth = 180 };
+            foreach (var item in items) combo.Items.Add(item);
+            combo.SelectedIndex = Math.Max(0, selected);
+            combo.SelectionChanged += (_, _) =>
+            {
+                if (combo.SelectedIndex < 0) return;
+                var i = combo.SelectedIndex;
+                Change(_ => pick(i));
+            };
+            return combo;
+        }
+
+        static Button Arrow(string glyph, string tip, bool enabled, Action click)
+        {
+            var b = new Button
+            {
+                Content = new FontIcon { Glyph = glyph, FontFamily = Theme.Icons, FontSize = 12 },
+                Width = 32, Height = 30, Padding = new Thickness(0),
+                Background = Theme.Brush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                IsEnabled = enabled,
+            };
+            ToolTipService.SetToolTip(b, tip);
+            b.Click += (_, _) => click();
+            return b;
+        }
     }
 
     void BuildKeys()

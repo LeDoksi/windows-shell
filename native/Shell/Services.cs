@@ -47,6 +47,7 @@ public sealed class Services
     public required Shots.ShotsService Shots { get; init; }
     public required Clips.ClipsService Clips { get; init; }
     public required Charge.ChargeService Charge { get; init; }
+    public required Perf.PerfService Perf { get; init; }
 
     MenuPopup? _menu;
     SoundFlyout? _sound;
