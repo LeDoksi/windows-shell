@@ -93,7 +93,7 @@ internal sealed class Overlay : IDisposable
                     break;
                 case "frametime":
                     runs.Add(new(now.Fps is { } f2 && f2 > 0 ? $"{1000 / f2:0.0}" : "—", Kind.Value, Value, "00.0"));
-                    runs.Add(new("мс", Kind.Unit, Label));
+                    if (now.Fps is > 0) runs.Add(new("мс", Kind.Unit, Label));
                     break;
                 case "cpu":
                     runs.Add(new(smp is null ? "—" : $"{smp.Cpu:0}%", Kind.Value, Value, "00%"));
