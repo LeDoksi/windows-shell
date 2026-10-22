@@ -123,6 +123,7 @@ public sealed class ShotEditor
         _source = source;
         _window = new Window { Title = "Снимок — Windows Shell" };
         _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(_window);
+        Apps.OwnWindows.Register(_hwnd, "shot-editor", "Снимок", "\uE722");
 
         var root = new Grid { RequestedTheme = ElementTheme.Dark };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -164,8 +165,6 @@ public sealed class ShotEditor
         else _window.SystemBackdrop = new MicaBackdrop();
 
         var presenter = OverlappedPresenter.Create();
-        // Панели задач Windows нет, а наши окна док не показывает: свёрнутое не найти.
-        presenter.IsMinimizable = false;
         _window.AppWindow.SetPresenter(presenter);
         SetDark(_hwnd);
         try { _window.AppWindow.SetIcon(System.IO.Path.Combine(AppContext.BaseDirectory, "shell.ico")); } catch { }

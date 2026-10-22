@@ -63,6 +63,7 @@ public sealed class SettingsWindow
         _page = page;
         _window = new Window { Title = "Настройки — Windows Shell" };
         _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(_window);
+        Apps.OwnWindows.Register(_hwnd, "settings", "Настройки", "\uE713");
         _scroll = new ScrollViewer { Content = _body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         _nav = new NavigationView
         {
@@ -86,8 +87,6 @@ public sealed class SettingsWindow
         Glass.Changed += ApplySurface;
 
         var presenter = OverlappedPresenter.Create();
-        // Панели задач Windows скоро не будет: свёрнутое окно было бы негде найти.
-        presenter.IsMinimizable = false;
         _window.AppWindow.SetPresenter(presenter);
         SetDark(_hwnd);
         try { _window.AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "shell.ico")); } catch { }

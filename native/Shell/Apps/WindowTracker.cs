@@ -5,7 +5,8 @@ using static WindowsShell.Native.Win32;
 
 namespace WindowsShell.Apps;
 
-/// Одно окно, которое панель задач Windows показала бы.
+/// Одно окно, которое панель задач Windows показала бы. `Own` — окно самой оболочки: ключ
+/// его группы в доке (`Glyph` — его значок из шрифта, если окно записано в OwnWindows).
 public sealed record WindowInfo(
     IntPtr Hwnd,
     string Title,
@@ -15,10 +16,14 @@ public sealed record WindowInfo(
     bool Minimized,
     long Seq,
     long Focused,
-    string? PackageAumid = null);
+    string? PackageAumid = null,
+    string? Own = null,
+    string? Glyph = null);
 
 /// Следит за окнами верхнего уровня, как трекер версии на Tauri (`apps.rs`): события Windows
 /// ставят пересчёт через 60 мс, страховочный пересчёт раз в 2 с. Всё в потоке интерфейса.
+/// Свои окна считаются по тому же правилу, что и чужие: обычное окно оболочки (настройки,
+/// канбан…) есть в доке, а док, меню и всплывающие окошки (окна-инструменты) — нет.
 public sealed class WindowTracker
 {
     static readonly string[] SystemClasses =
@@ -28,6 +33,7 @@ public sealed class WindowTracker
     readonly DispatcherQueueTimer _debounce;
     readonly DispatcherQueueTimer _safety;
     readonly WinEventProc _proc;
+    readonly WinEventProc _ownProc;
     readonly List<IntPtr> _hooks = [];
     readonly uint _ownPid = (uint)Environment.ProcessId;
     readonly Dictionary<IntPtr, long> _seq = [];
@@ -37,7 +43,8 @@ public sealed class WindowTracker
 
     public IReadOnlyList<WindowInfo> Windows { get; private set; } = [];
 
-    /// Последнее активное чужое окно (корневой владелец). Клик по доку его не меняет.
+    /// Последнее активное окно программы (корневой владелец), в том числе обычное окно
+    /// оболочки. Клик по доку, меню и окошки оболочки его не меняют.
     public IntPtr Foreground { get; private set; }
 
     public event Action? Changed;
@@ -62,6 +69,7 @@ public sealed class WindowTracker
         _safety.Interval = TimeSpan.FromSeconds(2);
         _safety.Tick += (_, _) => Scan();
         _proc = OnEvent;
+        _ownProc = OnOwnEvent;
     }
 
     public void Start()
@@ -71,6 +79,12 @@ public sealed class WindowTracker
         Hook(EVENT_OBJECT_CREATE, EVENT_OBJECT_HIDE);
         Hook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE);
         Hook(EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED);
+        // Свои окна: чужие хуки их пропускают, а меню и окошки оболочки шумят — тут отбор строже.
+        HookOwn(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND);
+        HookOwn(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND);
+        HookOwn(EVENT_OBJECT_CREATE, EVENT_OBJECT_HIDE);
+        HookOwn(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE);
+        HookOwn(EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED);
         NoteForeground(GetForegroundWindow());
         Scan();
         _safety.Start();
@@ -95,6 +109,28 @@ public sealed class WindowTracker
         if (h != IntPtr.Zero) _hooks.Add(h);
     }
 
+    void HookOwn(uint min, uint max)
+    {
+        var h = SetWinEventHook(min, max, IntPtr.Zero, _ownProc, _ownPid, 0, WINEVENT_OUTOFCONTEXT);
+        if (h != IntPtr.Zero) _hooks.Add(h);
+    }
+
+    void OnOwnEvent(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time)
+    {
+        if (idObject != OBJID_WINDOW || idChild != 0) return;
+        if (ev == EVENT_SYSTEM_FOREGROUND) { NoteForeground(hwnd); return; }
+        // Пропало окно, которое было в доке, — пересчёт; иначе только если появилось окно верхнего
+        // уровня, похожее на обычное (не меню и не окошко).
+        if (ev == EVENT_OBJECT_DESTROY || ev == EVENT_OBJECT_HIDE || ev == EVENT_OBJECT_CLOAKED)
+        {
+            if (Windows.Any(w => w.Hwnd == hwnd)) Schedule();
+            return;
+        }
+        if (GetAncestor(hwnd, 2 /* GA_ROOT */) != hwnd) return;
+        if ((ExStyle(hwnd) & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) != 0) return;
+        Schedule();
+    }
+
     void OnEvent(IntPtr hook, uint ev, IntPtr hwnd, int idObject, int idChild, uint thread, uint time)
     {
         if (idObject != OBJID_WINDOW || idChild != 0) return;
@@ -109,19 +145,19 @@ public sealed class WindowTracker
 
     void NoteForeground(IntPtr hwnd)
     {
-        if (hwnd == IntPtr.Zero || ProcessId(hwnd) == _ownPid) return;
+        if (hwnd == IntPtr.Zero) return;
         var root = GetAncestor(hwnd, GA_ROOTOWNER);
         if (root == IntPtr.Zero) root = hwnd;
+        if (ProcessId(root) == _ownPid && !IsAppWindow(root, ClassName(root), WindowText(root))) return;
         Foreground = root;
         _focused[root] = ++_tick;
         if (Attention.Remove(root) | Attention.Remove(hwnd)) AttentionChanged?.Invoke();
         ForegroundChanged?.Invoke();
     }
 
-    static bool IsAppWindow(IntPtr h, string cls, string title, uint ownPid)
+    static bool IsAppWindow(IntPtr h, string cls, string title)
     {
         if (!IsWindowVisible(h) || IsCloaked(h) || string.IsNullOrWhiteSpace(title)) return false;
-        if (ProcessId(h) == ownPid) return false;
         if (SystemClasses.Contains(cls)) return false;
         var ex = ExStyle(h);
         if ((ex & WS_EX_APPWINDOW) != 0) return true;
@@ -181,8 +217,17 @@ public sealed class WindowTracker
         {
             var title = WindowText(h);
             var cls = ClassName(h);
-            if (!IsAppWindow(h, cls, title, _ownPid)) continue;
+            if (!IsAppWindow(h, cls, title)) continue;
             var framePid = ProcessId(h);
+            if (framePid == _ownPid)
+            {
+                if (!_seq.TryGetValue(h, out var ownSeq)) _seq[h] = ownSeq = ++_tick;
+                _focused.TryGetValue(h, out var ownFocused);
+                var info = OwnWindows.Of(h);
+                list.Add(new WindowInfo(h, title, null, Environment.ProcessPath, info?.Name ?? title, IsIconic(h), ownSeq, ownFocused,
+                    Own: info?.Key ?? "shell", Glyph: info?.Glyph));
+                continue;
+            }
             var pid = framePid;
             if (cls == "ApplicationFrameWindow")
             {
@@ -196,6 +241,7 @@ public sealed class WindowTracker
             list.Add(new WindowInfo(h, title, aumid, proc.Exe, NameOf(aumid, proc.Exe, title), IsIconic(h), seq, focused, proc.Aumid));
         }
         // Закрытые окна забываем.
+        OwnWindows.Prune();
         var alive = list.Select(w => w.Hwnd).ToHashSet();
         foreach (var dead in _seq.Keys.Where(k => !alive.Contains(k)).ToList()) { _seq.Remove(dead); _focused.Remove(dead); Attention.Remove(dead); }
         list.Sort((a, b) => a.Seq.CompareTo(b.Seq));

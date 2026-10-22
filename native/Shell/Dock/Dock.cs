@@ -558,7 +558,8 @@ public sealed partial class Dock : IBar, IDropZone
             item.Entry = e;
             if (e.Running) item.LaunchUntil = 0;
             if (item.IconWeak && (started || Environment.TickCount64 - item.IconAt > 20_000)) item.IconSource = null;
-            SetIcon(item, IconSource(e), e.Windows.FirstOrDefault()?.Exe ?? Launcher.Resolve(e.Target).Exe);
+            if (e.Glyph != null) SetGlyph(item, e.Glyph);
+            else SetIcon(item, IconSource(e), e.Windows.FirstOrDefault()?.Exe ?? Launcher.Resolve(e.Target).Exe);
             next.Add(item);
         }
         // Закрыл последнее окно незакреплённой программы: иконка плавно исчезает на своём месте.
@@ -695,6 +696,18 @@ public sealed partial class Dock : IBar, IDropZone
             });
         }
         Next(0);
+    }
+
+    /// Окно оболочки: её значок из шрифта на плашке, как у кнопки Пуска.
+    void SetGlyph(Item item, string glyph)
+    {
+        if (item.Placeholder is null || item.Placeholder.Glyph == glyph && item.Placeholder.Visibility == Visibility.Visible) return;
+        item.Placeholder.Glyph = glyph;
+        item.Placeholder.FontSize = ElementSize * 0.5;
+        item.Placeholder.Foreground = Theme.Brush(Theme.Accent);
+        item.Placeholder.Visibility = Visibility.Visible;
+        item.Visual.Background = Theme.Brush(Windows.UI.Color.FromArgb(0x14, 255, 255, 255));
+        item.Visual.CornerRadius = new CornerRadius(ElementSize / 4);
     }
 
     bool IsActive(DockEntry e) => e.Windows.Any(w => w.Hwnd == _s.Tracker.Foreground);
@@ -1140,7 +1153,7 @@ public sealed partial class Dock : IBar, IDropZone
         if (it.Entry is null) return;
         HideTooltip();
         _listCloseTimer.Stop();
-        _s.WindowList.Show((this, it.Key), AnchorPx(it), it.Entry.Windows, it.IconSource ?? "", this);
+        _s.WindowList.Show((this, it.Key), AnchorPx(it), it.Entry.Windows, it.IconSource ?? Icons.WindowSource(it.Entry.Windows[0].Hwnd), this);
     }
 
     void CloseWindowList()
@@ -1294,7 +1307,7 @@ public sealed partial class Dock : IBar, IDropZone
                     _s.Config.Update(c => c.Dock.Pinned = ids.Select(id => c.Dock.Pinned.First(p => p.Id == id)).ToList());
                 }
             }
-            else if (index <= PinnedCount() && index != _dragFrom - 1)
+            else if (!e.Own && index <= PinnedCount() && index != _dragFrom - 1)
             {
                 // Запущенную незакреплённую утянули к закреплённым — закрепляется на этом месте.
                 _s.PinApp(e.Title, e.Target, index);
@@ -1448,7 +1461,8 @@ public sealed partial class Dock : IBar, IDropZone
             _springLoad.Stop();
             if (onto?.Entry?.Running == true) _springLoad.Start();
         }
-        if (onto is null) { e.AcceptedOperation = DataPackageOperation.None; return; }
+        // Окно оболочки выходит вперёд (бросить файл можно в него), но сама иконка файл не берёт.
+        if (onto is null || onto.Entry is { Own: true }) { e.AcceptedOperation = DataPackageOperation.None; return; }
         e.AcceptedOperation = DataPackageOperation.Copy;
         e.DragUIOverride.Caption = $"Открыть в «{onto.Entry!.Title}»";
     }
@@ -1473,7 +1487,7 @@ public sealed partial class Dock : IBar, IDropZone
             }
             return;
         }
-        if (onto?.Entry is { } entry)
+        if (onto?.Entry is { Own: false } entry)
         {
             var exe = entry.Windows.FirstOrDefault()?.Exe ?? Launcher.Resolve(entry.Target).Exe;
             if (exe != null) Launcher.OpenWith(exe, paths);
@@ -1506,8 +1520,8 @@ public sealed partial class Dock : IBar, IDropZone
             ], owner: this);
             return;
         }
-        if (shift && ctrl) { Launch(it, admin: true); return; }
-        if (shift) { Launch(it); return; }
+        if (shift && ctrl && !entry.Own) { Launch(it, admin: true); return; }
+        if (shift && !entry.Own) { Launch(it); return; }
         var recent = entry.Windows.FirstOrDefault();
         if (recent is null) { Launch(it); return; }
         if (recent.Hwnd == _s.Tracker.Foreground && !recent.Minimized) _s.Tracker.Minimize(recent.Hwnd);
@@ -1516,7 +1530,8 @@ public sealed partial class Dock : IBar, IDropZone
 
     void Launch(Item it, bool admin = false)
     {
-        if (it.Entry is null) return;
+        // Окно оболочки второй раз не запускают: оболочка уже работает.
+        if (it.Entry is null or { Own: true }) return;
         it.LaunchUntil = Environment.TickCount64 + 10_000;
         Launcher.LaunchInBackground(it.Entry.Target, admin);
         Kick();
@@ -1527,7 +1542,7 @@ public sealed partial class Dock : IBar, IDropZone
         if (ReferenceEquals(target, _soundSlot)) { _s.Audio.Muted = !_s.Audio.Muted; return; }
         // Средний клик по «Сейчас играет» — пауза / играть, как было на верхней панели.
         if (ReferenceEquals(target, _mediaSlot)) { _s.Media.PlayPause(); return; }
-        if (target is Item { IsStart: false, Entry.Missing: false } it) Launch(it);
+        if (target is Item { IsStart: false, Entry: { Missing: false, Own: false } } it) Launch(it);
     }
 
     void RightClick(object target)
@@ -1572,6 +1587,26 @@ public sealed partial class Dock : IBar, IDropZone
             }
             items.Add(MenuItem.Sep);
         }
+        // Окно оболочки: только его окна и «Закрыть» — запускать, закреплять и искать файл нечего.
+        if (!e.Own)
+            AddLaunchItems(it, e, items);
+        if (e.Running)
+        {
+            if (items.Count > 0 && !items[^1].Separator) items.Add(MenuItem.Sep);
+            var windows = e.Windows.Select(w => w.Hwnd).ToList();
+            items.Add(new MenuItem
+            {
+                Text = windows.Count == 1 ? "Закрыть окно" : $"Закрыть все окна ({windows.Count})",
+                Glyph = "",
+                Danger = true,
+                Invoke = () => { foreach (var h in windows) _s.Tracker.Close(h); },
+            });
+        }
+        return items;
+    }
+
+    void AddLaunchItems(Item it, DockEntry e, List<MenuItem> items)
+    {
         // Списки быстрых действий программы (раздел 8): недавние файлы и её действия.
         var exe = e.Windows.FirstOrDefault()?.Exe ?? Launcher.Resolve(e.Target).Exe;
         var aumid = e.Windows.FirstOrDefault()?.Aumid ?? (Launcher.IsPath(e.Target) ? null : e.Target);
@@ -1614,19 +1649,6 @@ public sealed partial class Dock : IBar, IDropZone
                 Invoke = () => ToggleCategory(c.Id, e),
             }).ToList(),
         });
-        if (e.Running)
-        {
-            items.Add(MenuItem.Sep);
-            var windows = e.Windows.Select(w => w.Hwnd).ToList();
-            items.Add(new MenuItem
-            {
-                Text = windows.Count == 1 ? "Закрыть окно" : $"Закрыть все окна ({windows.Count})",
-                Glyph = "",
-                Danger = true,
-                Invoke = () => { foreach (var h in windows) _s.Tracker.Close(h); },
-            });
-        }
-        return items;
     }
 
     void ToggleCategory(string categoryId, DockEntry e)
