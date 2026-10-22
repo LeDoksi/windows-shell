@@ -38,6 +38,7 @@ public sealed class SettingsWindow
         ("start", "Пуск", ""),
         ("look", "Внешний вид", ""),
         ("widgets", "Виджеты", ""),
+        ("perf", "Монитор ПК", "\uE9D9"),
         ("keys", "Клавиши", ""),
         ("system", "Система", ""),
     ];
