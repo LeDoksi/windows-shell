@@ -41,10 +41,15 @@ public sealed class KanbanWindow
     readonly TextBlock _state = Text(11, Faint);
     readonly Grid _main = new();
     readonly TextBox _quick;
+    /// Шапка, в которой сейчас стоит поле быстрой задачи (снимаем явно: у отцепленной шапки
+    /// WinUI не отдаёт Parent, и Add в новую падает с 0x800F1000).
+    Grid? _quickHost;
     readonly CardPanel _card;
     readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _save;
     string? _project;
     string? _quickEpic;
+    /// Клик по эпику в шапке: на доске только его задачи (ещё клик — все).
+    string? _epicFilter;
     string _signature = "";
     bool _closing, _doneOpen, _dirty, _building;
 
@@ -165,7 +170,7 @@ public sealed class KanbanWindow
 
     public void Activate(string? project)
     {
-        if (project != null && project != _project) { _project = project; _card.Hide(); Build(force: true); }
+        if (project != null && project != _project) { _project = project; _epicFilter = null; _quickEpic = null; _card.Hide(); Build(force: true); }
         _window.Activate();
         ShellWindow.ForceForeground(_hwnd);
         _quick.Focus(FocusState.Programmatic);
@@ -269,10 +274,18 @@ public sealed class KanbanWindow
         var (start, length) = (_quick.SelectionStart, _quick.SelectionLength);
         _building = true;
         try { BuildAll(s); }
+        catch (Exception e)
+        {
+            // Ошибка окна не должна ронять оболочку: пишем в журнал и показываем внизу слева.
+            Log.Error("окно канбана", e);
+            _signature = "";
+            _state.Text = "Окно не перестроилось, подробности в журнале оболочки.";
+            _state.Foreground = new SolidColorBrush(Theme.Warning);
+        }
         finally
         {
             _building = false;
-            if (typing && _quick.Parent != null)
+            if (typing && _quickHost != null)
                 _window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
                 {
                     _quick.Focus(FocusState.Programmatic);
@@ -329,7 +342,7 @@ public sealed class KanbanWindow
     {
         var sb = new StringBuilder();
         sb.Append(_project).Append('|').Append(_k.Api.SignedIn).Append('|').Append(_k.Error).Append('|').Append(_k.LoadedAt?.ToString("HH:mm"))
-          .Append('|').Append(_k.WaitingForGoogle).Append('|').Append(_k.SignInError).Append('|').Append(_doneOpen).Append('|').Append(_quickEpic)
+          .Append('|').Append(_k.WaitingForGoogle).Append('|').Append(_k.SignInError).Append('|').Append(_doneOpen).Append('|').Append(_quickEpic).Append('|').Append(_epicFilter)
           .Append('|').Append(string.Join(",", s.Shown)).Append(s.ShowDone).Append(s.Compact).Append('|').Append(_card.Current?.Id);
         foreach (var p in _k.Projects) sb.Append(p.Id).Append(p.Name).Append(_k.Progress(p.Id)).Append(';');
         foreach (var e in _k.Epics.Where(e => e.ProjectId == _project)) sb.Append(e.Id).Append(e.Title).Append(e.Status).Append(';');
@@ -368,6 +381,7 @@ public sealed class KanbanWindow
                 if (id == _project) return;
                 _project = id;
                 _quickEpic = null;
+                _epicFilter = null;
                 _card.Hide();
                 _k.RememberProject(id);
                 Build(force: true);
@@ -387,7 +401,8 @@ public sealed class KanbanWindow
         title.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
         title.MaxWidth = 260;
         grid.Children.Add(title);
-        if (_quick.Parent is Panel old) old.Children.Remove(_quick);
+        _quickHost?.Children.Remove(_quick);
+        _quickHost = grid;
         Grid.SetColumn(_quick, 1);
         grid.Children.Add(_quick);
         if (_quickEpic != null && _k.ActiveEpics(project.Id).All(e => e.Id != _quickEpic)) _quickEpic = null;
@@ -406,7 +421,7 @@ public sealed class KanbanWindow
             var none = new ToggleMenuFlyoutItem { Text = "Без эпика", IsChecked = _quickEpic is null };
             none.Click += (_, _) => { _quickEpic = null; Build(force: true); _quick.Focus(FocusState.Programmatic); };
             flyout.Items.Add(none);
-            foreach (var e in _k.ActiveEpics(project.Id))
+            foreach (var e in _k.OpenEpics(project.Id))
             {
                 var id = e.Id;
                 var item = new ToggleMenuFlyoutItem { Text = $"{e.Short} {e.Title}", IsChecked = _quickEpic == id };
@@ -449,18 +464,39 @@ public sealed class KanbanWindow
 
     FrameworkElement Epics(KProject project)
     {
-        var grid = new Grid { Padding = new Thickness(16, 10, 16, 10), ColumnSpacing = 14, BorderBrush = new SolidColorBrush(Line), BorderThickness = new Thickness(0, 0, 0, 1) };
+        var grid = new Grid { Padding = new Thickness(10, 5, 16, 5), ColumnSpacing = 14, BorderBrush = new SolidColorBrush(Line), BorderThickness = new Thickness(0, 0, 0, 1) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var list = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14 };
+        var list = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        // Эпики в работе: «active», и в них есть несделанное (или задач пока нет). Выбранный
+        // остаётся в шапке, даже если его доделали, чтобы фильтр было видно и можно было снять.
         foreach (var e in _k.ActiveEpics(project.Id))
         {
             var (done, total) = _k.Progress(project.Id, e.Id);
-            var label = Text(12, Muted, $"{e.Short} {e.Title} · {done}/{total}");
-            ToolTipService.SetToolTip(label, $"{e.Id} {e.Title}");
-            list.Children.Add(new StackPanel { Width = 170, Spacing = 4, Children = { label, Bar(total == 0 ? 0 : (double)done / total, Violet) } });
+            var on = e.Id == _epicFilter;
+            if (!on && total > 0 && done >= total) continue;
+            var label = Text(12, on ? Microsoft.UI.Colors.White : Muted, $"{e.Short} {e.Title} · {done}/{total}");
+            var chip = new Button
+            {
+                Content = new StackPanel { Width = 170, Spacing = 4, Children = { label, Bar(total == 0 ? 0 : (double)done / total, Violet) } },
+                Padding = new Thickness(8, 5, 8, 6),
+                CornerRadius = new CornerRadius(7),
+                BorderThickness = new Thickness(1),
+                BorderBrush = new SolidColorBrush(on ? Color.FromArgb(0x99, 0xB3, 0x9C, 0xFF) : Microsoft.UI.Colors.Transparent),
+                Background = new SolidColorBrush(on ? Color.FromArgb(0x1F, 0xB3, 0x9C, 0xFF) : Microsoft.UI.Colors.Transparent),
+            };
+            ToolTipService.SetToolTip(chip, on ? $"{e.Id} {e.Title}\nКлик — снова все задачи" : $"{e.Id} {e.Title}\nКлик — только задачи этого эпика");
+            var id = e.Id;
+            chip.Click += (_, _) =>
+            {
+                _epicFilter = _epicFilter == id ? null : id;
+                // Новая задача из шапки идёт в выбранный эпик.
+                _quickEpic = _epicFilter;
+                Build(force: true);
+            };
+            list.Children.Add(chip);
         }
-        if (list.Children.Count == 0) list.Children.Add(Text(12, Faint, "Активных эпиков нет"));
+        if (list.Children.Count == 0) list.Children.Add(Text(12, Faint, "Эпиков в работе нет"));
         grid.Children.Add(new ScrollViewer
         {
             Content = list,
@@ -496,7 +532,7 @@ public sealed class KanbanWindow
 
     FrameworkElement ColumnView(KProject project, string status, bool compact)
     {
-        var items = _k.Column(project.Id, status);
+        var items = Visible(project.Id, status);
         var head = new Grid { Padding = new Thickness(4, 2, 4, 2) };
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -527,7 +563,7 @@ public sealed class KanbanWindow
 
     FrameworkElement Done(KProject project, KanbanSettings s)
     {
-        var items = _k.Column(project.Id, KStatus.Done);
+        var items = Visible(project.Id, KStatus.Done);
         var panel = new StackPanel { BorderBrush = new SolidColorBrush(Line), BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(16, 4, 16, 8) };
         var toggle = new Button
         {
@@ -640,6 +676,10 @@ public sealed class KanbanWindow
         return card;
     }
 
+    /// Карточки колонки с учётом фильтра по эпику.
+    List<KItem> Visible(string project, string status) =>
+        _epicFilter is null ? _k.Column(project, status) : _k.Column(project, status).Where(i => i.EpicId == _epicFilter).ToList();
+
     List<MenuItem> CardMenu(KItem item)
     {
         var items = new List<MenuItem> { new() { Text = "Открыть", Glyph = "", Invoke = () => { _card.Show(item); Build(force: true); } } };
@@ -686,11 +726,11 @@ public sealed class KanbanWindow
             var index = IndexAt(list, e.GetPosition(list).Y);
             RemoveGhost();
             if (_drag is not { } item) return;
-            var column = _k.Column(project, status).Where(i => i.Id != item.Id).ToList();
+            var column = Visible(project, status).Where(i => i.Id != item.Id).ToList();
             // Бросили туда же, откуда взяли — ничего не меняем.
             if (item.Status == status)
             {
-                var was = _k.Column(project, status).FindIndex(i => i.Id == item.Id);
+                var was = Visible(project, status).FindIndex(i => i.Id == item.Id);
                 if (was == index) return;
             }
             _ = _k.Move(item, status, KanbanService.PositionAt(column, index));

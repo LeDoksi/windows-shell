@@ -74,7 +74,7 @@ public sealed class KanbanFlyout : Popup
         _ = _k.Refresh();
     }
 
-    string? ValidEpic(string project, string? epic) => _k.ActiveEpics(project).Any(e => e.Id == epic) ? epic : null;
+    string? ValidEpic(string project, string? epic) => _k.OpenEpics(project).Any(e => e.Id == epic) ? epic : null;
 
     void Build()
     {
@@ -179,7 +179,7 @@ public sealed class KanbanFlyout : Popup
         if (_project is null) return;
         var project = _project;
         var items = new List<MenuItem> { new() { Text = "Без эпика", Checked = _epic is null, Invoke = () => SetEpic(null) } };
-        var epics = _k.ActiveEpics(project);
+        var epics = _k.OpenEpics(project);
         if (epics.Count > 0) items.Add(MenuItem.Sep);
         foreach (var e in epics)
         {
