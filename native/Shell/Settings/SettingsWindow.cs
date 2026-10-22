@@ -39,6 +39,7 @@ public sealed class SettingsWindow
         ("look", "Внешний вид", ""),
         ("widgets", "Виджеты", ""),
         ("perf", "Монитор ПК", "\uE9D9"),
+        ("kanban", "Канбан", "\uE9D5"),
         ("keys", "Клавиши", ""),
         ("system", "Система", ""),
     ];
@@ -53,6 +54,8 @@ public sealed class SettingsWindow
     string _page;
     // Изменение пришло из этого окна: страницу не перестраиваем (фокус и прокрутка остаются).
     bool _self;
+    // Состояние входа в канбан, по которому строилась его страница.
+    string _kanbanState = "";
 
     SettingsWindow(Services services, string page)
     {
@@ -92,10 +95,12 @@ public sealed class SettingsWindow
 
         _s.Config.Changed += OnConfigChanged;
         _s.Monitors.Changed += OnMonitorsChanged;
+        _s.Kanban.Changed += OnKanbanChanged;
         _window.Closed += (_, _) =>
         {
             _s.Config.Changed -= OnConfigChanged;
             _s.Monitors.Changed -= OnMonitorsChanged;
+            _s.Kanban.Changed -= OnKanbanChanged;
             Glass.Changed -= ApplySurface;
             _lastPage = _page;
             _open = null;
@@ -159,6 +164,19 @@ public sealed class SettingsWindow
         if (_page == "dock") Build();
     }
 
+    /// Страница канбана перестраивается, только когда вошли, вышли или ждём браузер
+    /// (не на каждое чтение задач: поле пароля не должно сбрасываться).
+    void OnKanbanChanged()
+    {
+        if (_page == "kanban" && KanbanState() != _kanbanState) Build();
+    }
+
+    string KanbanState()
+    {
+        var k = _s.Kanban;
+        return $"{k.Api.SignedIn}|{k.Api.Email}|{k.WaitingForGoogle}|{k.SignInError}";
+    }
+
     /// Изменить конфиг из этого окна.
     void Change(Action<ConfigData> change)
     {
@@ -181,6 +199,7 @@ public sealed class SettingsWindow
             case "look": BuildLook(); break;
             case "widgets": BuildWidgets(); break;
             case "perf": BuildPerf(); break;
+            case "kanban": BuildKanban(); break;
             case "keys": BuildKeys(); break;
             case "system": BuildSystem(); break;
         }
@@ -631,6 +650,72 @@ public sealed class SettingsWindow
             b.Click += (_, _) => click();
             return b;
         }
+    }
+
+    void BuildKanban()
+    {
+        var k = _s.Kanban;
+        var s = k.Settings;
+        _kanbanState = KanbanState();
+        Add(Card(Switch("Канбан", "Твой канбан с сайта, не копия: что меняешь здесь, сразу видно там, и наоборот. Значок в хвосте дока — быстрая задача, на нём число задач «В работе».",
+            k.Enabled, on =>
+            {
+                Change(_ => _s.Config.Widget("kanban").Enabled = on);
+                Build();
+            })));
+        if (!k.Enabled) return;
+
+        Add(Section("Вход"));
+        if (k.Api.SignedIn)
+            Add(Card(Row($"Вошёл: {k.Api.Email}", "Вход хранится зашифрованным, только для твоей учётной записи Windows.", Button("Выйти", k.SignOut))));
+        else
+            Add(Card(new Border { Padding = new Thickness(0, 14, 0, 14), MaxWidth = 420, HorizontalAlignment = HorizontalAlignment.Left, Child = WindowsShell.Kanban.SignInView.Build(k) }));
+
+        ComboBox Combo(string[] items, int selected, Action<int> pick)
+        {
+            var combo = new ComboBox { MinWidth = 200 };
+            foreach (var item in items) combo.Items.Add(item);
+            combo.SelectedIndex = Math.Max(0, selected);
+            combo.SelectionChanged += (_, _) =>
+            {
+                if (combo.SelectedIndex < 0) return;
+                var i = combo.SelectedIndex;
+                Change(_ => pick(i));
+            };
+            return combo;
+        }
+
+        Add(Section("Окно канбана"));
+        var rows = new List<UIElement>
+        {
+            Switch("Окно канбана", "Доска целиком: слева проекты, колонки, перетаскивание карточек, клик — задача с описанием, шагами и комментариями. Помнит монитор, место и размер.",
+                s.Window, on => Change(_ => _s.Kanban.Settings.Window = on)),
+            Switch("Поверх всех окон", "Выключено — обычное окно.", s.WindowTopmost, on => Change(_ => _s.Kanban.Settings.WindowTopmost = on)),
+        };
+        var shown = s.Shown;
+        var columns = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        foreach (var c in KanbanSettings.Columns)
+        {
+            var id = c;
+            columns.Children.Add(Check(WindowsShell.Kanban.KStatus.Name(id), shown.Contains(id), on => Change(_ =>
+            {
+                var set = _s.Kanban.Settings.Shown;
+                if (on && !set.Contains(id)) set.Add(id);
+                if (!on) set.Remove(id);
+                _s.Kanban.Settings.Shown = set;
+            })));
+        }
+        rows.Add(Row("Колонки", null, columns));
+        rows.Add(Switch("«Готово» внизу", "Свёрнутая полоса: клик — последние сделанные задачи, туда же можно бросить карточку.", s.ShowDone,
+            on => Change(_ => _s.Kanban.Settings.ShowDone = on)));
+        rows.Add(Row("Карточки", null, Combo(["Обычные", "Компактные"], s.Compact ? 1 : 0, i => _s.Kanban.Settings.Compact = i == 1)));
+        string[] surfaces = [KanbanSettings.SurfaceShell, KanbanSettings.SurfaceGlass, KanbanSettings.SurfaceTint];
+        rows.Add(Row("Фон окна", null, Combo(["Как во всей оболочке", "Стекло", "Тонировка"], Array.IndexOf(surfaces, s.Surface), i => _s.Kanban.Settings.Surface = surfaces[i])));
+        Add(Card(rows.ToArray()));
+
+        Add(Section("Значок"));
+        Add(Card(Switch("Число задач «В работе»", "Голубой кружок на значке канбана в хвосте дока.", s.Badge, on => Change(_ => _s.Kanban.Settings.Badge = on))));
+        Add(Note("Задачи читаются раз в 15 секунд, пока окно открыто, и раз в 2 минуты для значка. В окне: Ctrl+N — новая задача, F5 — обновить, Esc — закрыть карточку. Правый клик по карточке — перенести в другую колонку."));
     }
 
     void BuildKeys()

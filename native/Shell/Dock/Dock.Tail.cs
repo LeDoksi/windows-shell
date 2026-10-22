@@ -15,6 +15,7 @@ namespace WindowsShell.Dock;
 /// язык · уведомления · часы. Полный хвост — на мониторе хвоста, на остальных только часы (раздел 9).
 /// Временные значки (design-v2 п. 2) стоят в постоянном порядке: Сейчас играет · Снимки ·
 /// Корзина · Заряд; видны, когда нужны, появляются и исчезают плавно. Корзина — п. 3, заряд — п. 7.
+/// Канбан (п. 9) — постоянный значок перед ⌃: быстрая задача, на нём число задач в работе.
 public sealed partial class Dock
 {
     /// Значок хвоста: место в доке, вид и показан ли он сейчас.
@@ -33,10 +34,11 @@ public sealed partial class Dock
     }
 
     readonly List<Slot> _slots = [];
-    Slot _mediaSlot = null!, _shotsSlot = null!, _binSlot = null!, _chargeSlot = null!, _traySlot = null!, _netSlot = null!, _soundSlot = null!, _batSlot = null!, _langSlot = null!, _bellSlot = null!, _clockSlot = null!;
+    Slot _mediaSlot = null!, _shotsSlot = null!, _binSlot = null!, _chargeSlot = null!, _kanbanSlot = null!, _traySlot = null!, _netSlot = null!, _soundSlot = null!, _batSlot = null!, _langSlot = null!, _bellSlot = null!, _clockSlot = null!;
     FontIcon _binIcon = null!, _chargeIcon = null!, _soundIcon = null!, _netIcon = null!, _batIcon = null!, _bellIcon = null!;
     Border _trayDot = null!, _bellDot = null!, _chargeDot = null!;
-    TextBlock _lang = null!, _time = null!, _date = null!;
+    TextBlock _lang = null!, _time = null!, _date = null!, _kanbanCount = null!;
+    Border _kanbanBadge = null!;
     Image _mediaCover = null!;
     FontIcon _mediaNote = null!;
     FontIcon _shotsIcon = null!;
@@ -108,6 +110,19 @@ public sealed partial class Dock
         _chargeSlot.Temp = true;
         _chargeSlot.Grow = 0;
 
+        // Канбан: список с галочками, число «В работе» голубым кружком.
+        _kanbanCount = new TextBlock { FontFamily = Theme.Font, FontSize = 10, FontWeight = Microsoft.UI.Text.FontWeights.Bold, Foreground = Theme.Brush(Windows.UI.Color.FromArgb(255, 0x06, 0x23, 0x3A)), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        _kanbanBadge = new Border
+        {
+            MinWidth = 15, Height = 15, CornerRadius = new CornerRadius(7.5), Padding = new Thickness(3, 0, 3, 1),
+            Background = Theme.Brush(Theme.Accent),
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, 4, 2, 0),
+            Child = _kanbanCount,
+            Visibility = Visibility.Collapsed,
+        };
+        _kanbanSlot = Add("kanban", 36, Glyph("\uE9D5", 17), _kanbanBadge);
+
         _trayDot = Dot();
         _traySlot = Add("tray", 30, Glyph("", 12), _trayDot);
         _netIcon = Glyph("");
@@ -139,6 +154,7 @@ public sealed partial class Dock
         _s.Shots.Changed += OnTailChanged;
         _s.Shots.Tick += OnShotsTick;
         _s.Charge.Changed += OnTailChanged;
+        _s.Kanban.Changed += OnTailChanged;
     }
 
     void UnsubscribeTail()
@@ -154,6 +170,7 @@ public sealed partial class Dock
         _s.Shots.Changed -= OnTailChanged;
         _s.Shots.Tick -= OnShotsTick;
         _s.Charge.Changed -= OnTailChanged;
+        _s.Kanban.Changed -= OnTailChanged;
     }
 
     void OnShotsTick()
@@ -215,6 +232,12 @@ public sealed partial class Dock
         _chargeIcon.Foreground = Theme.Brush(low.Count > 0 ? Theme.Warning : Theme.Text);
         _chargeDot.Visibility = low.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (Equals(_tooltipFor, _chargeSlot)) { _tooltipText.Text = SlotTooltip(_chargeSlot); PlaceTooltip(); }
+        var kanban = _s.Kanban;
+        Show(_kanbanSlot, full && kanban.Enabled);
+        var doing = kanban.Api.SignedIn && kanban.Settings.Badge ? kanban.Doing : 0;
+        _kanbanCount.Text = doing > 99 ? "99+" : doing.ToString();
+        _kanbanBadge.Visibility = doing > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (Equals(_tooltipFor, _kanbanSlot)) { _tooltipText.Text = SlotTooltip(_kanbanSlot); PlaceTooltip(); }
         Show(_traySlot, full && t.Tray && _s.Tray.Running);
         Show(_netSlot, full && t.Network);
         Show(_soundSlot, full && _s.Config.WidgetEnabled("audio"));
@@ -280,6 +303,12 @@ public sealed partial class Dock
                 if (list.Count == 0) return "Заряд устройств";
                 return "Заряд устройств\n" + string.Join("\n", list.Select(d => $"{d.Name}: {d.Percent} %{(d.Charging ? ", заряжается" : "")}"));
             }
+            case "kanban":
+            {
+                var k = _s.Kanban;
+                if (!k.Api.SignedIn) return "Канбан\nКлик — войти";
+                return k.LoadedAt is null ? "Канбан" : $"Канбан · в работе {k.Doing}\nКлик — новая задача";
+            }
             case "network":
             {
                 var n = _s.Network.State;
@@ -319,6 +348,9 @@ public sealed partial class Dock
                 break;
             case "charge":
                 Popups.Toggle(key, () => _s.ChargeFlyout.Show(key, AnchorPx(t), this));
+                break;
+            case "kanban":
+                Popups.Toggle(key, () => _s.KanbanFlyout.Show(key, AnchorPx(t), this));
                 break;
             case "tray":
                 _s.Tray.Anchor = AnchorRect(t);
@@ -391,6 +423,14 @@ public sealed partial class Dock
                 new() { Text = "Bluetooth и устройства", Glyph = "\uE702", Invoke = () => Launcher.Open("ms-settings:bluetooth") },
                 MenuItem.Sep,
                 new() { Text = "Настройки виджета", Glyph = "\uE713", Invoke = () => _s.OpenSettings("widgets") },
+            ],
+            "kanban" =>
+            [
+                new() { Text = "Новая задача", Glyph = "\uE710", Invoke = () => SlotClick(t) },
+                new() { Text = "Открыть окно канбана", Glyph = "\uE9D5", Invoke = () => _s.Kanban.OpenWindow() },
+                new() { Text = "Сайт канбана", Glyph = "\uE774", Invoke = _s.Kanban.OpenSite },
+                MenuItem.Sep,
+                new() { Text = "Настройки виджета", Glyph = "\uE713", Invoke = () => _s.OpenSettings("kanban") },
             ],
             "sound" => SoundMenu(),
             "network" =>
