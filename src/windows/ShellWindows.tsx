@@ -50,6 +50,15 @@ export function ShellWindow({ label }: { label: WindowLabel }) {
   useEffect(() => {
     document.documentElement.dataset.window = label;
   }, [label]);
+  // Меню браузера («Назад», «Обновить», «Печать») в оболочке не нужно: правый клик там, где
+  // нет своего меню, ничего не делает. В полях ввода остаётся (вставить, копировать).
+  useEffect(() => {
+    const block = (e: MouseEvent) => {
+      if (!(e.target as Element).closest?.("input, textarea")) e.preventDefault();
+    };
+    document.addEventListener("contextmenu", block);
+    return () => document.removeEventListener("contextmenu", block);
+  }, []);
   // «Тонировка» — плотный фон без размытия (токены `data-glass="off"`).
   useEffect(() => {
     if (glass) document.documentElement.dataset.glass = glass === "tint" ? "off" : "acrylic";
