@@ -9,7 +9,11 @@ namespace WindowsShell.Perf;
 /// группа «Пользователи журналов производительности» (PerfAccess).
 public sealed class Frames : IDisposable
 {
-    const string Session = "WindowsShellFps";
+    const string DefaultSession = "WindowsShellFps";
+    readonly string _session;
+
+    /// `session` — имя сессии событий; у пробы своё, чтобы не остановить счёт кадров оболочки.
+    public Frames(string session = DefaultSession) => _session = session;
     /// Сколько секунд кадров держим (1% low и график за минуту).
     const double KeepMs = 60_000;
 
@@ -69,7 +73,7 @@ public sealed class Frames : IDisposable
             RedirectStandardError = true,
         };
         foreach (var a in new[] { "--process_id", pid.ToString(), "--output_stdout", "--no_console_stats", "--qpc_time_ms",
-                     "--session_name", Session, "--stop_existing_session", "--terminate_on_proc_exit", "--no_track_input", "--no_track_gpu" })
+                     "--session_name", _session, "--stop_existing_session", "--terminate_on_proc_exit", "--no_track_input", "--no_track_gpu" })
             psi.ArgumentList.Add(a);
         try
         {
@@ -193,7 +197,7 @@ public sealed class Frames : IDisposable
     /// Последняя ошибка PresentMon (для проверки).
     public string Error { get { lock (_lock) return _error; } }
 
-    static void Kill(Process p, bool stopSession)
+    void Kill(Process p, bool stopSession)
     {
         try { if (!p.HasExited) p.Kill(); } catch { }
         p.Dispose();
@@ -201,12 +205,12 @@ public sealed class Frames : IDisposable
         if (stopSession) StopSession();
     }
 
-    static void StopSession()
+    void StopSession()
     {
         try
         {
             var psi = new ProcessStartInfo(Tool) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-            foreach (var a in new[] { "--session_name", Session, "--terminate_existing_session" }) psi.ArgumentList.Add(a);
+            foreach (var a in new[] { "--session_name", _session, "--terminate_existing_session" }) psi.ArgumentList.Add(a);
             using var p = Process.Start(psi);
             p?.WaitForExit(3000);
         }
