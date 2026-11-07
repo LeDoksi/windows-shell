@@ -164,7 +164,7 @@ public sealed class Notifications
     }
 
     // «Не беспокоить»: состояние WNF_SHEL_QUIETHOURS_ACTIVE_PROFILE_CHANGED (0 — выключено).
-    static bool QuietMode()
+    internal static bool QuietMode()
     {
         try
         {

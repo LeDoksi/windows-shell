@@ -35,6 +35,7 @@ public sealed class App : Application, IXamlMetadataProvider
         if (Kanban.SelfTest.Cli(args)) return;
         if (Perf.PerfAccess.Cli(args)) return;
         if (Island.Spike.OvertopTest.Cli(args)) return;
+        if (Island.Spike.NotifTest.Cli(args)) return;
         if (Island.Spike.SpikeArgs.Parse(args) is { } spike)
         {
             // Без сторожа и мьютекса: проба работает рядом с запущенной оболочкой и её не трогает.
