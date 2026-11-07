@@ -72,22 +72,24 @@ internal sealed class IslandSpike
 
     public void Start()
     {
-        var monitors = new Monitors(_queue, new MessageWindow());
-        _metrics.Line($"== Мониторы ({monitors.All.Count})");
-        foreach (var s in monitors.All)
+        // Снимок мониторов, без своего окна сообщений: второе окно WindowsShellNative.Messages
+        // перехватило бы команды сторожа (--stop, --launch), адресованные оболочке.
+        var screens = Monitors.Snapshot();
+        _metrics.Line($"== Мониторы ({screens.Count})");
+        foreach (var s in screens)
         {
             var hz = RefreshRate(s.Name);
-            _metrics.Line($"   {s.Name}: {s.Bounds.Width}×{s.Bounds.Height} в ({s.Bounds.Left}, {s.Bounds.Top}), масштаб {s.Scale * 100:0} %, {(hz > 0 ? $"{hz} Гц" : "частота неизвестна")}{(s.Primary ? ", основной" : "")}");
-            _bodies.Add(CreateBody(s, hz > 0 ? 1000.0 / hz : 1000.0 / 60));
+            _metrics.Line($"   {s.Name}: {s.Bounds.Width}×{s.Bounds.Height} в ({s.Bounds.Left}, {s.Bounds.Top}), масштаб {s.Scale * 100:0} %, {(hz > 1 ? $"{hz} Гц" : "частота неизвестна (считаем 60 Гц)")}{(s.Primary ? ", основной" : "")}");
+            _bodies.Add(CreateBody(s, MotionStats.PeriodMs(hz)));
         }
         _metrics.Line($"== Настройки: стратегия {_opt.Strategy}, {(_opt.Auto ? "авторежим" : "ручной режим")}, эффекты анимации Windows {(_reduced ? "выключены (без пружин)" : "включены")}");
         foreach (var b in _bodies) EnterRest(b);
         PublishZones();
         new Thread(Poll) { IsBackground = true, Name = "проба острова: курсор" }.Start();
         // Окнам нужно время, чтобы появиться, прежде чем смотреть на пиксели и клики.
-        After(900, CheckRestAll);
-        if (_opt.Auto) After(1500, RunAuto);
-        else
+        // Авторежим начинается только после проверок покоя (иначе проверка попадёт на ленту).
+        After(900, () => CheckRestAll(_opt.Auto ? RunAuto : null));
+        if (!_opt.Auto)
         {
             _limit = _queue.CreateTimer();
             _limit.Interval = TimeSpan.FromMinutes(10);
@@ -208,7 +210,7 @@ internal sealed class IslandSpike
         if (m != IslandMode.Rest) LeaveRest(b);
         if (m is IslandMode.Sound or IslandMode.Net or IslandMode.Media) b.WidgetText.Text = $"{Name(m)} — заглушка виджета";
         b.Content.IsHitTestVisible = m != IslandMode.Rest;
-        _metrics.Begin(b.Screen.Name, Name(from), Name(m), start, byPointer, b.PeriodMs);
+        _metrics.Begin(b.Screen.Name, Name(from), Name(m), start, byPointer, b.PeriodMs, (b.FromW, b.FromH), (w, h));
         b.Moving = true;
         PublishZones();
         EnsureRendering();
@@ -259,7 +261,7 @@ internal sealed class IslandSpike
 
     /// Видна ли кромка (пиксель экрана того же цвета, что тело) и проходят ли клики сквозь неё.
     /// Если кромки не видно или клики не проходят, переходим на b2 и проверяем ещё раз.
-    void CheckRestAll()
+    void CheckRestAll(Action? then)
     {
         var bad = false;
         foreach (var b in _bodies)
@@ -277,13 +279,25 @@ internal sealed class IslandSpike
                 b.Transparent = false;
                 if (b.Mode == IslandMode.Rest && !b.Moving) EnterRest(b);
             }
-            After(700, () => { foreach (var b in _bodies) CheckRest(b, "b2"); });
+            After(700, () =>
+            {
+                foreach (var b in _bodies) CheckRest(b, "b2");
+                if (then != null) After(300, then);
+            });
+            return;
         }
-        else _metrics.Check($"вариант покоя: {(_b2 ? "b2" : "b1")}");
+        _metrics.Check($"вариант покоя: {(_b2 ? "b2" : "b1")}");
+        if (then != null) After(300, then);
     }
 
     (bool? Visible, bool Through) CheckRest(Body b, string variant)
     {
+        if (b.Mode != IslandMode.Rest || b.Moving)
+        {
+            // Остров раскрыт рукой: проверка покоя здесь ничего не скажет.
+            _metrics.Check($"{b.Screen.Name} покой ({variant}): пропущено — остров сейчас открыт");
+            return (null, true);
+        }
         var x = b.CenterPx;
         var y = b.Screen.Bounds.Top + 1;
         var rim = ScreenPixel(x, y);
@@ -450,6 +464,7 @@ internal sealed class IslandSpike
             var first = _firstFrame;
             _firstFrame = false;
             var dt = Math.Min(frameMs / 1000, first ? 1 / 60.0 : 0.5);
+            _metrics.Tick(frameMs, first);
             var any = false;
             foreach (var b in _bodies)
             {
@@ -464,7 +479,7 @@ internal sealed class IslandSpike
                 if (b.Moving || b.Magnet.Moving) Draw(b);
                 if (b.Moving)
                 {
-                    _metrics.Frame(b.Screen.Name, frameMs, first, changed || _reduced);
+                    _metrics.Frame(b.Screen.Name, frameMs, first, changed || _reduced, b.W.Value, b.H.Value);
                     if (b.W.Settled(0.3) && b.H.Settled(0.3))
                     {
                         b.W = new Spring { Value = b.W.Target, Target = b.W.Target };

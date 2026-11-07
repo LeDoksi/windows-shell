@@ -63,9 +63,10 @@ public static class GamesTest
             Thread.Sleep(1000);
             var fg = GetForegroundWindow();
             if (fg == IntPtr.Zero) continue;
+            // Корневой владелец — только чтобы узнать программу; весь экран смотрим у самого окна
+            // на переднем плане, как Ui/Bars.
             var root = GetAncestor(fg, GA_ROOTOWNER);
-            if (root != IntPtr.Zero) fg = root;
-            var pid = ProcessId(fg);
+            var pid = ProcessId(root != IntPtr.Zero ? root : fg);
             if (pid == own || pid == 0) continue;
             if (ClassName(fg) is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") continue;
             var exe = ProcessInfo(pid).Exe;

@@ -29,11 +29,11 @@ public static class NotifTest
         var t = new Thread(() =>
         {
             try { result = Run(); }
-            catch (Exception e) { error = $"{e.GetType().Name}: {e.Message}"; }
+            catch (Exception e) { error = Short(e); }
         }) { IsBackground = true, Name = "проба уведомлений" };
         t.SetApartmentState(ApartmentState.MTA);
         t.Start();
-        var finished = t.Join(30_000);
+        var finished = t.Join(45_000);
 
         var sb = new StringBuilder();
         sb.AppendLine($"---- {DateTime.Now:yyyy-MM-dd HH:mm:ss} проба доступа к уведомлениям");
@@ -48,7 +48,7 @@ public static class NotifTest
             sb.AppendLine($"своё уведомление убрали из центра: {(r.OwnRemoved ? "да" : "нет")}");
             sb.AppendLine($"«Не беспокоить» Windows сейчас: {(r.WindowsQuiet ? "включено" : "выключено")}");
         }
-        else sb.AppendLine(finished ? $"ОШИБКА: {error}" : "ОШИБКА: проба не уложилась в 30 с");
+        else sb.AppendLine(finished ? $"ОШИБКА: {error}" : "ОШИБКА: проба не уложилась в 45 с");
         sb.AppendLine("ГОТОВО");
         var text = sb.ToString();
         foreach (var line in text.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)) Log.Write($"проба уведомлений: {line}");
@@ -85,7 +85,9 @@ public static class NotifTest
 
         var known = before.Select(n => n.Id).ToHashSet();
         var sw = Stopwatch.StartNew();
-        Toasts.Show(OwnTitle, OwnText, silent: true);
+        // Без Register(): имя уже записала установленная оболочка, а ссылку её кнопок
+        // («Запустить ещё раз») проба из папки ветки перезаписывать не должна.
+        Toasts.Show(OwnTitle, OwnText, silent: true, register: false);
         UserNotification? own = null;
         while (sw.ElapsedMilliseconds < 15_000 && own is null)
         {
