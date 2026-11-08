@@ -35,7 +35,7 @@ public static class Board
     /// Последние закрытые проекта (свежие сверху) — то, что видно в колонке «Готово».
     public static List<KItem> RecentDone(IEnumerable<KItem> items, string project) =>
         items.Where(i => i.ProjectId == project && i.Status == KStatus.Done && !i.Archived)
-            .OrderByDescending(i => i.ClosedAt ?? DateTimeOffset.MinValue)
+            .OrderByDescending(i => i.ClosedAt ?? i.UpdatedAt ?? DateTimeOffset.MinValue)
             .Take(DoneShown)
             .ToList();
 

@@ -35,6 +35,7 @@ public sealed class IslandHost
     // Закреплённый монитор ПК (П8): на каком экране строка и её цифры.
     string? _pinOn, _pinKey;
     UIElement? _pinRow;
+    bool _pinUnderGame;
     readonly Dictionary<string, TextBlock> _pinValues = [];
     long _pinPainted;
 
@@ -212,6 +213,7 @@ public sealed class IslandHost
         var full = _full.Full;
         foreach (var (name, b) in _bodies) b.SetFull(full.Contains(name));
         UpdateRecording();
+        UpdatePinned();
         Log.Write($"остров: fullscreen — {(full.Count == 0 ? "нигде" : string.Join(", ", full))}{(_full.Exclusive is { } x ? $", эксклюзив на {x}" : "")}");
     }
 
@@ -458,6 +460,15 @@ public sealed class IslandHost
             // Пока строка видна, датчики нужны (П8).
             perf.Hold(this, screen != null);
             if (screen is null || _pinRow is null || !_bodies.TryGetValue(screen, out var body)) return;
+            // Эксклюзивная игра на этом же экране: окно поверх неё сбивало бы эксклюзив — строка
+            // прячется, пока игра там (цифры показывает оверлей), и возвращается после.
+            var underGame = _full.Exclusive == screen;
+            if (underGame != _pinUnderGame)
+            {
+                _pinUnderGame = underGame;
+                Log.Write(underGame ? $"остров: строка монитора спрятана — эксклюзивная игра на {screen}" : $"остров: строка монитора снова на {screen}");
+            }
+            if (underGame) { body.SetBadge("pin", null, null); return; }
             PaintPin();
             var target = body;
             body.SetBadge("pin", _pinRow, () => target.OpenWidget("perf", byUser: true, focus: false));

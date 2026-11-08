@@ -287,18 +287,23 @@ public sealed class KanbanService
     }
 
     /// Задача с новым эпиком одним действием (П12): сначала эпик — не создался, задачи нет
-    /// (исключение, черновик остаётся у вызывающего); потом задача в этом эпике.
+    /// (исключение, черновик остаётся у вызывающего); потом задача в этом эпике. Эпик создался,
+    /// а задача нет — исключение с KeptEpic: форма выбирает этот эпик, повтор второго не создаст.
     public async Task<KItem> CreateWithEpic(string project, string title, string type, string? epic, string? newEpicTitle)
     {
-        if (newEpicTitle is { } et && et.Trim().Length > 0)
+        if (newEpicTitle is not { } et || et.Trim().Length == 0) return await Create(project, title, epic, type);
+        var p = Project(project) ?? throw new KanbanException("Проект не найден, обнови канбан.");
+        var created = await Api.CreateEpic(p, et.Trim());
+        if (Epics.All(e => e.Id != created.Id)) Epics = [.. Epics, created];
+        Log.Write($"канбан: создан эпик {created.Id}");
+        try { return await Create(project, title, created.Id, type); }
+        catch (Exception e)
         {
-            var p = Project(project) ?? throw new KanbanException("Проект не найден, обнови канбан.");
-            var created = await Api.CreateEpic(p, et.Trim());
-            if (Epics.All(e => e.Id != created.Id)) Epics = [.. Epics, created];
-            Log.Write($"канбан: создан эпик {created.Id}");
-            epic = created.Id;
+            if (e is not KanbanException) Log.Write($"канбан: задача в новом эпике {created.Id}: {e}");
+            Changed?.Invoke();
+            var why = e is KanbanException k ? k.Message : "подробности в журнале оболочки";
+            throw new KanbanException($"Эпик {created.Short} создан, а задача — нет ({why}). Нажми «Создать» ещё раз.", keptEpic: created.Id);
         }
-        return await Create(project, title, epic, type);
     }
 
     /// Что вернуть по «Отменить» после смены статуса (undoPatch сайта).
@@ -313,6 +318,7 @@ public sealed class KanbanService
     /// Перевести с «Отменить» (галочка, «Вернуть в работу»).
     public Undo MoveWithUndo(KItem item, string status)
     {
+        item = Current(item);
         var (st, pos, closed) = Board.Undo(item);
         var undo = new Undo(item, st, pos, closed);
         var column = Column(item.ProjectId, status);
@@ -344,6 +350,7 @@ public sealed class KanbanService
     /// Вернуть из архива (как на сайте: в «В работе»).
     public Task Restore(KItem item)
     {
+        item = Current(item);
         var column = Column(item.ProjectId, KStatus.Doing);
         var position = PositionAt(column, column.Count);
         return Change(item, new JsonObject { ["status"] = KStatus.Doing, ["archived_at"] = null, ["closed_at"] = null, ["position"] = position },
@@ -353,6 +360,7 @@ public sealed class KanbanService
     /// Перенести карточку: статус и место в колонке.
     public Task Move(KItem item, string status, double position)
     {
+        item = Current(item);
         var fields = new JsonObject { ["status"] = status, ["position"] = position };
         var closed = item.ClosedAt;
         if (status != item.Status)
@@ -370,8 +378,12 @@ public sealed class KanbanService
         Change(item, new JsonObject { ["epic_id"] = epic }, i => i.EpicId = epic);
 
     /// Своё изменение видно сразу; не записалось — откатываем и показываем ошибку.
+    /// Свежий объект задачи: после чтения с сервера окно и остров могут держать старую копию.
+    KItem Current(KItem item) => Item(item.Id) ?? item;
+
     async Task Change(KItem item, JsonObject fields, Action<KItem> apply)
     {
+        item = Current(item);
         var before = Copy(item);
         apply(item);
         _pending[item.Id] = apply;

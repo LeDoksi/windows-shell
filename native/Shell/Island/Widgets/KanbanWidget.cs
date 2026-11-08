@@ -25,20 +25,41 @@ public sealed class KanbanWidget(Services s, IslandBody body) : IslandWidget(s, 
 
     KanbanService K => S.Kanban;
 
+    /// Верх виджета (заголовок, карточки, ошибки): пересобирается сам по себе, форма быстрой
+    /// задачи под ним остаётся на месте — печать не прерывается, когда пришли свежие данные.
+    readonly StackPanel _top = new() { Spacing = 12 };
+    bool _withQuick;
+
     protected override void OnOpen()
     {
         _quick ??= new KanbanQuick(K, S.Queue, ShowMenu, Resized);
-        K.Changed += Later;
+        K.Changed += OnChanged;
         // Данные старше полуминуты — перечитать (на сайте могли поменять).
         if (K.LoadedAt is not { } t || DateTime.Now - t > Fresh) _ = K.Refresh();
     }
 
     protected override void OnClose()
     {
-        K.Changed -= Later;
+        K.Changed -= OnChanged;
         _undoTimer?.Stop();
         _undo = null;
     }
+
+    void OnChanged() => S.Queue.TryEnqueue(() =>
+    {
+        if (!IsOpen) return;
+        if (WantQuick() != _withQuick) { Rebuild(); return; }
+        try
+        {
+            _top.Children.Clear();
+            BuildTop();
+            if (_withQuick) _quick!.Build();
+        }
+        catch (Exception e) { Log.Error("остров: канбан", e); }
+        Resized();
+    });
+
+    bool WantQuick() => _quick != null && K.Api.SignedIn && K.LoadedAt != null && K.Projects.Count > 0;
 
     public override void FocusFirst()
     {
@@ -48,6 +69,20 @@ public sealed class KanbanWidget(Services s, IslandBody body) : IslandWidget(s, 
 
     protected override void Build()
     {
+        _top.Children.Clear();
+        BuildTop();
+        Root.Children.Add(_top);
+        _withQuick = WantQuick();
+        if (_withQuick)
+        {
+            Root.Children.Add(new Border { Height = 1, Background = B(Outline), Margin = new Thickness(4, 2, 4, 2) });
+            _quick!.Build();
+            Root.Children.Add(_quick.View);
+        }
+    }
+
+    void BuildTop()
+    {
         var waiting = Waiting();
         var head = new Grid { Margin = new Thickness(4, 0, 0, 0), ColumnSpacing = 10 };
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -56,19 +91,19 @@ public sealed class KanbanWidget(Services s, IslandBody body) : IslandWidget(s, 
         var board = Link("Открыть доску ↗", () => { Body.Sleep(restoreFocus: false); K.OpenWindow(); });
         Grid.SetColumn(board, 1);
         head.Children.Add(board);
-        Root.Children.Add(head);
+        _top.Children.Add(head);
 
-        if (!K.Api.SignedIn) { Root.Children.Add(SignIn()); return; }
+        if (!K.Api.SignedIn) { _top.Children.Add(SignIn()); return; }
         if (K.LoadedAt is null)
         {
-            Root.Children.Add(K.Error is { } e ? Problem(e) : Note(K.Loading ? "Загружаю задачи…" : "Задачи ещё не загружены."));
+            _top.Children.Add(K.Error is { } e ? Problem(e) : Note(K.Loading ? "Загружаю задачи…" : "Задачи ещё не загружены."));
             return;
         }
-        if (K.Error is { } error) Root.Children.Add(Problem(error));
+        if (K.Error is { } error) _top.Children.Add(Problem(error));
 
-        if (_undo is { } u) Root.Children.Add(UndoRow(u));
+        if (_undo is { } u) _top.Children.Add(UndoRow(u));
 
-        if (waiting.Count == 0) Root.Children.Add(Note("От тебя сейчас ничего не нужно."));
+        if (waiting.Count == 0) _top.Children.Add(Note("От тебя сейчас ничего не нужно."));
         else
         {
             var list = new StackPanel { Spacing = 6 };
@@ -79,14 +114,7 @@ public sealed class KanbanWidget(Services s, IslandBody body) : IslandWidget(s, 
                 more.HorizontalAlignment = HorizontalAlignment.Left;
                 list.Children.Add(more);
             }
-            Root.Children.Add(list);
-        }
-
-        if (_quick != null && K.Projects.Count > 0)
-        {
-            Root.Children.Add(new Border { Height = 1, Background = B(Outline), Margin = new Thickness(4, 2, 4, 2) });
-            _quick.Build();
-            Root.Children.Add(_quick.View);
+            _top.Children.Add(list);
         }
     }
 
@@ -166,7 +194,7 @@ public sealed class KanbanWidget(Services s, IslandBody body) : IslandWidget(s, 
         _undoTimer ??= MakeUndoTimer();
         _undoTimer.Stop();
         _undoTimer.Start();
-        Rebuild();
+        OnChanged();
     }
 
     Microsoft.UI.Dispatching.DispatcherQueueTimer MakeUndoTimer()
@@ -174,7 +202,7 @@ public sealed class KanbanWidget(Services s, IslandBody body) : IslandWidget(s, 
         var t = S.Queue.CreateTimer();
         t.Interval = UndoFor;
         t.IsRepeating = false;
-        t.Tick += (_, _) => { _undo = null; Rebuild(); };
+        t.Tick += (_, _) => { _undo = null; OnChanged(); };
         return t;
     }
 
@@ -189,7 +217,7 @@ public sealed class KanbanWidget(Services s, IslandBody body) : IslandWidget(s, 
             _undoTimer?.Stop();
             _undo = null;
             _ = K.UndoMove(u);
-            Rebuild();
+            OnChanged();
         });
         Grid.SetColumn(undo, 1);
         g.Children.Add(undo);

@@ -286,7 +286,7 @@ public sealed class RibbonView
                 var k = _s.Kanban;
                 s.Icon.Glyph = "\uE9D5";
                 // П10, П22: число «Нужно от тебя» (не «В работе»), при нуле скрыто.
-                var n = k.Api.SignedIn ? k.Waiting : 0;
+                var n = k.Api.SignedIn && k.Settings.Badge ? k.Waiting : 0;
                 if (n > 0) { s.Count.Text = n > 99 ? "99+" : n.ToString(); s.Count.Visibility = Visibility.Visible; s.Count.Foreground = B(Theme.Accent); }
                 tip = !k.Api.SignedIn ? "Канбан: войди через Google" : n > 0 ? $"Канбан · нужно от тебя {n}" : "Канбан · от тебя ничего не нужно";
                 break;

@@ -35,7 +35,7 @@ public sealed class Frames : IDisposable
     readonly Dictionary<string, int> _presenters = new(StringComparer.OrdinalIgnoreCase);
     Process? _proc;
     int _pid;
-    bool _wide, _rows;
+    bool _wide, _rows, _listening;
     long _startedAt, _presentersAt;
     Status _status = Status.Idle;
     string _error = "";
@@ -51,6 +51,12 @@ public sealed class Frames : IDisposable
 
     /// Процесс, кадры которого считаем (0 — никакой).
     public int Pid { get { lock (_lock) return _pid; } }
+
+    /// PresentMon для этого процесса запущен и прислал заголовок (с этого момента ждать кадры честно).
+    public bool Listening { get { lock (_lock) return _listening; } }
+
+    /// Кадров за последнюю минуту.
+    public int Count { get { lock (_lock) return _stats.Count; } }
 
     public static double NowMs => Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency;
 
@@ -73,6 +79,7 @@ public sealed class Frames : IDisposable
         _stats.Clear();
         _presenters.Clear();
         _rows = false;
+        _listening = false;
         _status = status;
         _startedAt = Environment.TickCount64;
         _presentersAt = _startedAt;
@@ -160,6 +167,7 @@ public sealed class Frames : IDisposable
                     cols = FrameColumns.Pick(header);
                     appCol = Array.FindIndex(header, h => h.Trim().Equals("Application", StringComparison.OrdinalIgnoreCase));
                     Log.Write($"FPS: PresentMon {(wide ? "все программы" : pid.ToString())}: {line[..Math.Min(line.Length, 300)]}");
+                    lock (_lock) if (pid == _pid) _listening = true;
                     return;
                 }
                 Row(p, cols, appCol, line);

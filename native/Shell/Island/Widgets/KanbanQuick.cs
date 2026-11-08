@@ -84,6 +84,24 @@ public sealed class KanbanQuick
     /// Пересобрать (данные канбана поменялись). Введённый текст не теряется: поля те же.
     public void Build()
     {
+        // Пересборка во время набора (пришли свежие данные) не должна отнимать фокус и курсор.
+        var typing = _title.FocusState != FocusState.Unfocused ? _title : _epicTitle.FocusState != FocusState.Unfocused ? _epicTitle : null;
+        var (start, length) = typing is null ? (0, 0) : (typing.SelectionStart, typing.SelectionLength);
+        try { Layout(); }
+        finally
+        {
+            if (typing != null && typing.IsEnabled && View.Children.Contains(typing))
+                _queue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+                {
+                    if (typing.FocusState != FocusState.Unfocused) return;
+                    typing.Focus(FocusState.Programmatic);
+                    typing.Select(Math.Min(start, typing.Text.Length), Math.Min(length, Math.Max(0, typing.Text.Length - start)));
+                });
+        }
+    }
+
+    void Layout()
+    {
         View.Children.Clear();
         if (K.Projects.Count == 0) return;
         if (K.Project(_project) is null)
@@ -240,7 +258,11 @@ public sealed class KanbanQuick
             K.RememberQuick(project, item.EpicId);
             Created?.Invoke(item);
         }
-        catch (KanbanException e) { _note = (e.Message, true); }
+        catch (KanbanException e)
+        {
+            if (e.KeptEpic is { } kept) { _newEpic = false; _epic = kept; _epicTitle.Text = ""; }
+            _note = (e.Message, true);
+        }
         catch (Exception e)
         {
             Log.Write($"канбан: быстрая задача в острове: {e}");

@@ -62,7 +62,13 @@ public sealed class PerfSettings(WidgetEntry entry)
         get
         {
             var list = S["order"] is JsonArray a ? a.Select(n => n?.GetValue<string>()).OfType<string>().Where(Metrics.Contains).Distinct().ToList() : [];
-            list.AddRange(Metrics.Where(m => !list.Contains(m)));
+            // Новые цифры (1% low, график) встают рядом со своими: после FPS / времени кадра, а не в конец.
+            foreach (var m in Metrics.Where(m => !list.Contains(m)))
+            {
+                var i = Array.IndexOf(Metrics, m);
+                var after = i > 0 ? list.IndexOf(Metrics[i - 1]) : -1;
+                list.Insert(after >= 0 ? after + 1 : IsFrameMetric(m) ? 0 : list.Count, m);
+            }
             return list;
         }
         set => S["order"] = new JsonArray(value.Select(v => (JsonNode)v).ToArray());

@@ -82,8 +82,12 @@ public static class KStatus
 }
 
 /// Ошибка, которую можно показать как есть (по-русски).
-public sealed class KanbanException(string message, bool signedOut = false, bool conflict = false) : Exception(message)
+public sealed class KanbanException(string message, bool signedOut = false, bool conflict = false, string? keptEpic = null) : Exception(message)
 {
+    /// «Создать» с новым эпиком: эпик создался, задача — нет. Форма переключается на этот эпик,
+    /// чтобы повтор не создал второй такой же.
+    public string? KeptEpic { get; } = keptEpic;
+
     /// Вход больше не действует: нужно войти снова.
     public bool SignedOut { get; } = signedOut;
     /// Такая запись уже есть (номер задачи заняли одновременно).

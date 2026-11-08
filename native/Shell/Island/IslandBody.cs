@@ -71,6 +71,9 @@ public sealed class IslandBody
     public BodyMode Mode { get; private set; } = BodyMode.Rest;
     public IslandWidget? Widget { get; private set; }
     public bool Full { get; private set; }
+
+    /// Виджет раскрыт кликом без фокуса (строка закрепления): Esc всё равно закрывает.
+    bool _openedUnfocused;
     public IntPtr Hwnd => _win.Hwnd;
     public bool Moving => _moving || _magnet.Moving;
     public bool Waiting => _gate.Waiting;
@@ -334,6 +337,7 @@ public sealed class IslandBody
         _pillClick = null;
         _gate.Reset(awake: true);
         if (byUser && focus) Activate();
+        _openedUnfocused = byUser && !focus;
         var (tw, th) = WidgetSize(w);
         SetMode(BodyMode.Widget, tw, th);
     }
@@ -555,7 +559,8 @@ public sealed class IslandBody
             return false;
         }
 
-        if (esc && (Mode is BodyMode.Ribbon or BodyMode.Event || (Mode == BodyMode.Widget && GetForegroundWindow() == _win.Hwnd)))
+        // Esc закрывает и монитор, раскрытый кликом по строке без фокуса (игра остаётся впереди).
+        if (esc && (Mode is BodyMode.Ribbon or BodyMode.Event || (Mode == BodyMode.Widget && (GetForegroundWindow() == _win.Hwnd || _openedUnfocused))))
         {
             Sleep();
             return false;

@@ -206,7 +206,8 @@ public sealed class PerfService
         var window = _window != null;
         // FPS: игра в фокусе и оверлей его показывает, или открыто окно / виджет, а игра ещё идёт.
         var wantFps = _gamePid != 0 && ((overlay && s.Items.Any(i => i is "fps" or "low1" or "frametime" or "graph")) || window || Held);
-        _frames.Track(wantFps ? _gamePid : _probeTrack);
+        // Идёт проба новой программы впереди — считаем её кадры, даже если старая игра ещё открыта.
+        _frames.Track(_probeTrack != 0 ? _probeTrack : wantFps ? _gamePid : 0);
         if (!wantFps) Fps = Low1 = null;
         var run = overlay || window || Previewing || Held || _probeTrack != 0;
         if (run && !_timer.IsRunning)
@@ -257,7 +258,16 @@ public sealed class PerfService
         var fg = GetForegroundWindow();
         var front = fg != IntPtr.Zero && GetAncestor(fg, GA_ROOTOWNER) == c.Hwnd;
         var full = front && IsFullscreen(c.Hwnd);
-        var frames = _frames.Pid == c.Pid && _frames.Fps != null;
+        var known = _probe.Known(c.Pid);
+        // Часы пробы идут с момента, когда PresentMon уже слушает этот процесс: его запуск — не «нет кадров».
+        if (full && known is null && !(_frames.Pid == c.Pid && _frames.Listening))
+        {
+            if (_frames.Pid != c.Pid) Log.Write($"проба игры: {AppName(c.Exe)} на весь экран — считаю кадры");
+            _probeTrack = c.Pid;
+            return;
+        }
+        // Игра рисует постоянно: один кадр (мигающий курсор, анимация) — ещё не игра.
+        var frames = _frames.Pid == c.Pid && _frames.Count >= 30 && (_frames.Fps ?? 0) >= 15;
         var d = _probe.Step(Environment.TickCount64, c.Pid, full, candidate: true, frames);
         if (d.Game == true)
         {
@@ -270,11 +280,10 @@ public sealed class PerfService
         else if (d.Game == false)
         {
             _candidate = null;
-            Log.Write($"не игра: {AppName(c.Exe)} ({Path.GetFileName(c.Exe)}) — на весь экран, но кадров нет 4 с");
+            // Уже решённое раньше не пишем снова на каждый Alt+Tab.
+            if (known is null) Log.Write($"не игра: {AppName(c.Exe)} ({Path.GetFileName(c.Exe)}) — на весь экран, но постоянных кадров нет 4 с");
         }
         else _probeTrack = d.Track;
-        if (d.Track != 0 && _probe.Probing == c.Pid && d.Game is null && _frames.Pid != c.Pid)
-            Log.Write($"проба игры: {AppName(c.Exe)} на весь экран — считаю кадры");
     }
 
     /// Окно на весь экран своего монитора и без рамки (то же правило, что у острова и Bars).
@@ -322,7 +331,7 @@ public sealed class PerfService
     {
         _tick++;
         if ((_gamePid != 0 && !IsWindow(_gameHwnd)) || _probeTrack != 0) { Evaluate(); if (!_timer.IsRunning) return; }
-        Fps = _gamePid != 0 ? _frames.Fps : null;
+        Fps = _gamePid != 0 && _frames.Pid == _gamePid ? _frames.Fps : null;
         // 1% low считается сортировкой — раз в секунду, пока считаются кадры игры.
         if (_tick % 2 == 0)
         {

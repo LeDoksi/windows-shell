@@ -285,7 +285,11 @@ public sealed class KanbanFlyout : Popup
             _k.RememberQuick(project, item.EpicId);
             _closeTimer.Start();
         }
-        catch (KanbanException e) { _note = (e.Message, Theme.Warning); }
+        catch (KanbanException e)
+        {
+            if (e.KeptEpic is { } kept) { _newEpic = false; _epic = kept; _epicInput.Text = ""; }
+            _note = (e.Message, Theme.Warning);
+        }
         catch (Exception e)
         {
             Log.Write($"канбан: быстрая задача: {e}");

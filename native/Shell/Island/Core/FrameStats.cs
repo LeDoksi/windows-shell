@@ -25,17 +25,21 @@ public sealed record FrameColumns(int Time, int Shown, int Presented, int Latenc
 /// вывода DisplayedTime = NA), — время между кадрами самой программы, пока нет ни одного показанного.
 public sealed class FrameStats(double keepMs = 60_000)
 {
-    readonly Queue<(double At, double Ms)> _frames = new();
+    // Кольцо кадров: без копий всей минуты на каждый тик (при 500 FPS это 30 тысяч кадров).
+    (double At, double Ms)[] _buf = new (double, double)[1024];
+    int _start, _count;
     bool _shownSeen;
 
-    public int Count => _frames.Count;
+    (double At, double Ms) this[int i] => _buf[(_start + i) % _buf.Length];
+
+    public int Count => _count;
 
     /// Кадры известны только как «программа отдала кадр» (показ не виден).
-    public bool PresentedOnly => _frames.Count > 0 && !_shownSeen;
+    public bool PresentedOnly => _count > 0 && !_shownSeen;
 
     public void Clear()
     {
-        _frames.Clear();
+        _start = _count = 0;
         _shownSeen = false;
     }
 
@@ -43,7 +47,7 @@ public sealed class FrameStats(double keepMs = 60_000)
     public void Add(double atMs, double shownMs)
     {
         if (shownMs <= 0) return;
-        if (!_shownSeen) { _frames.Clear(); _shownSeen = true; }
+        if (!_shownSeen) { _start = _count = 0; _shownSeen = true; }
         Push(atMs, shownMs);
     }
 
@@ -56,19 +60,26 @@ public sealed class FrameStats(double keepMs = 60_000)
 
     void Push(double at, double ms)
     {
-        _frames.Enqueue((at, ms));
-        while (_frames.Count > 0 && _frames.Peek().At < at - keepMs) _frames.Dequeue();
+        while (_count > 0 && this[0].At < at - keepMs) { _start = (_start + 1) % _buf.Length; _count--; }
+        if (_count == _buf.Length)
+        {
+            var bigger = new (double, double)[_buf.Length * 2];
+            for (var i = 0; i < _count; i++) bigger[i] = this[i];
+            _buf = bigger;
+            _start = 0;
+        }
+        _buf[(_start + _count) % _buf.Length] = (at, ms);
+        _count++;
     }
 
     /// FPS сейчас: среднее за последние ~0,5 с; null — кадров нет или последний старше 1,5 с.
     public double? Fps(double nowMs)
     {
-        if (_frames.Count == 0) return null;
-        var arr = _frames.ToArray();
-        if (nowMs - arr[^1].At > 1500) return null;
+        if (_count == 0) return null;
+        if (nowMs - this[_count - 1].At > 1500) return null;
         double sum = 0;
         var n = 0;
-        for (var i = arr.Length - 1; i >= 0 && sum < 500; i--) { sum += arr[i].Ms; n++; }
+        for (var i = _count - 1; i >= 0 && sum < 500; i--) { sum += this[i].Ms; n++; }
         return sum > 0 ? 1000.0 * n / sum : null;
     }
 
@@ -77,8 +88,11 @@ public sealed class FrameStats(double keepMs = 60_000)
     {
         get
         {
-            if (_frames.Count < 100) return null;
-            var times = _frames.Select(f => f.Ms).OrderByDescending(t => t).ToArray();
+            if (_count < 100) return null;
+            var times = new double[_count];
+            for (var i = 0; i < _count; i++) times[i] = this[i].Ms;
+            Array.Sort(times);
+            Array.Reverse(times);
             var n = Math.Max(1, times.Length / 100);
             var avg = times.Take(n).Average();
             return avg > 0 ? 1000.0 / avg : null;
@@ -91,7 +105,9 @@ public sealed class FrameStats(double keepMs = 60_000)
     /// Последние n времён кадра (мс), самое старое первым — для графика.
     public double[] Recent(int n)
     {
-        var arr = _frames.ToArray();
-        return arr.Skip(Math.Max(0, arr.Length - n)).Select(f => f.Ms).ToArray();
+        var k = Math.Min(n, _count);
+        var r = new double[k];
+        for (var i = 0; i < k; i++) r[i] = this[_count - k + i].Ms;
+        return r;
     }
 }

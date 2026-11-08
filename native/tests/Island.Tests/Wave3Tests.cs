@@ -68,6 +68,15 @@ public class FrameStatsTests
         Assert.False(s.PresentedOnly);
     }
 
+    [Fact] public void RingKeepsLastMinuteOnly()
+    {
+        var s = new FrameStats(keepMs: 1000);
+        for (var i = 1; i <= 5000; i++) s.Add(i * 2.0, 2);
+        Assert.InRange(s.Count, 500, 501);
+        Assert.Equal(500, s.Fps(10_000)!.Value, 1);
+        Assert.Equal([2.0, 2.0, 2.0], s.Recent(3));
+    }
+
     [Fact] public void RecentForGraph()
     {
         var s = Run(50, 10);
