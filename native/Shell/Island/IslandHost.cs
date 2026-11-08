@@ -522,11 +522,13 @@ public sealed class IslandHost
             };
     }
 
-    // ---------- самопроверка изнутри (--island-test, волна 2) ----------
+    // ---------- самопроверка изнутри (--island-test, волны 2 и 3) ----------
 
-    /// Открыть по очереди виджеты волны 2 и все страницы листа настроек, показать пилюлю
-    /// записи, положить файл на полку и убрать. Итог — строки «остров: самопроверка: …» в журнале
-    /// (их читает --island-test). Фокус не забираем: виджеты открываются как по событию.
+    /// Открыть по очереди виджеты волн 2 и 3 и все страницы листа настроек, показать пилюлю
+    /// записи, положить файл на полку и убрать; закрепить монитор ПК и открепить. Итог — строки
+    /// «остров: самопроверка: …» в журнале (их читает --island-test). Фокус не забираем:
+    /// виджеты открываются как по событию. Закрепление Георгия на время проверки снимается и
+    /// потом возвращается.
     async void SelfCheck()
     {
         if (_checking || !_running) return;
@@ -535,12 +537,15 @@ public sealed class IslandHost
         var total = 0;
         void Say(string t) => Log.Write($"остров: самопроверка: {t}");
         void Check(bool good, string what) { total++; if (good) ok++; Say($"{(good ? "OK " : "НЕТ")} {what}"); }
+        var savedPin = _s.Perf.Settings.PinScreen;
+        void Pin(string? screen) => _s.Config.Update(_ => _s.Perf.Settings.PinScreen = screen);
         try
         {
             var body = _bodies.Values.FirstOrDefault(b => !b.Full);
             if (body is null) { Say("нет монитора без игры на весь экран"); return; }
             Say($"монитор {body.Screen.Name}");
-            foreach (var id in new[] { "shots", "bin", "shelf" })
+            if (savedPin != null) { Pin(null); await Task.Delay(800); }
+            foreach (var id in new[] { "shots", "bin", "shelf", "perf", "kanban" })
             {
                 body.OpenWidget(id, byUser: false);
                 await Task.Delay(700);
@@ -598,10 +603,40 @@ public sealed class IslandHost
                 await Task.Delay(500);
                 Check(body.Mode == BodyMode.Rest, "пилюля убрана — снова кромка");
             }
+
+            // Волна 3: закреплённый монитор ПК (П8).
+            Pin(body.Screen.Name);
+            await Task.Delay(1200);
+            Check(body.Mode == BodyMode.Badge && body.HasBadge("pin"), "монитор закреплён — строка вместо кромки");
+            if (_bodies.Values.FirstOrDefault(b => b != body && !b.Full) is { } other)
+            {
+                other.Wake();
+                await Task.Delay(600);
+                Check(body.Mode == BodyMode.Badge && body.HasBadge("pin"), "лента на другом экране — строка на месте");
+                other.Sleep(restoreFocus: false);
+                await Task.Delay(500);
+            }
+            body.OpenWidget("sound", byUser: false);
+            await Task.Delay(700);
+            Check(body.Mode == BodyMode.Widget && body.Widget?.Id == "sound", "поверх строки открылся звук");
+            body.Sleep(restoreFocus: false);
+            await Task.Delay(800);
+            Check(body.Mode == BodyMode.Badge && body.HasBadge("pin"), "звук закрыт — снова строка");
+            // Клик по строке: монитор раскрывается, а окно впереди (игра) остаётся впереди.
+            var fg = GetForegroundWindow();
+            body.OpenWidget("perf", byUser: true, focus: false);
+            await Task.Delay(800);
+            Check(body.Mode == BodyMode.Widget && body.Widget?.Id == "perf" && GetForegroundWindow() == fg, "строка раскрыла монитор, фокус не забран");
+            body.Sleep(restoreFocus: false);
+            await Task.Delay(800);
+            Pin(null);
+            await Task.Delay(1000);
+            Check(body.Mode == BodyMode.Rest && !body.HasBadge("pin"), "откреплён — снова кромка");
         }
         catch (Exception e) { Log.Error("остров: самопроверка", e); }
         finally
         {
+            if (_s.Perf.Settings.PinScreen != savedPin) Pin(savedPin);
             _checking = false;
             Say($"ГОТОВО {ok} из {total}");
         }

@@ -132,12 +132,14 @@ public sealed class PerfService
     public void Apply()
     {
         var s = Settings;
-        if (s.Window && _window is null)
+        // Окно убрали в «Переносе» — «Монитор ПК» живёт в острове, окна нет.
+        var want = s.Window && _config.Island.InDock("perf-window");
+        if (want && _window is null)
         {
             _window = new PerfWindow(this, _config);
             _window.Closed += () => _window = null;
         }
-        else if (!s.Window && _window is { } w)
+        else if (!want && _window is { } w)
         {
             _window = null;
             w.Close();

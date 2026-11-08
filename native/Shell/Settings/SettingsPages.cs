@@ -50,6 +50,8 @@ public sealed class SettingsPages(Services s, Panel body, Action<Action<ConfigDa
             case "w-bin": WidgetsBin(); break;
             case "w-clips": WidgetsClips(); break;
             case "w-charge": WidgetsCharge(); break;
+            case "w-perf": BuildPerf(); break;
+            case "w-kanban": BuildKanban(); break;
             case "i-ribbon": IslandRibbon(withSwitch: true); break;
             case "i-move": IslandMove(); break;
         }
@@ -69,7 +71,7 @@ public sealed class SettingsPages(Services s, Panel body, Action<Action<ConfigDa
     {
         var island = _s.Config.Island;
         Add(Card(
-            Switch("Остров у верхнего края", "Наведи курсор на самый верх экрана — откроется лента: звук, медиа, сеть, заряд, раскладка, снимки, корзина, полка. На каждом мониторе свой.",
+            Switch("Остров у верхнего края", "Наведи курсор на самый верх экрана — откроется лента: звук, медиа, сеть, заряд, раскладка, снимки, корзина, полка, монитор ПК, канбан. На каждом мониторе свой.",
                 island.Enabled, on => { Change(c => c.Island.Enabled = on); _rebuild(); })));
         if (island.Enabled) return true;
         Add(Note("Пока остров выключен, всё остаётся в доке как раньше."));
@@ -86,13 +88,16 @@ public sealed class SettingsPages(Services s, Panel body, Action<Action<ConfigDa
         {
             var inDock = !data.OutOfDock.Contains(id);
             var key = id;
-            moveRows.Add(Row(IslandSettings.Title(id), inDock ? "В острове ✓ · в доке ✓" : "В острове ✓ · в доке —",
+            // «Монитор ПК» переезжает из отдельного окна, остальное — из хвоста дока.
+            var window = id == "perf";
+            moveRows.Add(Row(IslandSettings.Title(id),
+                window ? (inDock ? "В острове ✓ · окно ✓" : "В острове ✓ · окно —") : (inDock ? "В острове ✓ · в доке ✓" : "В острове ✓ · в доке —"),
                 inDock
-                    ? Button("Проверил — убрать из дока", () => { Change(c => { if (!c.Island.OutOfDock.Contains(key)) c.Island.OutOfDock.Add(key); }); _rebuild(); })
-                    : Button("Вернуть в док", () => { Change(c => c.Island.OutOfDock.Remove(key)); _rebuild(); })));
+                    ? Button(window ? "Проверил — убрать окно" : "Проверил — убрать из дока", () => { Change(c => { if (!c.Island.OutOfDock.Contains(key)) c.Island.OutOfDock.Add(key); }); _rebuild(); })
+                    : Button(window ? "Вернуть окно" : "Вернуть в док", () => { Change(c => c.Island.OutOfDock.Remove(key)); _rebuild(); })));
         }
         Add(Card(moveRows.ToArray()));
-        Add(Note("Полка есть только в острове. Трей, часы, приложения и Пуск остаются в доке всегда."));
+        Add(Note("Полка есть только в острове. Трей, часы, приложения и Пуск остаются в доке всегда. Окно канбана остаётся: вся доска живёт в нём."));
     }
 
     /// Лента и события острова.
@@ -460,10 +465,62 @@ public sealed class SettingsPages(Services s, Panel body, Action<Action<ConfigDa
         Add(Note("Клик по полю клавиши, потом нужное сочетание. Backspace убирает сочетание, Esc отменяет."));
     }
 
+    /// «В острове» (П8): на каком экране закреплена строка монитора и что в ней.
+    void PerfPin(PerfSettings p)
+    {
+        Add(Section("В острове"));
+        var screens = _s.Monitors.All;
+        var names = new List<string> { "Не закреплять" };
+        var ids = new List<string?> { null };
+        for (var i = 0; i < screens.Count; i++)
+        {
+            var m = screens[i];
+            names.Add($"Экран {i + 1} ({m.Bounds.Right - m.Bounds.Left}×{m.Bounds.Bottom - m.Bounds.Top}){(m.Primary ? " — основной" : "")}");
+            ids.Add(m.Name);
+        }
+        if (p.PinScreen is { } pinned && !ids.Contains(pinned))
+        {
+            // Экран отключён: закрепление спит и вернётся, когда его подключат.
+            names.Add("Экран, который сейчас не подключён");
+            ids.Add(pinned);
+        }
+        var combo = new ComboBox { MinWidth = 240 };
+        foreach (var n in names) combo.Items.Add(n);
+        combo.SelectedIndex = Math.Max(0, ids.IndexOf(p.PinScreen));
+        combo.SelectionChanged += (_, _) =>
+        {
+            if (combo.SelectedIndex < 0) return;
+            var id = ids[combo.SelectedIndex];
+            Change(_ => _s.Perf.Settings.PinScreen = id);
+        };
+        var rows = new List<UIElement>
+        {
+            Row("Закрепить строку на экране", "Строка с цифрами всегда видна у верхнего края этого экрана — удобно на втором мониторе, пока играешь на первом. Клик по ней раскрывает весь монитор, игру не сворачивает.", combo),
+            Row("Что в строке", null, null),
+        };
+        var items = p.PinItems;
+        foreach (var id in PerfSettings.PinMetrics)
+        {
+            var key = id;
+            var check = Check(PerfSettings.MetricName(id), items.Contains(id), on => Change(_ =>
+            {
+                var set = _s.Perf.Settings.PinItems;
+                if (on) { if (!set.Contains(key)) set.Add(key); } else set.Remove(key);
+                _s.Perf.Settings.PinItems = set;
+            }));
+            check.Margin = new Thickness(0, -6, 0, 0);
+            rows.Add(check);
+        }
+        Add(Card(rows.ToArray()));
+        Add(Note("FPS в строке появляется, только когда идёт игра."));
+    }
+
     void BuildPerf()
     {
         var perf = _s.Perf;
         var p = perf.Settings;
+        if (_s.Config.Island.Enabled) PerfPin(p);
+        Add(Section("Оверлей в игре"));
         var overlayRows = new List<UIElement>
         {
             Switch("Оверлей в игре", "Цифры в углу экрана, только когда в фокусе игра. Клики проходят сквозь него, фокус он не берёт.", p.Overlay, on =>
@@ -519,10 +576,16 @@ public sealed class SettingsPages(Services s, Panel body, Action<Action<ConfigDa
                 Combo(warns.Select(w => w == 0 ? "Не подсвечивать" : $"{w}").ToArray(), Math.Max(0, Array.IndexOf(warns, p.FpsWarn)), i => _s.Perf.Settings.FpsWarn = warns[i])));
             overlayRows.Add(Row("Включить и выключить в игре", "Сочетание работает, только пока в фокусе игра.",
                 new HotkeyBox(p.Hotkey, k => Change(_ => _s.Perf.Settings.Hotkey = k)) { Width = 200 }));
+            overlayRows.Add(Switch("Показывать в записи экрана", "Выключено — оверлей видно только тебе: в снимки, запись и трансляцию он не попадает.", p.OverlayInCapture,
+                on => Change(_ => _s.Perf.Settings.OverlayInCapture = on)));
             overlayRows.Add(Row("Как это выглядит", "Оверлей на 5 секунд на этом мониторе, FPS для примера.", Button("Показать", () => _s.Perf.Preview())));
         }
         Add(Card(overlayRows.ToArray()));
 
+        if (!_s.Config.Island.InDock("perf-window"))
+            Add(Note("Отдельное окно убрано: «Монитор ПК» теперь в острове. Вернуть окно — остров → «Перенос»."));
+        else
+        {
         Add(Section("Окно «Монитор ПК»"));
         var windowRows = new List<UIElement>
         {
@@ -533,6 +596,7 @@ public sealed class SettingsPages(Services s, Panel body, Action<Action<ConfigDa
             windowRows.Add(Switch("Поверх всех окон", "Выключено — обычное окно.", p.WindowTopmost, on => Change(_ => _s.Perf.Settings.WindowTopmost = on)));
         Add(Card(windowRows.ToArray()));
         Add(Note("Правый клик по окну — «Поверх всех окон», настройки, закрыть."));
+        }
 
         Add(Section("FPS"));
         var state = PerfAccess.Current;

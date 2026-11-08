@@ -118,7 +118,7 @@ public static class SelfTest
         }
         finally { SetCursorPos(saved.X, saved.Y); }
 
-        say("== Изнутри: снимки, корзина, полка, лист настроек, пилюля записи");
+        say("== Изнутри: снимки, корзина, полка, монитор ПК, канбан, лист настроек, пилюля записи, закрепление");
         try
         {
             var msgWin = IntPtr.Zero;
@@ -134,7 +134,7 @@ public static class SelfTest
                 PostMessageW(msgWin, RegisterWindowMessageW(SelfCheckMessage), IntPtr.Zero, IntPtr.Zero);
                 var sw2 = Stopwatch.StartNew();
                 List<string> got = [];
-                while (sw2.ElapsedMilliseconds < 60_000)
+                while (sw2.ElapsedMilliseconds < 90_000)
                 {
                     Thread.Sleep(500);
                     got = ReadTail(Log.File, 300).Where(l => l.Contains("остров: самопроверка:") && Stamp(l) >= mark.AddSeconds(-1)).ToList();
