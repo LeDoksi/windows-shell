@@ -171,23 +171,45 @@ public sealed class ClipsService
             Toasts.Show("Не получилось вставить", "Буфер обмена занят другой программой. Попробуй ещё раз.", silent: true);
             return;
         }
-        if (target == IntPtr.Zero || !IsWindow(target)) return;
+        if (await PasteInto(target)) Log.Write($"буфер обмена: вставлено ({e.Kind}{(plain ? ", без оформления" : "")})");
+    }
+
+    /// Преобразованный текст (WSH-E26): в буфер новым пунктом истории (оригинал остаётся),
+    /// `paste` — сразу вставить в окно `target`.
+    public async void PutTransformed(string text, string what, bool paste, IntPtr target)
+    {
+        bool ok;
+        try { ok = Board.PutText(text, null, null); }
+        catch (Exception ex) { Log.Error("буфер обмена: преобразование", ex); ok = false; }
+        if (!ok)
+        {
+            Toasts.Show("Не получилось", "Буфер обмена занят другой программой. Попробуй ещё раз.", silent: true);
+            return;
+        }
+        Log.Write($"буфер обмена: преобразование «{what}»{(paste ? ", вставлено" : ", только в буфер")}");
+        if (paste) await PasteInto(target);
+    }
+
+    /// Нажать Ctrl+V в окне `target`, когда оно станет активным. false — не вставили.
+    async Task<bool> PasteInto(IntPtr target)
+    {
+        if (target == IntPtr.Zero || !IsWindow(target)) return false;
         // Ждём, пока окно правда станет активным (до полсекунды).
         for (var i = 0; i < 25 && !IsForeground(target); i++) await Task.Delay(20);
         if (!IsForeground(target))
         {
             Log.Write("буфер обмена: окно для вставки не стало активным — оставили в буфере");
-            return;
+            return false;
         }
         if (Elevated(target) && !Elevated(IntPtr.Zero))
         {
             // Окну администратора Windows не даёт нажимать клавиши от обычной программы.
             Toasts.Show("Скопировано", "Окно запущено от администратора: вставь сам, Ctrl+V.", silent: true);
-            return;
+            return false;
         }
         await Task.Delay(30);
         WinKeys.SendPaste();
-        Log.Write($"буфер обмена: вставлено ({e.Kind}{(plain ? ", без оформления" : "")})");
+        return true;
     }
 
     static bool IsForeground(IntPtr target)

@@ -59,9 +59,19 @@ public sealed class IslandHost
         _s.Shots.Changed += () => { Indicators(); UpdateRecording(); };
         _s.Shots.Tick += () => { Indicators(); UpdateRecording(); };
         _s.Shots.IslandSaved = ShotSaved;
+        _s.Shots.IslandOcr = ShowOcr;
         _s.Bin.Changed += Indicators;
         _s.Shelf.Changed += Indicators;
         _s.Notifications.Changed += Indicators;
+        _s.Notifications.PillFor = NoticePillFor;
+        _s.Notifications.Arrived += NoticeArrived;
+        // Свои уведомления оболочки (ошибки записи, «канбан подключён», буфер) — событием острова.
+        Toasts.Island = (title, text) =>
+        {
+            if (!_running) return false;
+            _s.Queue.TryEnqueue(() => _s.Notifications.AddOwn(title, text));
+            return true;
+        };
         _s.Kanban.Changed += Indicators;
         _s.Perf.Updated += PinTick;
         _lastLang = _s.Language.Current.Short;
@@ -304,6 +314,111 @@ public sealed class IslandHost
         return true;
     }
 
+    // ---------- уведомления (волна 4) ----------
+
+    IslandBody? _noticeBody;
+    UIElement? _noticePill;
+
+    /// Можно ли пилюлю (вызывается до записи в центр). Своё уведомление оболочки — баннера
+    /// Windows у него нет, поэтому «Не беспокоить» Windows ему не нужно.
+    bool NoticePillFor(Notices.Notice n)
+    {
+        if (!_running) return false;
+        var island = _s.Config.Island;
+        var ok = Notices.NoticeRule.Pill(island.Quiet, n.WinId == 0 || _s.Notifications.DoNotDisturb, island.EventOn(EventKind.Notice));
+        // Прошлая пилюля уже закрылась — это новая пачка.
+        if (ok && !(_noticeBody?.ShowingPill(_noticePill) ?? false)) _s.Notifications.EndBurst();
+        return ok;
+    }
+
+    /// Пилюля уведомления (П7, вариант А): значок, приложение, заголовок, текст; пачка — «ещё N».
+    /// Клик открывает приложение-источник. В игре — на свободном другом экране или тихо в центр.
+    void NoticeArrived(Notices.Notice n, int burst)
+    {
+        try
+        {
+            if (Route(EventKind.Notice) is not { } screen || !_bodies.TryGetValue(screen, out var body))
+            {
+                Log.Write($"остров: уведомление {n.App} — тихо в центр (игра на весь экран)");
+                return;
+            }
+            var pill = NoticePill(n, burst);
+            body.ShowPill(pill, burst > 1 ? $"{n.App} · ещё {burst - 1}" : $"{n.App}: {n.Title}", 4500, () => { body.Sleep(restoreFocus: false); OpenNotice(n); });
+            _noticeBody = body;
+            _noticePill = pill;
+            if (_s.Config.Island.NoticeSound && _full.Full.Count == 0) PlaySoundW("Notification.Default", IntPtr.Zero, 0x10000 | 0x1 | 0x2 /* ALIAS | ASYNC | NODEFAULT */);
+            Log.Write($"остров: уведомление {n.App} на {screen}{(burst > 1 ? $" (пачка {burst})" : "")}");
+        }
+        catch (Exception e) { Log.Error("остров: пилюля уведомления", e); }
+    }
+
+    static UIElement NoticePill(Notices.Notice n, int burst)
+    {
+        var row = new Grid { ColumnSpacing = 12, Padding = new Thickness(14, 10, 18, 12), MaxWidth = 460 };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition());
+        row.Children.Add(NoticeIcon(n, 32));
+        var lines = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        var app = Text(burst > 1 ? $"{n.App} · ещё {burst - 1}" : n.App, 12, Sub);
+        app.TextTrimming = TextTrimming.CharacterEllipsis;
+        lines.Children.Add(app);
+        var title = Text(n.Title, 14, bold: true);
+        title.TextTrimming = TextTrimming.CharacterEllipsis;
+        lines.Children.Add(title);
+        if (n.Body.Length > 0)
+        {
+            var body = Text(n.Body, 13, Sub, wrap: true);
+            body.MaxLines = 2;
+            body.TextTrimming = TextTrimming.CharacterEllipsis;
+            lines.Children.Add(body);
+        }
+        Grid.SetColumn(lines, 1);
+        row.Children.Add(lines);
+        AutomationProperties.SetName(row, $"Уведомление {n.App}: {n.Title}");
+        return row;
+    }
+
+    /// Значок приложения уведомления (PNG из кэша) или колокольчик.
+    public static FrameworkElement NoticeIcon(Notices.Notice n, double size)
+    {
+        if (n.Icon is { } path && File.Exists(path))
+        {
+            try
+            {
+                return new Border
+                {
+                    Width = size, Height = size, CornerRadius = new CornerRadius(size / 4), VerticalAlignment = VerticalAlignment.Center,
+                    Child = new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(path)), Stretch = Stretch.Uniform },
+                };
+            }
+            catch { }
+        }
+        var g = Glyph(n.WinId == 0 ? "\uE713" : "\uEA8F", size * 0.6, Sub);
+        return new Border { Width = size, Height = size, CornerRadius = new CornerRadius(size / 4), Background = B(Group), VerticalAlignment = VerticalAlignment.Center, Child = g };
+    }
+
+    /// Открыть приложение-источник (вариант А): его окно уже есть — вперёд, иначе запуск по AUMID.
+    /// Своё уведомление оболочки — центр уведомлений в острове.
+    public void OpenNotice(Notices.Notice n)
+    {
+        try
+        {
+            if (n.WinId == 0 || n.Aumid.Length == 0)
+            {
+                if (Route(EventKind.Notice) is { } screen && _bodies.TryGetValue(screen, out var body)) body.OpenWidget("notif", byUser: true);
+                return;
+            }
+            var w = _s.Tracker.Windows.FirstOrDefault(x => string.Equals(x.Aumid, n.Aumid, StringComparison.OrdinalIgnoreCase) || string.Equals(x.PackageAumid, n.Aumid, StringComparison.OrdinalIgnoreCase));
+            if (w != null) _s.Tracker.Activate(w.Hwnd);
+            else Apps.Launcher.LaunchInBackground(n.Aumid);
+            Log.Write($"остров: уведомление → {n.App} ({(w != null ? "окно вперёд" : "запуск")})");
+        }
+        catch (Exception e) { Log.Error("остров: открыть приложение уведомления", e); }
+    }
+
+    [System.Runtime.InteropServices.DllImport("winmm.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern bool PlaySoundW(string sound, IntPtr module, uint flags);
+
     // ---------- запись и снимки (волна 2) ----------
 
     int ScreenNumber(string name)
@@ -370,6 +485,14 @@ public sealed class IslandHost
         }
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(row, away ? $"Идёт запись экрана {ScreenNumber(recorded)}" : "Идёт запись экрана");
         return row;
+    }
+
+    /// Распознанный текст (OCR): «Снимки» с результатом на экране активного окна (в игре — на другом).
+    bool ShowOcr()
+    {
+        if (!_running || Route(EventKind.Shot) is not { } screen || !_bodies.TryGetValue(screen, out var body)) return false;
+        body.OpenWidget("shots", byUser: true);
+        return true;
     }
 
     /// Результат снимка (пилюля, эскиз Events). true — остров взял событие на себя.
@@ -556,7 +679,7 @@ public sealed class IslandHost
             if (body is null) { Say("нет монитора без игры на весь экран"); return; }
             Say($"монитор {body.Screen.Name}");
             if (savedPin != null) { Pin(null); await Task.Delay(800); }
-            foreach (var id in new[] { "shots", "bin", "shelf", "perf", "kanban" })
+            foreach (var id in new[] { "shots", "bin", "shelf", "perf", "kanban", "notif" })
             {
                 body.OpenWidget(id, byUser: false);
                 await Task.Delay(700);
@@ -588,14 +711,22 @@ public sealed class IslandHost
                 foreach (var page in Widgets.SettingsWidget.PageIds)
                 {
                     var errors = sheet.TestPage(page);
-                    await Task.Delay(120);
+                    await Task.Delay(250);
                     Check(errors == null, $"страница «{page}»{(errors == null ? "" : " — " + errors)}");
                 }
             }
             body.Sleep(restoreFocus: false);
-            await Task.Delay(900);
-            GetWindowRect(body.Hwnd, out var after);
-            Check((after.Bottom - after.Top) / body.Screen.Scale <= 641, "после листа окно сжалось обратно");
+            // Пружина сворачивания и сжатие окна: ждём до 3 с, а не наугад.
+            RECT after = default;
+            var shrink = System.Diagnostics.Stopwatch.StartNew();
+            do
+            {
+                await Task.Delay(150);
+                GetWindowRect(body.Hwnd, out after);
+            }
+            while ((after.Bottom - after.Top) / body.Screen.Scale > 641 && shrink.ElapsedMilliseconds < 3000);
+            var afterH = (after.Bottom - after.Top) / body.Screen.Scale;
+            Check(afterH <= 641, $"после листа окно сжалось обратно ({afterH:0} DIP за {shrink.ElapsedMilliseconds} мс{(afterH > 641 ? $", режим {body.Mode}" : "")})");
 
             // Пилюля записи (без настоящей записи).
             if (!_s.Shots.Recording)
@@ -613,6 +744,23 @@ public sealed class IslandHost
                 _badgeTime = null;
                 await Task.Delay(500);
                 Check(body.Mode == BodyMode.Rest, "пилюля убрана — снова кромка");
+            }
+
+            // Волна 4: своё уведомление идёт в центр острова (и пилюлей, если правило разрешает), не тостом.
+            {
+                var n = _s.Notifications;
+                Say($"уведомления: доступ {n.Access}, «Не беспокоить» Windows {(n.DoNotDisturb ? "вкл" : "выкл")}, опрос в среднем {n.PollMs:0.0} мс, в центре {n.Store.Items.Count}");
+                if (n.Listening) Check(n.PollMs < 50, $"опрос центра Windows дешёвый ({n.PollMs:0.0} мс)");
+                Toasts.Show("Проверка острова", "самопроверка центра уведомлений", silent: true);
+                await Task.Delay(600);
+                var test = n.Store.Items.FirstOrDefault(i => i.WinId == 0 && i.Title == "Проверка острова");
+                Check(test != null, "своё уведомление легло в центр острова, без тоста Windows");
+                var island = _s.Config.Island;
+                var expectPill = island.EventOn(EventKind.Notice) && !island.Quiet;
+                if (expectPill) Check(_bodies.Values.Any(b => b.ShowingPill(_noticePill)), "пилюля уведомления показана");
+                if (test != null) n.Remove(test);
+                foreach (var b in _bodies.Values) if (b.Mode == BodyMode.Event) b.Sleep(restoreFocus: false);
+                await Task.Delay(700);
             }
 
             // Волна 3: закреплённый монитор ПК (П8).

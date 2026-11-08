@@ -30,6 +30,8 @@ public sealed class App : Application, IXamlMetadataProvider
         if (Native.Watchdog.Cli(args)) return;
         if (Shots.SelfTest.Cli(args)) return;
         if (Shots.PrtScTest.Cli(args)) return;
+        if (Shots.Ocr.Cli(args)) return;
+        if (Tail.BtDevices.Cli(args)) return;
         if (Clips.SelfTest.Cli(args)) return;
         if (Charge.SelfTest.Cli(args)) return;
         if (Perf.SelfTest.Cli(args)) return;

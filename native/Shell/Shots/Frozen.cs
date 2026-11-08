@@ -130,6 +130,10 @@ public static class Clip
         return Put([(CF_DIB, Dib(bmp)), (RegisterClipboardFormatW("PNG"), png)]);
     }
 
+    /// Текст (распознанный OCR).
+    public static bool SetText(string text) =>
+        Put([(13 /* CF_UNICODETEXT */, System.Text.Encoding.Unicode.GetBytes(text + "\0"))]);
+
     /// Файлы: вставка в Проводник, в Telegram — как файл.
     public static bool SetFiles(IEnumerable<string> paths)
     {

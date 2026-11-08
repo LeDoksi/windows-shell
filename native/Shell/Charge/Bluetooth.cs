@@ -65,12 +65,12 @@ public static class Bluetooth
 
     static readonly Guid KeyboardClass = new("4D36E96B-E325-11CE-BFC1-08002BE10318");
     static readonly Guid MouseClass = new("4D36E96F-E325-11CE-BFC1-08002BE10318");
-    static readonly Guid MediaClass = new("4D36E96C-E325-11CE-BFC1-08002BE10318");
-    static readonly Guid AudioEndpointClass = new("C166523C-FE0C-4A94-A586-F1A80CFBBF3E");
+    internal static readonly Guid MediaClass = new("4D36E96C-E325-11CE-BFC1-08002BE10318");
+    internal static readonly Guid AudioEndpointClass = new("C166523C-FE0C-4A94-A586-F1A80CFBBF3E");
     /// Контейнер самого компьютера: встроенное не считаем.
-    static readonly Guid ComputerContainer = new("00000000-0000-0000-FFFF-FFFFFFFFFFFF");
+    internal static readonly Guid ComputerContainer = new("00000000-0000-0000-FFFF-FFFFFFFFFFFF");
 
-    sealed class Node
+    internal sealed class Node
     {
         public required string Id;
         public Guid Container;
@@ -119,7 +119,7 @@ public static class Bluetooth
         return Task.FromResult(list);
     }
 
-    static DeviceKind Kind(string name, List<Node> nodes)
+    internal static DeviceKind Kind(string name, List<Node> nodes)
     {
         bool Has(Guid g) => nodes.Any(n => n.Class == g);
         bool Named(params string[] words) => words.Any(w => name.Contains(w, StringComparison.OrdinalIgnoreCase));
@@ -132,7 +132,7 @@ public static class Bluetooth
     }
 
     /// Все подключённые к системе узлы PnP с контейнером, классом, именем и уровнем заряда.
-    static List<Node> Nodes()
+    internal static List<Node> Nodes()
     {
         var list = new List<Node>();
         if (CM_Get_Device_ID_List_SizeW(out var len, null, CM_GETIDLIST_FILTER_PRESENT) != 0 || len == 0) return list;

@@ -92,6 +92,7 @@ public static class IslandWidgets
         "settings" => new SettingsWidget(s, body),
         "perf" => new PerfWidget(s, body),
         "kanban" => new KanbanWidget(s, body),
+        "notif" => new NoticeWidget(s, body),
         _ => new LangWidget(s, body),
     };
 }

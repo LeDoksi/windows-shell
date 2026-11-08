@@ -15,17 +15,21 @@ public sealed class IslandSection
     public Dictionary<string, bool> Events { get; set; } = [];
     /// Виджеты, которые Георгий убрал из дока кнопкой «Проверил — убрать из дока» (П24).
     public List<string> OutOfDock { get; set; } = [];
+    /// «Не беспокоить» острова (своё, не режим Windows): уведомления тихо копятся в центре.
+    public bool Quiet { get; set; }
+    /// Звук Windows «уведомление» вместе с пилюлей уведомления.
+    public bool NoticeSound { get; set; } = true;
 }
 
 /// Чтение секции острова с порядком и соответствием значкам дока.
 public sealed class IslandSettings(IslandSection s)
 {
     /// Виджеты острова (волны 1–3), порядок по умолчанию (медиа — постоянное место слева, В3).
-    public static readonly string[] Known = ["media", "charge", "net", "sound", "lang", "shots", "bin", "shelf", "perf", "kanban"];
+    public static readonly string[] Known = ["media", "charge", "net", "sound", "lang", "shots", "bin", "shelf", "perf", "kanban", "notif"];
 
     /// Виджеты, у которых есть старый доступ (значок в доке, у монитора ПК — окно): их можно
     /// перенести (П24). Полки в доке нет.
-    public static readonly string[] Movable = ["media", "charge", "net", "sound", "lang", "shots", "bin", "perf", "kanban"];
+    public static readonly string[] Movable = ["media", "charge", "net", "sound", "lang", "shots", "bin", "perf", "kanban", "notif"];
 
     public static string Title(string id) => id switch
     {
@@ -39,6 +43,7 @@ public sealed class IslandSettings(IslandSection s)
         "shelf" => "Полка",
         "perf" => "Монитор ПК",
         "kanban" => "Канбан",
+        "notif" => "Уведомления",
         "settings" => "Настройки",
         _ => id,
     };
@@ -49,10 +54,15 @@ public sealed class IslandSettings(IslandSection s)
         "net" => "network",
         "lang" => "language",
         "perf" => "perf-window",
+        "notif" => "notifications",
         _ => id,
     };
 
     public bool Enabled => s.Enabled;
+
+    public bool Quiet => s.Quiet;
+
+    public bool NoticeSound => s.NoticeSound;
 
     public List<string> Order => RibbonOrder.Normalize(s.Ribbon, Known);
 
@@ -67,6 +77,7 @@ public sealed class IslandSettings(IslandSection s)
     {
         EventKind.Language => "lang",
         EventKind.Shot => "shots",
+        EventKind.Notice => "notif",
         _ => "charge",
     };
 

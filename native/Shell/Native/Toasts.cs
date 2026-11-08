@@ -12,6 +12,9 @@ public static class Toasts
     public const string Aumid = "LeDoksi.WindowsShell";
     public const string Protocol = "windows-shell-native";
 
+    /// Остров берёт уведомление себе (true) — тоста Windows не будет. Вызывается из любого потока.
+    public static Func<string, string, bool>? Island { get; set; }
+
     /// Имя, значок и ссылка для кнопок. Зовём при каждом запуске: exe мог переехать.
     public static void Register()
     {
@@ -40,6 +43,16 @@ public static class Toasts
     /// кнопок (пробы из другой папки не должны перенаправить кнопки на себя).
     public static void Show(string title, string text, bool silent, string? button = null, bool register = true)
     {
+        // В оболочке с островом свои уведомления — событие острова и строка в нашем центре
+        // (баннеры Windows заменены островом). Кнопок у таких нет; сторож острова не имеет.
+        if (button is null && Island is { } island)
+        {
+            try
+            {
+                if (island(title, text)) { Log.Write($"уведомление (остров): {title}"); return; }
+            }
+            catch (Exception e) { Log.Error("уведомление в остров", e); }
+        }
         try
         {
             if (register) Register();

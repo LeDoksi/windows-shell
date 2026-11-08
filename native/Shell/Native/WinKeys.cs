@@ -55,6 +55,9 @@ public sealed class WinKeys
     /// PrtSc (false) или Shift+PrtSc (true).
     public event Action<bool>? Snapshot;
 
+    /// Ctrl+PrtSc: текст с экрана (OCR, WSH-E26).
+    public event Action? TextShot;
+
     /// Клавиша для дока, пока он в режиме клавиатуры: VK и Shift.
     public event Action<int, bool>? Captured;
 
@@ -137,17 +140,18 @@ public sealed class WinKeys
             {
                 var ctrl = Down(VK_CONTROL);
                 var alt = Down(VK_MENU);
-                if (PrintScreen && !_winDown && !ctrl && !alt)
+                if (PrintScreen && !_winDown && !alt)
                 {
                     var fire = _snap.Step(down, k.time);
                     var shift = Down(VK_SHIFT);
                     // Автоповтор, пока держат, в лог не пишем (их десятки).
                     if (fire || !down || _snap.Last != "автоповтор")
-                        Log.Write($"PrtSc {(down ? "↓" : "↑")}{(shift ? " +Shift" : "")}{((k.flags & LLKHF_INJECTED) != 0 ? " (программное)" : "")} t={k.time} → {_snap.Last}");
-                    if (fire) Post(() => Snapshot?.Invoke(shift));
+                        Log.Write($"PrtSc {(down ? "↓" : "↑")}{(ctrl ? " +Ctrl" : "")}{(shift ? " +Shift" : "")}{((k.flags & LLKHF_INJECTED) != 0 ? " (программное)" : "")} t={k.time} → {_snap.Last}");
+                    if (fire && ctrl) Post(() => TextShot?.Invoke());
+                    else if (fire) Post(() => Snapshot?.Invoke(shift));
                     return 1;
                 }
-                if (down) Log.Write($"PrtSc ↓ t={k.time} → Windows ({(!PrintScreen ? "снимки выключены" : _winDown ? "с Win" : ctrl ? "с Ctrl" : "с Alt")})");
+                if (down) Log.Write($"PrtSc ↓ t={k.time} → Windows ({(!PrintScreen ? "снимки выключены" : _winDown ? "с Win" : "с Alt")})");
                 // Отпускание Windows после нашего нажатия — тоже сброс: следующее нажатие снова наше.
                 if (!down) _snap.Reset();
                 return CallNextHookEx(IntPtr.Zero, code, w, l);

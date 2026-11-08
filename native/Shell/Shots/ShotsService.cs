@@ -149,6 +149,89 @@ public sealed class ShotsService
         return f;
     }
 
+    // ---------- текст с картинки (OCR, WSH-E26) ----------
+
+    /// Распознанный текст ждёт проверки в острове. null — нет.
+    public OcrJob? Ocr { get; private set; }
+
+    public event Action? OcrChanged;
+
+    /// Остров открывает «Снимки» с результатом. false — острова нет: текст сразу в буфер.
+    public Func<bool>? IslandOcr { get; set; }
+
+    /// Ctrl+PrtSc: экран замирает, выбираешь область — текст из неё.
+    public async void SnapText()
+    {
+        if (Skipped("текст с экрана")) return;
+        _busy = true;
+        byte[] png;
+        try
+        {
+            _thumb?.Hide();
+            using var frozen = Capture();
+            var sel = await Selector.Pick(frozen, _monitors.All, record: false);
+            if (sel is null) { Log.Write("текст с экрана: выбор отменён"); return; }
+            using var bmp = frozen.Crop(sel.Rect);
+            png = Shots.Ocr.Png(bmp);
+            Log.Write($"текст с экрана: область {bmp.Width}×{bmp.Height}");
+        }
+        catch (Exception e)
+        {
+            Log.Error("текст с экрана", e);
+            return;
+        }
+        finally
+        {
+            _busy = false;
+        }
+        await RunOcr(png, "Область экрана", null);
+    }
+
+    /// Текст сохранённого снимка.
+    public async void TextOf(ShotItem item)
+    {
+        try { await RunOcr(await File.ReadAllBytesAsync(item.Path), item.Name, null); }
+        catch (Exception e) { Log.Error("текст снимка", e); }
+    }
+
+    /// Распознать тот же снимок другим языком.
+    public async void OcrLanguage(string lang)
+    {
+        if (Ocr is { } job) await RunOcr(job.Png, job.Source, lang);
+    }
+
+    async Task RunOcr(byte[] png, string source, string? lang)
+    {
+        lang ??= Shots.Ocr.DefaultLang();
+        var (text, error) = await Shots.Ocr.Recognize(png, lang);
+        Log.Write($"текст с картинки: {source}, язык {lang ?? "—"}, символов {text.Length}{(error != null && text.Length == 0 ? " (пусто)" : "")}");
+        Ocr = new OcrJob(png, source, lang ?? "", text, error);
+        var island = false;
+        try { island = IslandOcr?.Invoke() ?? false; }
+        catch (Exception e) { Log.Error("текст с картинки: остров", e); }
+        if (island) { OcrChanged?.Invoke(); return; }
+        // Острова нет (выключен или игра на весь экран без второго экрана): сразу в буфер.
+        Ocr = null;
+        if (text.Length > 0 && Clip.SetText(text)) Toasts.Show("Текст скопирован", text.Length > 120 ? text[..120] + "…" : text, silent: true);
+        else Toasts.Show("Текст не распознан", error ?? "Попробуй ещё раз.", silent: true);
+    }
+
+    /// «Копировать» в острове: проверенный (и, может быть, поправленный) текст — в буфер.
+    public bool CopyOcr(string text)
+    {
+        var ok = text.Length > 0 && Clip.SetText(text);
+        Log.Write($"текст с картинки: {(ok ? $"скопировано {text.Length} символов" : "не скопировано")}");
+        if (ok) { Ocr = null; OcrChanged?.Invoke(); }
+        return ok;
+    }
+
+    public void DropOcr()
+    {
+        if (Ocr is null) return;
+        Ocr = null;
+        OcrChanged?.Invoke();
+    }
+
     /// Остров показывает результат снимка (пилюля). true — остров взял событие на себя
     /// (включён и событие «снимок» включено), даже если тихо положил снимок в галерею.
     public Func<ShotItem, string, bool>? IslandSaved { get; set; }
