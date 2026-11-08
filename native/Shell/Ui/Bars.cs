@@ -151,6 +151,9 @@ public sealed class Bars
 
     public bool IsFullscreen(Screen screen) => _fullscreen.Contains(screen.Name);
 
+    /// Набор мониторов в fullscreen поменялся (поток интерфейса).
+    public event Action? FullscreenChanged;
+
     // ---------- фоновый поток ----------
 
     void Poll()
@@ -172,7 +175,7 @@ public sealed class Bars
                     if (!full.SetEquals(_fullscreen))
                     {
                         _fullscreen = full;
-                        _queue.TryEnqueue(Evaluate);
+                        _queue.TryEnqueue(() => { Evaluate(); FullscreenChanged?.Invoke(); });
                     }
                 }
                 if (!GetCursorPos(out var p)) continue;

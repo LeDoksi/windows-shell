@@ -7,12 +7,20 @@ namespace WindowsShell.Config;
 public sealed class PerfSettings(WidgetEntry entry)
 {
     /// Цифры оверлея (порядок по умолчанию). Идут парами: FPS · время кадра, процессор % · °C…
-    public static readonly string[] Metrics = ["fps", "frametime", "cpu", "cputemp", "gpu", "gputemp", "ram", "vram"];
+    public static readonly string[] Metrics = ["fps", "low1", "frametime", "graph", "cpu", "cputemp", "gpu", "gputemp", "ram", "vram"];
+
+    /// Кадровые показатели (их считает PresentMon; остальное — датчики).
+    public static bool IsFrameMetric(string id) => id is "fps" or "low1" or "frametime" or "graph";
+
+    /// Что можно показать в строке закреплённого монитора (П8).
+    public static readonly string[] PinMetrics = ["fps", "cpu", "cputemp", "gpu", "gputemp", "ram", "vram"];
 
     public static string MetricName(string id) => id switch
     {
         "fps" => "FPS",
+        "low1" => "1% low",
         "frametime" => "Время кадра",
+        "graph" => "График времени кадра",
         "cpu" => "Процессор %",
         "cputemp" => "Процессор °C",
         "gpu" => "Видеокарта %",
@@ -60,11 +68,40 @@ public sealed class PerfSettings(WidgetEntry entry)
         set => S["order"] = new JsonArray(value.Select(v => (JsonNode)v).ToArray());
     }
 
-    /// Какие цифры показывать (по умолчанию только FPS).
+    /// Какие цифры показывать (по умолчанию FPS и 1% low, П16).
     public HashSet<string> Shown
     {
-        get => S["shown"] is JsonArray a ? a.Select(n => n?.GetValue<string>()).OfType<string>().Where(Metrics.Contains).ToHashSet() : ["fps"];
-        set => S["shown"] = new JsonArray(Metrics.Where(value.Contains).Select(v => (JsonNode)v).ToArray());
+        get
+        {
+            if (S["shown"] is not JsonArray a) return ["fps", "low1"];
+            var set = a.Select(n => n?.GetValue<string>()).OfType<string>().Where(Metrics.Contains).ToHashSet();
+            // Волна 3: у кого FPS уже был включён, 1% low добавляется один раз (потом можно снять).
+            if (!Bool("low1Added", false) && set.Contains("fps")) set.Add("low1");
+            return set;
+        }
+        set
+        {
+            S["shown"] = new JsonArray(Metrics.Where(value.Contains).Select(v => (JsonNode)v).ToArray());
+            S["low1Added"] = true;
+        }
+    }
+
+    /// Оверлей попадает в снимки и запись экрана (по умолчанию нет, П9).
+    public bool OverlayInCapture { get => Bool("overlayInCapture", false); set => S["overlayInCapture"] = value; }
+
+    /// Монитор, за которым закреплён «Монитор ПК» в острове (имя экрана; null — не закреплён, П8).
+    public string? PinScreen
+    {
+        get => S["pinScreen"] is JsonValue v && v.TryGetValue<string>(out var s) && s.Length > 0 ? s : null;
+        set => S["pinScreen"] = value;
+    }
+
+    /// Показатели строки закрепления (по умолчанию ЦП, ГП, их температуры, ОЗУ и видеопамять; FPS — когда идёт игра).
+    public List<string> PinItems
+    {
+        get => S["pinItems"] is JsonArray a ? a.Select(n => n?.GetValue<string>()).OfType<string>().Where(PinMetrics.Contains).Distinct().ToList()
+            : ["fps", "cpu", "cputemp", "gpu", "gputemp", "ram", "vram"];
+        set => S["pinItems"] = new JsonArray(PinMetrics.Where(value.Contains).Select(v => (JsonNode)v).ToArray());
     }
 
     /// Показанные цифры по порядку.
