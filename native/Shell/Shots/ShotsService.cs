@@ -59,6 +59,9 @@ public sealed class ShotsService
     public IReadOnlyList<ShotItem> Items => _items;
 
     public bool Recording => _rec != null;
+
+    /// Монитор, который пишется (имя, как в Monitors), пока идёт запись.
+    public string? RecordingScreen { get; private set; }
     public TimeSpan RecordingTime => _rec?.Elapsed ?? TimeSpan.Zero;
     public bool RecordingPaused => _rec?.Paused ?? false;
     public bool RecordMic => _rec?.Mic ?? Settings.Mic;
@@ -146,8 +149,17 @@ public sealed class ShotsService
         return f;
     }
 
+    /// Остров показывает результат снимка (пилюля). true — остров взял событие на себя
+    /// (включён и событие «снимок» включено), даже если тихо положил снимок в галерею.
+    public Func<ShotItem, string, bool>? IslandSaved { get; set; }
+
     void ShowThumb(ShotItem item, string caption)
     {
+        var island = false;
+        try { island = IslandSaved?.Invoke(item, caption) ?? false; }
+        catch (Exception e) { Log.Error("снимки: пилюля острова", e); }
+        // Миграция дублированием (П24): миниатюра в углу остаётся, пока «Снимки» в доке.
+        if (island && !_config.Island.InDock("shots")) return;
         if (_thumb is null)
         {
             _thumb = new ShotThumb(_queue);
@@ -200,6 +212,7 @@ public sealed class ShotsService
             if (!rec.HasSound && (s.SystemSound || s.Mic))
                 Toasts.Show("Запись идёт без звука", "Кодировщик Windows не принял звук. Подробности в журнале оболочки.", silent: true);
             _rec = rec;
+            RecordingScreen = screen.Name;
             _frame = new RecordFrame(this, r, screen);
             _tick.Start();
             Changed?.Invoke();
@@ -220,6 +233,7 @@ public sealed class ShotsService
         var rec = _rec;
         if (rec is null) return;
         _rec = null;
+        RecordingScreen = null;
         _tick.Stop();
         _frame?.Close();
         _frame = null;

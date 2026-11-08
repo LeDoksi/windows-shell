@@ -14,7 +14,10 @@ using XPath = Microsoft.UI.Xaml.Shapes.Path;
 
 namespace WindowsShell.Island;
 
-public enum BodyMode { Rest, Ribbon, Widget, Event }
+public enum BodyMode { Rest, Ribbon, Widget, Event, Badge, Drop }
+
+/// Куда бросили файлы в режиме приёма (П2).
+public enum DropTarget { None, Bin, Shelf }
 
 /// Тело острова на одном мониторе (путь b1 из пробы E22): одно неподвижное прозрачное окно
 /// с запасом; форма — путь по контуру IslandShape, клики — SetWindowRgn по тому же контуру,
@@ -22,9 +25,10 @@ public enum BodyMode { Rest, Ribbon, Widget, Event }
 /// меняющее форму на пружинах; содержимое не двигается, проявляется на последней трети пути.
 public sealed class IslandBody
 {
-    const double WinW = 680, WinH = 640, MagnetPad = 60, RestW = 190, RestH = 3, HotY = 2, HotHalfW = 140, Pad = 18;
+    const double BaseW = 680, BaseH = 640, MagnetPad = 60, RestW = 190, RestH = 3, HotY = 2, HotHalfW = 140, Pad = 18;
     const long WS_EX_LAYERED = 0x80000, WS_EX_TRANSPARENT = 0x20;
 
+    double WinW = BaseW, WinH = BaseH;
     readonly IslandHost _host;
     readonly Services _s;
     readonly ShellWindow _win;
@@ -36,6 +40,7 @@ public sealed class IslandBody
     readonly Border _widgetHost;
     readonly Border _pillHost;
     readonly Border _chip;
+    readonly DropView _drop;
     readonly TextBlock _chipText;
     readonly Dictionary<string, IslandWidget> _widgets = [];
     readonly HoverGate _gate = new();
@@ -52,6 +57,12 @@ public sealed class IslandBody
     Action? _pillClick, _chipClick;
     double _cursorX, _cursorY;
     bool _cursorOn;
+    // Постоянная пилюля (идущая запись): тело возвращается в неё, а не в кромку.
+    UIElement? _badge;
+    Action? _badgeClick;
+    // Приём файлов (П2): кнопку зажали не у края, курсор пришёл к краю — окно ловит DragEnter.
+    bool _probe, _wasAtHot;
+    long _dropLeftAt, _dropReleasedAt;
 
     public Screen Screen { get; private set; }
     public BodyMode Mode { get; private set; } = BodyMode.Rest;
@@ -121,7 +132,8 @@ public sealed class IslandBody
         };
         _chip.Tapped += (_, _) => _chipClick?.Invoke();
         var stack = new StackPanel { Children = { _ribbon.Panel, _scroll } };
-        _content = new Grid { IsHitTestVisible = false, Children = { stack, _pillHost, _chip } };
+        _drop = new DropView();
+        _content = new Grid { IsHitTestVisible = false, Children = { stack, _pillHost, _chip, _drop.View } };
         canvas.Children.Add(_content);
 
         _pillTimer = s.Queue.CreateTimer();
@@ -144,6 +156,15 @@ public sealed class IslandBody
         {
             if (e.Key == Windows.System.VirtualKey.Escape && Mode != BodyMode.Rest) { e.Handled = true; Sleep(); }
         };
+
+        // Приём файлов (П2, И9): цели — корзина и полка. Корень прозрачен для глаза, но ловит
+        // перетаскивание; где окно «есть», решает регион (в покое — кромка).
+        _win.Root.Background = B(Color.FromArgb(0, 0, 0, 0));
+        _win.Root.AllowDrop = true;
+        _win.Root.DragEnter += OnDragEnter;
+        _win.Root.DragOver += OnDragOver;
+        _win.Root.DragLeave += (_, _) => { _drop.Hover(DropTarget.None); _dropLeftAt = Environment.TickCount64; };
+        _win.Root.Drop += OnDrop;
 
         Place();
         AddExStyle(_win.Hwnd, WS_EX_LAYERED);
@@ -190,14 +211,63 @@ public sealed class IslandBody
     /// Свернуть в кромку. restoreFocus — вернуть фокус окну, где работали до острова (П5).
     public void Sleep(bool restoreFocus = true)
     {
-        if (Mode == BodyMode.Rest || _disposed) return;
+        if (_disposed) return;
+        if (Mode == BodyMode.Rest || (Mode == BodyMode.Badge && _badge != null)) return;
         CloseWidget();
         _pillTimer.Stop();
         _pillClick = null;
         _chip.Visibility = Visibility.Collapsed;
         _gate.Reset();
         Deactivate(restoreFocus);
-        SetMode(BodyMode.Rest, RestW, RestH);
+        if (_badge != null) EnterBadge();
+        else SetMode(BodyMode.Rest, RestW, RestH);
+    }
+
+    // ---------- постоянная пилюля (запись) ----------
+
+    public UIElement? BadgeContent => _badge;
+
+    /// Задать или убрать постоянную пилюлю. Тот же элемент ещё раз — пересчитать размер (таймер вырос).
+    public void SetBadge(UIElement? content, Action? click)
+    {
+        if (_disposed) return;
+        var same = content != null && content == _badge;
+        _badge = content;
+        _badgeClick = click;
+        if (content == null)
+        {
+            if (Mode == BodyMode.Badge) SetMode(BodyMode.Rest, RestW, RestH);
+            return;
+        }
+        if (Mode == BodyMode.Rest) EnterBadge();
+        else if (Mode == BodyMode.Badge)
+        {
+            if (!same) _pillHost.Child = content;
+            _pillClick = click;
+            var (w, h) = PillSize();
+            if (Math.Abs(w - _w.Target) > 0.5 || Math.Abs(h - _h.Target) > 0.5) { _targetW = w; _content.Width = w; Canvas.SetLeft(_content, WinW / 2 - w / 2); Retarget(w, h, Springs.Ribbon); }
+        }
+    }
+
+    void EnterBadge()
+    {
+        if (_badge == null) return;
+        _pillHost.Child = _badge;
+        _pillClick = _badgeClick;
+        if (_hidden) { _win.Show(false); _hidden = false; }
+        _win.Raise();
+        _raisedAt = Environment.TickCount64;
+        _pillHost.Visibility = Visibility.Visible;
+        var (w, h) = PillSize();
+        SetMode(BodyMode.Badge, w, h);
+        _pillTimer.Start();
+    }
+
+    (double W, double H) PillSize()
+    {
+        _pillHost.Measure(new Windows.Foundation.Size(WinW, 200));
+        var size = _pillHost.DesiredSize;
+        return (Math.Max(64, size.Width), Math.Max(30, size.Height));
     }
 
     /// Открыть виджет в теле. byUser — кликом (берём фокус: Escape, Tab, ввод пароля).
@@ -207,6 +277,8 @@ public sealed class IslandBody
         if (Full && !byUser) return;
         var w = _widgets.TryGetValue(id, out var existing) ? existing : _widgets[id] = IslandWidgets.Create(id, _s, this);
         _host.Opening(this);
+        // Большое состояние (лист настроек): окно сначала вырастает, потом тело раскрывается в нём.
+        if (w.Sheet(Screen) is { } sheet) EnsureSize(sheet.W + 2 * MagnetPad, sheet.H + MagnetPad);
         if (Widget != w)
         {
             CloseWidget();
@@ -248,7 +320,7 @@ public sealed class IslandBody
     (double W, double H) WidgetSize(IslandWidget w)
     {
         var width = Math.Max(_ribbon.Width, w.Width);
-        var maxContent = WinH - MagnetPad - RibbonView.Height;
+        var maxContent = (w.Sheet(Screen) is { } sheet ? Math.Min(WinH, sheet.H) : Math.Min(WinH - MagnetPad, BaseH - MagnetPad)) - RibbonView.Height;
         _scroll.Visibility = Visibility.Visible;
         _scroll.MaxHeight = maxContent;
         _scroll.Width = width;
@@ -271,7 +343,7 @@ public sealed class IslandBody
             _chipTimer.Start();
             return;
         }
-        if (Mode == BodyMode.Ribbon) return; // лента сама показывает то же на значке
+        if (Mode is BodyMode.Ribbon or BodyMode.Drop) return; // лента сама показывает то же на значке
         _pillHost.Child = content;
         _pillClick = click;
         _pillUntil = Environment.TickCount64 + ms;
@@ -279,18 +351,18 @@ public sealed class IslandBody
         _win.Raise();
         _raisedAt = Environment.TickCount64;
         _pillHost.Visibility = Visibility.Visible;
-        _pillHost.Measure(new Windows.Foundation.Size(WinW, 200));
-        var size = _pillHost.DesiredSize;
-        SetMode(BodyMode.Event, Math.Max(64, size.Width), Math.Max(30, size.Height));
+        var (pw, ph) = PillSize();
+        SetMode(BodyMode.Event, pw, ph);
         _pillTimer.Start();
     }
 
     void PillTick()
     {
-        if (Mode != BodyMode.Event) { _pillTimer.Stop(); return; }
+        if (Mode is not (BodyMode.Event or BodyMode.Badge)) { _pillTimer.Stop(); return; }
         var now = Environment.TickCount64;
         // Игра тоже бывает «поверх всех»: раз в секунду поднимаемся над ней.
         if (now - _raisedAt > 1000) { _win.Raise(); _raisedAt = now; }
+        if (Mode == BodyMode.Badge) return;
         var hover = _cursorOn && _cursorY <= _h.Value + 4 && Math.Abs(_cursorX) <= _w.Value / 2 + 4;
         if (hover) _pillUntil = Math.Max(_pillUntil, now + 600);
         if (now >= _pillUntil) Sleep(restoreFocus: false);
@@ -299,7 +371,7 @@ public sealed class IslandBody
     void SetMode(BodyMode m, double w, double h)
     {
         var from = Mode;
-        _p = m is BodyMode.Rest or BodyMode.Ribbon or BodyMode.Event ? Springs.Ribbon
+        _p = m is BodyMode.Rest or BodyMode.Ribbon or BodyMode.Event or BodyMode.Badge ? Springs.Ribbon
             : from == BodyMode.Widget ? Springs.Switch : Springs.Widget;
         Mode = m;
         _fromW = _w.Value;
@@ -309,10 +381,12 @@ public sealed class IslandBody
         Canvas.SetLeft(_content, WinW / 2 - w / 2);
         _ribbon.Panel.Visibility = m is BodyMode.Ribbon or BodyMode.Widget ? Visibility.Visible : Visibility.Collapsed;
         _scroll.Visibility = m == BodyMode.Widget ? Visibility.Visible : Visibility.Collapsed;
-        if (m != BodyMode.Event) { _pillHost.Visibility = Visibility.Collapsed; _pillHost.Child = null; }
+        if (m is not (BodyMode.Event or BodyMode.Badge)) { _pillHost.Visibility = Visibility.Collapsed; _pillHost.Child = null; }
+        _drop.View.Visibility = m == BodyMode.Drop ? Visibility.Visible : Visibility.Collapsed;
+        if (m != BodyMode.Drop) _drop.Hover(DropTarget.None);
         if (m != BodyMode.Widget) _chip.Visibility = Visibility.Collapsed;
         // Уходит быстрее, чем приходит: старое содержимое гаснет сразу.
-        if (from != m || m == BodyMode.Widget) { _scroll.Opacity = 0; _pillHost.Opacity = 0; }
+        if (from != m || m == BodyMode.Widget) { _scroll.Opacity = 0; _pillHost.Opacity = 0; _drop.View.Opacity = 0; }
         if (m != BodyMode.Rest) LeaveRest();
         _content.IsHitTestVisible = m != BodyMode.Rest;
         Retarget(w, h, _p);
@@ -422,6 +496,24 @@ public sealed class IslandBody
         var atHot = _cursorOn && _cursorY < HotY && cx < Math.Max(HotHalfW, w / 2);
         var inside = _cursorOn && _cursorY <= h + 8 && cx <= w / 2 + 8;
 
+        // Приём файлов (П2): к краю пришли с зажатой кнопкой (не нажали у самого края —
+        // это клик по вкладке под кромкой). Окно ловит DragEnter; тащат окно — его не будет.
+        var arrived = atHot && !_wasAtHot;
+        _wasAtHot = atHot;
+        if (!held && _probe) EndProbe();
+        if (held && arrived && !Full && Mode is BodyMode.Rest or BodyMode.Badge) StartProbe();
+        if (Mode == BodyMode.Drop)
+        {
+            // Отпустили — бросок уже обработан (Drop приходит раньше), или бросили мимо.
+            if (!held)
+            {
+                if (_dropReleasedAt == 0) _dropReleasedAt = now;
+                else if (now - _dropReleasedAt > 400) Sleep(restoreFocus: false);
+            }
+            else if (!inside && _cursorY > h + 120 && now - _dropLeftAt < 5000) Sleep(restoreFocus: false);
+            return false;
+        }
+
         if (esc && (Mode is BodyMode.Ribbon or BodyMode.Event || (Mode == BodyMode.Widget && GetForegroundWindow() == _win.Hwnd)))
         {
             Sleep();
@@ -435,11 +527,101 @@ public sealed class IslandBody
         }
         switch (_gate.Step(now, atHot, inside, held, Full, Mode == BodyMode.Widget))
         {
-            case HoverStep.Wake when Mode is BodyMode.Rest or BodyMode.Event: Wake(); break;
+            case HoverStep.Wake when Mode is BodyMode.Rest or BodyMode.Event or BodyMode.Badge: Wake(); break;
             case HoverStep.Sleep when Mode == BodyMode.Ribbon: Sleep(restoreFocus: false); break;
         }
         // Магнит: курсор под телом в его радиусе (принцип motion 5).
         return _cursorOn && _cursorY > h && _cursorY - h < 170 && cx < w / 2 + 40;
+    }
+
+    // ---------- приём файлов (П2, И9) ----------
+
+    void StartProbe()
+    {
+        if (_probe) return;
+        _probe = true;
+        LeaveRest();
+        Draw();
+    }
+
+    void EndProbe()
+    {
+        if (!_probe) return;
+        _probe = false;
+        if (Mode == BodyMode.Rest && !_moving) EnterRest();
+        Draw();
+    }
+
+    static bool HasFiles(DragEventArgs e) => e.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems);
+
+    /// Открыт виджет полки или корзины — бросок прямо в него.
+    DropTarget WidgetTarget => Mode == BodyMode.Widget ? Widget?.Id switch { "shelf" => DropTarget.Shelf, "bin" => DropTarget.Bin, _ => DropTarget.None } : DropTarget.None;
+
+    void OnDragEnter(object sender, DragEventArgs e)
+    {
+        if (!HasFiles(e) || _disposed) return;
+        if (Mode is BodyMode.Rest or BodyMode.Badge or BodyMode.Event && !Full)
+        {
+            _probe = false;
+            _dropReleasedAt = 0;
+            _dropLeftAt = 0;
+            _host.Opening(this);
+            _pillTimer.Stop();
+            SetMode(BodyMode.Drop, DropView.W, DropView.H);
+            Log.Write($"остров: приём файлов на {Screen.Name}");
+        }
+        OnDragOver(sender, e);
+    }
+
+    void OnDragOver(object sender, DragEventArgs e)
+    {
+        if (!HasFiles(e)) return;
+        var target = Mode == BodyMode.Drop ? _drop.HitTest(e.GetPosition(_drop.View)) : WidgetTarget;
+        _drop.Hover(target);
+        e.AcceptedOperation = target switch
+        {
+            DropTarget.Bin => Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move,
+            DropTarget.Shelf => Windows.ApplicationModel.DataTransfer.DataPackageOperation.Link,
+            _ => Windows.ApplicationModel.DataTransfer.DataPackageOperation.None,
+        };
+        e.DragUIOverride.Caption = target switch { DropTarget.Bin => "В корзину", DropTarget.Shelf => "На полку", _ => "" };
+        e.DragUIOverride.IsCaptionVisible = target != DropTarget.None;
+        e.Handled = true;
+    }
+
+    async void OnDrop(object sender, DragEventArgs e)
+    {
+        var target = Mode == BodyMode.Drop ? _drop.HitTest(e.GetPosition(_drop.View)) : WidgetTarget;
+        if (target == DropTarget.None || !HasFiles(e)) return;
+        var deferral = e.GetDeferral();
+        try
+        {
+            var items = await e.DataView.GetStorageItemsAsync();
+            var paths = items.Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p)).ToList();
+            if (paths.Count > 0) _host.Dropped(this, target, paths);
+        }
+        catch (Exception ex) { Log.Error("остров: бросок файлов", ex); }
+        finally { deferral.Complete(); }
+    }
+
+    // ---------- размер окна ----------
+
+    /// Окно тела растёт под большое состояние (лист настроек) и сжимается обратно в покое.
+    /// Центр верхнего края остаётся на месте, форма перерисовывается в новых координатах.
+    void EnsureSize(double w, double h)
+    {
+        var maxW = (Screen.Bounds.Right - Screen.Bounds.Left) / Screen.Scale;
+        var maxH = (Screen.Bounds.Bottom - Screen.Bounds.Top) / Screen.Scale;
+        w = Math.Min(Math.Max(BaseW, w), maxW);
+        h = Math.Min(Math.Max(BaseH, h), maxH);
+        if (Math.Abs(w - WinW) < 1 && Math.Abs(h - WinH) < 1) return;
+        WinW = w;
+        WinH = h;
+        Place();
+        Canvas.SetLeft(_dot, WinW / 2 + RestW / 2 - 14);
+        Canvas.SetLeft(_content, WinW / 2 - _targetW / 2);
+        Draw();
+        _host.PublishZones();
     }
 
     bool OverOwnWindow(POINT p)
@@ -479,7 +661,8 @@ public sealed class IslandBody
             _moving = false;
             Draw();
             _host.PublishZones();
-            if (Mode == BodyMode.Rest) EnterRest();
+            if (Mode == BodyMode.Rest && !_probe) EnterRest();
+            if (Mode is BodyMode.Rest or BodyMode.Badge) EnsureSize(BaseW, BaseH);
         }
         return _moving || _magnet.Moving;
     }
@@ -509,6 +692,13 @@ public sealed class IslandBody
         var poly = new POINT[pts.Count];
         for (var i = 0; i < pts.Count; i++) poly[i] = new POINT { X = (int)Math.Round((pts[i].X + cx) * s), Y = (int)Math.Round(pts[i].Y * s) };
         var rgn = CreatePolygonRgn(poly, poly.Length, 2 /* WINDING */);
+        if (_probe)
+        {
+            // Приём файлов: у края полоса пошире кромки, чтобы перетаскивание её задело.
+            var strip = CreateRectRgn((int)((cx - 170) * s), 0, (int)((cx + 170) * s), (int)(24 * s));
+            CombineRgn(rgn, rgn, strip, 2 /* RGN_OR */);
+            DeleteObject(strip);
+        }
         if (SetWindowRgn(_win.Hwnd, rgn, true) == 0) DeleteObject(rgn);
 
         // Содержимое стоит; видно только то, что внутри тела.
@@ -522,7 +712,8 @@ public sealed class IslandBody
             if (o >= 1) _contentShown = true;
             _scroll.Opacity = o;
         }
-        if (Mode == BodyMode.Event) _pillHost.Opacity = Math.Clamp((progress - 2.0 / 3) * 3, 0, 1);
+        if (Mode is BodyMode.Event or BodyMode.Badge) _pillHost.Opacity = Math.Clamp((progress - 2.0 / 3) * 3, 0, 1);
+        if (Mode == BodyMode.Drop) _drop.View.Opacity = Math.Clamp((progress - 2.0 / 3) * 3, 0, 1);
     }
 
     double Progress()

@@ -26,6 +26,8 @@ public sealed class RibbonView
         public required TextBlock Text;
         public required Grid Bar;
         public required Border Fill;
+        public required TextBlock Count;
+        public required Grid Grid;
         public long PressedAt;
     }
 
@@ -112,7 +114,13 @@ public sealed class RibbonView
             Margin = new Thickness(0, 0, 0, 6), Visibility = Visibility.Collapsed,
             Children = { fill },
         };
-        var grid = new Grid { Width = 44, Height = 48, Children = { icon, text, bar } };
+        // Число в углу (полка).
+        var count = Text("", 10, Sub, bold: true);
+        count.HorizontalAlignment = HorizontalAlignment.Right;
+        count.VerticalAlignment = VerticalAlignment.Top;
+        count.Margin = new Thickness(0, 5, 5, 0);
+        count.Visibility = Visibility.Collapsed;
+        var grid = new Grid { Width = 44, Height = 48, Children = { icon, text, bar, count } };
         var b = new Button
         {
             Content = grid,
@@ -123,7 +131,7 @@ public sealed class RibbonView
             Background = B(Microsoft.UI.Colors.Transparent),
             BorderThickness = new Thickness(0),
         };
-        var slot = new Slot { Id = id, Button = b, Icon = icon, Text = text, Bar = bar, Fill = fill };
+        var slot = new Slot { Id = id, Button = b, Icon = icon, Text = text, Bar = bar, Fill = fill, Count = count, Grid = grid };
         // Отклик по нажатию, а не по отпусканию (принцип motion 1); Click — для клавиатуры и диктора.
         b.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, e) =>
         {
@@ -166,6 +174,10 @@ public sealed class RibbonView
         s.Text.Visibility = Visibility.Collapsed;
         s.Bar.Visibility = Visibility.Collapsed;
         s.Icon.Foreground = B(Ink);
+        s.Text.Foreground = B(Ink);
+        s.Text.FontSize = 14;
+        s.Count.Visibility = Visibility.Collapsed;
+        s.Button.Width = s.Grid.Width = 44;
         switch (s.Id)
         {
             case "media":
@@ -222,9 +234,45 @@ public sealed class RibbonView
                 s.Text.Text = _s.Language.Current.Short;
                 tip = $"Раскладка: {_s.Language.Current.Name}";
                 break;
+            case "shots":
+            {
+                var sh = _s.Shots;
+                s.Icon.Glyph = "\uE722";
+                tip = sh.Items.Count == 0 ? "Снимки и запись: PrtSc — снимок, Shift+PrtSc — запись" : $"Снимки и запись · за 3 дня {sh.Items.Count}";
+                if (sh.Recording)
+                {
+                    // П20: во время записи вместо значка — таймер.
+                    var t = Shots.ShotsService.Length(sh.RecordingTime);
+                    s.Icon.Visibility = Visibility.Collapsed;
+                    s.Text.Visibility = Visibility.Visible;
+                    s.Text.Text = t;
+                    s.Text.FontSize = 13;
+                    s.Text.Foreground = B(sh.RecordingPaused ? Amber : Red);
+                    if (t.Length > 4) s.Button.Width = s.Grid.Width = 62;
+                    tip = $"Идёт запись · {t}{(sh.RecordingPaused ? " (пауза)" : "")}";
+                }
+                break;
+            }
+            case "bin":
+            {
+                var bin = _s.Bin;
+                s.Icon.Glyph = "\uE74D";
+                s.Button.Opacity = bin.Empty ? 0.45 : 1;
+                tip = bin.Empty ? "Корзина пуста" : $"Корзина: {bin.Summary}";
+                break;
+            }
+            case "shelf":
+            {
+                var n = _s.Shelf.Count;
+                s.Icon.Glyph = "\uE7B8";
+                s.Button.Opacity = n == 0 ? 0.45 : 1;
+                if (n > 0) { s.Count.Text = n > 99 ? "99+" : n.ToString(); s.Count.Visibility = Visibility.Visible; }
+                tip = n == 0 ? "Полка пуста — перетащи файл к верхнему краю" : $"Полка · {n}";
+                break;
+            }
             default:
-                s.Icon.Glyph = "";
-                tip = "Настройки острова";
+                s.Icon.Glyph = "\uE713";
+                tip = "Настройки";
                 break;
         }
         AutomationProperties.SetName(s.Button, tip);

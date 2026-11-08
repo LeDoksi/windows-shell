@@ -23,6 +23,9 @@ public abstract class IslandWidget
     /// Ширина тела с этим виджетом, DIP.
     public virtual double Width => 560;
 
+    /// Большое состояние («лист»): размер тела в DIP на этом экране. null — обычный виджет.
+    public virtual (double W, double H)? Sheet(WindowsShell.Native.Screen screen) => null;
+
     public FrameworkElement View => Root;
 
     public bool IsOpen => _open;
@@ -83,6 +86,10 @@ public static class IslandWidgets
         "media" => new MediaWidget(s, body),
         "net" => new NetWidget(s, body),
         "charge" => new ChargeWidget(s, body),
+        "shots" => new ShotsWidget(s, body),
+        "bin" => new BinWidget(s, body),
+        "shelf" => new ShelfWidget(s, body),
+        "settings" => new SettingsWidget(s, body),
         _ => new LangWidget(s, body),
     };
 }

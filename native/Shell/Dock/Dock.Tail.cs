@@ -214,7 +214,7 @@ public sealed partial class Dock
         Show(_mediaSlot, full && dock("media") && _s.Config.TempWidgetVisible("media", media != null));
         var shots = _s.Shots;
         var recording = shots.Recording;
-        Show(_shotsSlot, full && shots.Enabled && (shots.Settings.Icon || recording));
+        Show(_shotsSlot, full && dock("shots") && shots.Enabled && (shots.Settings.Icon || recording));
         var shotsW = recording ? 74 : 36;
         if (_shotsSlot.W != shotsW)
         {
@@ -226,7 +226,7 @@ public sealed partial class Dock
         _shotsRec.Visibility = recording ? Visibility.Visible : Visibility.Collapsed;
         if (recording) OnShotsTick();
         // Корзина: пока не пустая и пока из Проводника тащат файлы (чтобы было куда бросить).
-        Show(_binSlot, full && _s.Config.TempWidgetVisible("bin", !_s.Bin.Empty || _binDrag));
+        Show(_binSlot, full && dock("bin") && _s.Config.TempWidgetVisible("bin", !_s.Bin.Empty || _binDrag));
         // Заряд: пока у какого-то устройства не выше порога.
         var low = _s.Charge.Low;
         Show(_chargeSlot, full && dock("charge") && _s.Config.TempWidgetVisible("charge", low.Count > 0));

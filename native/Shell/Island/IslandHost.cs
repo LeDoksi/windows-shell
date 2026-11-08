@@ -25,6 +25,10 @@ public sealed class IslandHost
     bool _rendering, _lastHeld, _lastEsc, _started;
     long _lastFrame;
     string _lastLang = "";
+    readonly RecordRoute _recRoute = new();
+    string? _badgeOn;
+    bool _badgeAway, _badgePaused;
+    TextBlock? _badgeTime;
 
     public IslandHost(Services s) => _s = s;
 
@@ -43,7 +47,11 @@ public sealed class IslandHost
         _s.Network.Changed += Indicators;
         _s.Media.Changed += Indicators;
         _s.Charge.Changed += Indicators;
-        _s.Shots.Changed += Indicators;
+        _s.Shots.Changed += () => { Indicators(); UpdateRecording(); };
+        _s.Shots.Tick += () => { Indicators(); UpdateRecording(); };
+        _s.Shots.IslandSaved = ShotSaved;
+        _s.Bin.Changed += Indicators;
+        _s.Shelf.Changed += Indicators;
         _s.Notifications.Changed += Indicators;
         _lastLang = _s.Language.Current.Short;
         _s.Language.Changed += () => { Indicators(); LanguageChanged(); };
@@ -63,6 +71,7 @@ public sealed class IslandHost
         if (_running)
         {
             Sync();
+            UpdateRecording();
             Log.Write($"остров: включён, мониторов {_bodies.Count}");
         }
         else
@@ -103,6 +112,9 @@ public sealed class IslandHost
                 }
             }
             PublishZones();
+            // Пилюля записи могла быть на пропавшем мониторе.
+            _badgeOn = null;
+            UpdateRecording();
         }
         catch (Exception e) { Log.Error("остров: мониторы", e); }
     }
@@ -118,13 +130,7 @@ public sealed class IslandHost
 
     public void SlotClicked(IslandBody body, string id)
     {
-        if (id == "settings")
-        {
-            body.Sleep(restoreFocus: false);
-            // Настройки внутри острова — волна 2; пока окно настроек на странице «Остров».
-            _s.OpenSettings("island");
-            return;
-        }
+        // ⚙ — настройки-«лист» внутри острова (П14).
         body.OpenWidget(id, byUser: true);
     }
 
@@ -190,6 +196,7 @@ public sealed class IslandHost
     {
         var full = _full.Full;
         foreach (var (name, b) in _bodies) b.SetFull(full.Contains(name));
+        UpdateRecording();
         Log.Write($"остров: fullscreen — {(full.Count == 0 ? "нигде" : string.Join(", ", full))}{(_full.Exclusive is { } x ? $", эксклюзив на {x}" : "")}");
     }
 
@@ -278,6 +285,138 @@ public sealed class IslandHost
         body.ShowPill(row, $"{d.Name} · {percent} %", 4000, () => body.OpenWidget("charge", byUser: true));
         Log.Write($"остров: заряд «{d.Name} {percent} %» на {screen}");
         return true;
+    }
+
+    // ---------- запись и снимки (волна 2) ----------
+
+    int ScreenNumber(string name)
+    {
+        var all = _s.Monitors.All;
+        for (var i = 0; i < all.Count; i++) if (all[i].Name == name) return i + 1;
+        return 0;
+    }
+
+    /// Пилюля идущей записи (решение E22): на записываемом экране, в эксклюзиве — на соседнем
+    /// с подписью и стрелкой. Привязана к самой записи, не к тому, видна ли игра.
+    void UpdateRecording()
+    {
+        if (!_running) return;
+        try
+        {
+            var shots = _s.Shots;
+            if (!shots.Recording || shots.RecordingScreen is not { } recorded)
+            {
+                if (_badgeOn != null) Log.Write("остров: запись — пилюля убрана");
+                foreach (var b in _bodies.Values) b.SetBadge(null, null);
+                _recRoute.Reset();
+                _badgeOn = null;
+                _badgeTime = null;
+                return;
+            }
+            var screens = _s.Monitors.All.Select(m => m.Name).ToList();
+            var target = _recRoute.Step(Environment.TickCount64, recorded, _full.Exclusive, _full.Full.ToHashSet(), screens);
+            if (target is null || !_bodies.TryGetValue(target, out var body)) return;
+            var away = _recRoute.Away;
+            var paused = shots.RecordingPaused;
+            if (target != _badgeOn || away != _badgeAway || paused != _badgePaused || _badgeTime is null)
+            {
+                foreach (var (name, b) in _bodies) if (name != target) b.SetBadge(null, null);
+                Log.Write($"остров: запись экрана {recorded} — пилюля на {target}{(away ? " (эксклюзив, со стрелкой)" : "")}");
+                _badgeOn = target;
+                _badgeAway = away;
+                _badgePaused = paused;
+                body.SetBadge(RecordBadge(target, recorded, away, paused), () => body.OpenWidget("shots", byUser: true));
+            }
+            _badgeTime!.Text = Shots.ShotsService.Length(shots.RecordingTime);
+            body.SetBadge(body.BadgeContent, () => body.OpenWidget("shots", byUser: true));
+        }
+        catch (Exception e) { Log.Error("остров: пилюля записи", e); }
+    }
+
+    UIElement RecordBadge(string on, string recorded, bool away, bool paused)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Padding = new Thickness(14, 5, 14, 7) };
+        row.Children.Add(Text(paused ? "❚❚" : "●", 13, paused ? Amber : Red, bold: true));
+        _badgeTime = Text("0:00", 13, paused ? Amber : Red, bold: true);
+        row.Children.Add(_badgeTime);
+        if (away)
+        {
+            row.Children.Add(Text($"· пишется экран {ScreenNumber(recorded)}", 13, Ink));
+            var from = _s.Monitors.ByName(on);
+            var to = _s.Monitors.ByName(recorded);
+            if (from != null && to != null)
+            {
+                var dir = RecordRoute.Direction(new RectI(from.Bounds.Left, from.Bounds.Top, from.Bounds.Right, from.Bounds.Bottom),
+                    new RectI(to.Bounds.Left, to.Bounds.Top, to.Bounds.Right, to.Bounds.Bottom));
+                row.Children.Add(Glyph(dir switch { Arrow.Left => "\uE72B", Arrow.Right => "\uE72A", Arrow.Up => "\uE74A", _ => "\uE74B" }, 14, Ink));
+            }
+        }
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(row, away ? $"Идёт запись экрана {ScreenNumber(recorded)}" : "Идёт запись экрана");
+        return row;
+    }
+
+    /// Результат снимка (пилюля, эскиз Events). true — остров взял событие на себя.
+    bool ShotSaved(Shots.ShotItem item, string caption)
+    {
+        if (!_running || !_s.Config.Island.EventOn(EventKind.Shot)) return false;
+        if (Route(EventKind.Shot) is { } screen && _bodies.TryGetValue(screen, out var body))
+        {
+            body.ShowPill(ShotPill(item, caption, body), caption, 4500, () => body.OpenWidget("shots", byUser: true));
+            Log.Write($"остров: {caption} на {screen}");
+        }
+        else Log.Write($"остров: {caption} — тихо, в галерее (игра на весь экран)");
+        return true;
+    }
+
+    UIElement ShotPill(Shots.ShotItem item, string caption, IslandBody body)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12, Padding = new Thickness(12, 10, 12, 12) };
+        var image = new Image { Stretch = Stretch.UniformToFill };
+        var thumb = new Border { Width = 72, Height = 44, CornerRadius = new CornerRadius(8), Background = B(Group), Child = image };
+        _ = LoadThumb(item, image);
+        // Миниатюру можно сразу перетащить в чат или папку.
+        Draggable(thumb, () => item.Path, () => { body.Sleep(restoreFocus: false); _s.Shots.Edit(item); }, () => body.Sleep(restoreFocus: false));
+        ToolTipService.SetToolTip(thumb, "Перетащи в любое окно");
+        row.Children.Add(thumb);
+        var lines = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 260 };
+        lines.Children.Add(Text(item.IsImage ? "Снимок сохранён" : caption, 14, bold: true));
+        lines.Children.Add(Text(item.IsImage ? "и скопирован в буфер" : "в «Видео\\Записи экрана»", 12, Sub));
+        row.Children.Add(lines);
+        var edit = Btn(item.IsImage ? "Изменить" : "Открыть", click: () => { body.Sleep(restoreFocus: false); _s.Shots.Edit(item); });
+        edit.PointerPressed += (_, e) => e.Handled = true;
+        row.Children.Add(edit);
+        return row;
+    }
+
+    static async Task LoadThumb(Shots.ShotItem item, Image image)
+    {
+        try { image.Source = await Shots.ShotImages.Load(item, 144); }
+        catch { }
+    }
+
+    /// Бросили файлы в режиме приёма (П2).
+    public void Dropped(IslandBody body, DropTarget target, List<string> paths)
+    {
+        var n = paths.Count;
+        string text;
+        if (target == DropTarget.Bin)
+        {
+            _s.Bin.Delete(paths);
+            text = $"В корзине · {Tail.RecycleBin.Objects(n)}";
+        }
+        else
+        {
+            var added = _s.Shelf.Add(paths);
+            text = added == n ? $"На полке · +{n}" : $"На полке · +{added} (остальное уже там)";
+        }
+        Log.Write($"остров: бросили {n} → {(target == DropTarget.Bin ? "корзина" : "полка")}");
+        var widget = target == DropTarget.Bin ? "bin" : "shelf";
+        if (body.Mode == BodyMode.Widget && body.Widget?.Id == widget) return; // виджет и так открыт — он обновится сам
+        body.Sleep(restoreFocus: false);
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Padding = new Thickness(16, 8, 18, 10) };
+        row.Children.Add(Glyph(target == DropTarget.Bin ? "\uE74D" : "\uE7B8", 18));
+        row.Children.Add(Text(text, 14, bold: true));
+        body.ShowPill(row, text, 2200, () => body.OpenWidget(widget, byUser: true));
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
