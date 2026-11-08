@@ -47,10 +47,11 @@ public static class SelfTest
 
     static void Run(Action<string> say, Action<bool, string> check)
     {
-        var shell = Process.GetProcessesByName("WindowsShellNative").Where(p => p.Id != Environment.ProcessId).ToList();
-        check(shell.Count == 1, $"оболочка запущена (процессов: {shell.Count})");
-        if (shell.Count == 0) return;
-        var proc = shell[0];
+        // Рядом с оболочкой всегда работает её сторож (тот же exe): оболочка — процесс с окнами острова.
+        var all = Process.GetProcessesByName("WindowsShellNative").Where(p => p.Id != Environment.ProcessId).ToList();
+        var proc = all.FirstOrDefault(p => Windows((uint)p.Id).Count > 0);
+        check(proc != null, $"оболочка с островом запущена (процессов WindowsShellNative: {all.Count})");
+        if (proc is null) return;
 
         var screens = Monitors.Snapshot();
         var islands = Windows((uint)proc.Id);
@@ -130,7 +131,8 @@ public static class SelfTest
         say("== Журнал оболочки (остров)");
         try
         {
-            var lines = ReadTail(Log.File, 400).Where(l => l.Contains("остров") && !l.Contains("проверка острова")).TakeLast(15).ToList();
+            // Только строки самой оболочки («остров: …»), без проб и этой проверки.
+            var lines = ReadTail(Log.File, 400).Where(l => l.Contains(" остров: ") || l.Contains("ОШИБКА в остров")).TakeLast(15).ToList();
             foreach (var l in lines) say($"   {l}");
             var errors = lines.Count(l => l.Contains("ОШИБКА"));
             check(errors == 0, $"ошибок острова в журнале нет ({errors})");
