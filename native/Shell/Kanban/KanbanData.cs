@@ -71,21 +71,14 @@ public sealed class KComment
     public DateTimeOffset CreatedAt { get; set; }
 }
 
-/// Статусы канбана: как на сайте.
+/// Статусы канбана: как на сайте (подписи — Board.StatusName).
 public static class KStatus
 {
     public const string Backlog = "backlog", Hold = "hold", Doing = "doing", Waiting = "waiting", Done = "done";
-    public static readonly string[] All = [Doing, Waiting, Backlog, Hold, Done];
+    /// Порядок сайта: Hold · Backlog · В работе · Нужно от тебя · Готово (П10).
+    public static readonly string[] All = Board.Columns;
 
-    public static string Name(string status) => status switch
-    {
-        Doing => "В работе",
-        Waiting => "Ждёт",
-        Backlog => "Бэклог",
-        Hold => "Пауза",
-        Done => "Готово",
-        _ => status,
-    };
+    public static string Name(string status) => Board.StatusName(status);
 }
 
 /// Ошибка, которую можно показать как есть (по-русски).
