@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using WindowsShell.Charge;
@@ -31,6 +32,11 @@ public sealed class IslandHost
     string? _badgeOn;
     bool _badgeAway, _badgePaused;
     TextBlock? _badgeTime;
+    // Закреплённый монитор ПК (П8): на каком экране строка и её цифры.
+    string? _pinOn, _pinKey;
+    UIElement? _pinRow;
+    readonly Dictionary<string, TextBlock> _pinValues = [];
+    long _pinPainted;
 
     public IslandHost(Services s) => _s = s;
 
@@ -55,6 +61,8 @@ public sealed class IslandHost
         _s.Bin.Changed += Indicators;
         _s.Shelf.Changed += Indicators;
         _s.Notifications.Changed += Indicators;
+        _s.Kanban.Changed += Indicators;
+        _s.Perf.Updated += PinTick;
         _lastLang = _s.Language.Current.Short;
         _s.Language.Changed += () => { Indicators(); LanguageChanged(); };
         _selfCheckMsg = RegisterWindowMessageW(SelfTest.SelfCheckMessage);
@@ -68,7 +76,7 @@ public sealed class IslandHost
     {
         if (Enabled == _running)
         {
-            if (_running) foreach (var b in _bodies.Values) b.RefreshIndicators();
+            if (_running) { foreach (var b in _bodies.Values) b.RefreshIndicators(); UpdatePinned(); }
             return;
         }
         _running = Enabled;
@@ -83,6 +91,7 @@ public sealed class IslandHost
             foreach (var b in _bodies.Values) b.Dispose();
             _bodies.Clear();
             _zones = [];
+            UpdatePinned();
             Log.Write("остров: выключен");
         }
     }
@@ -119,6 +128,8 @@ public sealed class IslandHost
             // Пилюля записи могла быть на пропавшем мониторе.
             _badgeOn = null;
             UpdateRecording();
+            _pinOn = null;
+            UpdatePinned();
         }
         catch (Exception e) { Log.Error("остров: мониторы", e); }
     }
@@ -311,7 +322,7 @@ public sealed class IslandHost
             if (!shots.Recording || shots.RecordingScreen is not { } recorded)
             {
                 if (_badgeOn != null) Log.Write("остров: запись — пилюля убрана");
-                foreach (var b in _bodies.Values) b.SetBadge(null, null);
+                foreach (var b in _bodies.Values) b.SetBadge("rec", null, null);
                 _recRoute.Reset();
                 _badgeOn = null;
                 _badgeTime = null;
@@ -324,15 +335,15 @@ public sealed class IslandHost
             var paused = shots.RecordingPaused;
             if (target != _badgeOn || away != _badgeAway || paused != _badgePaused || _badgeTime is null)
             {
-                foreach (var (name, b) in _bodies) if (name != target) b.SetBadge(null, null);
+                foreach (var (name, b) in _bodies) if (name != target) b.SetBadge("rec", null, null);
                 Log.Write($"остров: запись экрана {recorded} — пилюля на {target}{(away ? " (эксклюзив, со стрелкой)" : "")}");
                 _badgeOn = target;
                 _badgeAway = away;
                 _badgePaused = paused;
-                body.SetBadge(RecordBadge(target, recorded, away, paused), () => body.OpenWidget("shots", byUser: true));
+                body.SetBadge("rec", RecordBadge(target, recorded, away, paused), () => body.OpenWidget("shots", byUser: true));
             }
             _badgeTime!.Text = Shots.ShotsService.Length(shots.RecordingTime);
-            body.SetBadge(body.BadgeContent, () => body.OpenWidget("shots", byUser: true));
+            body.SetBadge("rec", body.BadgeContent("rec"), () => body.OpenWidget("shots", byUser: true));
         }
         catch (Exception e) { Log.Error("остров: пилюля записи", e); }
     }
@@ -423,6 +434,94 @@ public sealed class IslandHost
         body.ShowPill(row, text, 2200, () => body.OpenWidget(widget, byUser: true));
     }
 
+    // ---------- закреплённый монитор ПК (волна 3, П8) ----------
+
+    /// Строка закрепления на своём экране; экрана нет — закрепление спит, строки нигде нет.
+    void UpdatePinned()
+    {
+        try
+        {
+            var perf = _s.Perf;
+            var pinned = _running ? perf.Settings.PinScreen : null;
+            var (screen, sleeping) = PinPlace.Where(pinned, _s.Monitors.All.Select(m => m.Name).ToList());
+            var key = string.Join(",", perf.Settings.PinItems) + "|" + (perf.Game != null);
+            if (screen != _pinOn || key != _pinKey || _pinRow is null)
+            {
+                foreach (var (name, b) in _bodies) if (name != screen) b.SetBadge("pin", null, null);
+                if (screen != _pinOn)
+                    Log.Write(screen != null ? $"остров: монитор ПК закреплён на {screen}"
+                        : sleeping ? $"остров: закрепление спит — экрана {pinned} сейчас нет" : _pinOn != null ? "остров: монитор ПК откреплён" : "остров: монитор ПК не закреплён");
+                _pinOn = screen;
+                _pinKey = key;
+                _pinRow = screen is null ? null : PinRow(perf.Settings.PinItems, perf.Game != null);
+            }
+            // Пока строка видна, датчики нужны (П8).
+            perf.Hold(this, screen != null);
+            if (screen is null || _pinRow is null || !_bodies.TryGetValue(screen, out var body)) return;
+            PaintPin();
+            var target = body;
+            body.SetBadge("pin", _pinRow, () => target.OpenWidget("perf", byUser: true, focus: false));
+        }
+        catch (Exception e) { Log.Error("остров: закреплённый монитор", e); }
+    }
+
+    /// Строка: скрепка и выбранные показатели (эскиз Pinned). Ширина цифр с запасом — строка не дёргается.
+    UIElement PinRow(List<string> items, bool game)
+    {
+        _pinValues.Clear();
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 14, Padding = new Thickness(14, 6, 16, 8) };
+        row.Children.Add(Glyph("\uE718", 14, Windows.UI.Color.FromArgb(255, 0x4C, 0xC2, 0xFF)));
+        foreach (var group in new[] { ("fps", "FPS"), ("cpu", "CPU"), ("gpu", "GPU"), ("ram", "RAM"), ("vram", "VRAM") })
+        {
+            var (id, label) = group;
+            var parts = items.Where(i => i == id || i == id + "temp").ToList();
+            if (parts.Count == 0 || (id == "fps" && !game)) continue;
+            var cell = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            cell.Children.Add(Text(label, 13, Sub));
+            foreach (var part in parts)
+            {
+                var t = Text("—", part.EndsWith("temp") ? 13 : 15, part.EndsWith("temp") ? Sub : Ink, bold: !part.EndsWith("temp"));
+                t.MinWidth = part switch { "cpu" or "gpu" => 38, "fps" => 30, "ram" or "vram" => 50, _ => 26 };
+                _pinValues[part] = t;
+                cell.Children.Add(t);
+            }
+            row.Children.Add(cell);
+        }
+        AutomationProperties.SetName(row, "Монитор ПК закреплён — нажми, чтобы раскрыть");
+        return row;
+    }
+
+    void PinTick()
+    {
+        if (_pinOn is null || _pinRow is null) return;
+        var now = Environment.TickCount64;
+        if (now - _pinPainted < 900) return;
+        _pinPainted = now;
+        // Игра появилась или пропала — состав строки другой.
+        if (_pinKey != string.Join(",", _s.Perf.Settings.PinItems) + "|" + (_s.Perf.Game != null)) { UpdatePinned(); return; }
+        PaintPin();
+    }
+
+    void PaintPin()
+    {
+        var p = _s.Perf;
+        var smp = p.Last;
+        var ru = System.Globalization.CultureInfo.GetCultureInfo("ru-RU");
+        string Gb(double b) => (b / (1024.0 * 1024 * 1024)).ToString("0.0", ru) + " ГБ";
+        foreach (var (id, t) in _pinValues)
+            t.Text = id switch
+            {
+                "fps" => p.Fps is { } f ? $"{f:0}" : "—",
+                "cpu" => smp is null ? "—" : $"{smp.Cpu:0} %",
+                "cputemp" => smp?.CpuTemp is { } ct ? $"{ct:0}°" : "",
+                "gpu" => smp?.Gpu is { } g ? $"{g:0} %" : "—",
+                "gputemp" => smp?.GpuTemp is { } gt ? $"{gt:0}°" : "",
+                "ram" => smp is null ? "—" : Gb(smp.RamUsed),
+                "vram" => smp?.VramUsed is { } v ? Gb(v) : "—",
+                _ => "",
+            };
+    }
+
     // ---------- самопроверка изнутри (--island-test, волна 2) ----------
 
     /// Открыть по очереди виджеты волны 2 и все страницы листа настроек, показать пилюлю
@@ -486,7 +585,7 @@ public sealed class IslandHost
             if (!_s.Shots.Recording)
             {
                 var badge = RecordBadge(body.Screen.Name, body.Screen.Name, away: false, paused: false);
-                body.SetBadge(badge, null);
+                body.SetBadge("rec", badge, null);
                 await Task.Delay(700);
                 Check(body.Mode == BodyMode.Badge, "пилюля записи висит вместо кромки");
                 body.Wake();
@@ -494,7 +593,7 @@ public sealed class IslandHost
                 body.Sleep(restoreFocus: false);
                 await Task.Delay(700);
                 Check(body.Mode == BodyMode.Badge, "после ленты тело вернулось в пилюлю записи");
-                body.SetBadge(null, null);
+                body.SetBadge("rec", null, null);
                 _badgeTime = null;
                 await Task.Delay(500);
                 Check(body.Mode == BodyMode.Rest, "пилюля убрана — снова кромка");

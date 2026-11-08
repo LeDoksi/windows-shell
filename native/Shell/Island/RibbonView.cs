@@ -177,6 +177,7 @@ public sealed class RibbonView
         s.Text.Foreground = B(Ink);
         s.Text.FontSize = 14;
         s.Count.Visibility = Visibility.Collapsed;
+        s.Count.Foreground = B(Sub);
         s.Button.Width = s.Grid.Width = 44;
         switch (s.Id)
         {
@@ -268,6 +269,26 @@ public sealed class RibbonView
                 s.Button.Opacity = n == 0 ? 0.45 : 1;
                 if (n > 0) { s.Count.Text = n > 99 ? "99+" : n.ToString(); s.Count.Visibility = Visibility.Visible; }
                 tip = n == 0 ? "Полка пуста — перетащи файл к верхнему краю" : $"Полка · {n}";
+                break;
+            }
+            case "perf":
+            {
+                var p = _s.Perf;
+                s.Icon.Glyph = "\uE9D9";
+                var smp = p.Last;
+                tip = smp is null ? "Монитор ПК" : $"Монитор ПК · ЦП {smp.Cpu:0} %{(smp.Gpu is { } g ? $" · ГП {g:0} %" : "")}";
+                if (p.Game is { } game) tip += $" · {game.Name}{(p.Fps is { } f ? $" {f:0} FPS" : "")}";
+                if (p.Settings.PinScreen != null) tip += " · закреплён";
+                break;
+            }
+            case "kanban":
+            {
+                var k = _s.Kanban;
+                s.Icon.Glyph = "\uE9D5";
+                // П10, П22: число «Нужно от тебя» (не «В работе»), при нуле скрыто.
+                var n = k.Api.SignedIn ? k.Waiting : 0;
+                if (n > 0) { s.Count.Text = n > 99 ? "99+" : n.ToString(); s.Count.Visibility = Visibility.Visible; s.Count.Foreground = B(Theme.Accent); }
+                tip = !k.Api.SignedIn ? "Канбан: войди через Google" : n > 0 ? $"Канбан · нужно от тебя {n}" : "Канбан · от тебя ничего не нужно";
                 break;
             }
             default:

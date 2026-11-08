@@ -20,11 +20,12 @@ public sealed class IslandSection
 /// Чтение секции острова с порядком и соответствием значкам дока.
 public sealed class IslandSettings(IslandSection s)
 {
-    /// Виджеты острова (волны 1–2), порядок по умолчанию (медиа — постоянное место слева, В3).
-    public static readonly string[] Known = ["media", "charge", "net", "sound", "lang", "shots", "bin", "shelf"];
+    /// Виджеты острова (волны 1–3), порядок по умолчанию (медиа — постоянное место слева, В3).
+    public static readonly string[] Known = ["media", "charge", "net", "sound", "lang", "shots", "bin", "shelf", "perf", "kanban"];
 
-    /// Виджеты, у которых есть значок в доке (их можно перенести, П24). Полки в доке нет.
-    public static readonly string[] Movable = ["media", "charge", "net", "sound", "lang", "shots", "bin"];
+    /// Виджеты, у которых есть старый доступ (значок в доке, у монитора ПК — окно): их можно
+    /// перенести (П24). Полки в доке нет.
+    public static readonly string[] Movable = ["media", "charge", "net", "sound", "lang", "shots", "bin", "perf", "kanban"];
 
     public static string Title(string id) => id switch
     {
@@ -36,6 +37,8 @@ public sealed class IslandSettings(IslandSection s)
         "shots" => "Снимки",
         "bin" => "Корзина",
         "shelf" => "Полка",
+        "perf" => "Монитор ПК",
+        "kanban" => "Канбан",
         "settings" => "Настройки",
         _ => id,
     };
@@ -45,6 +48,7 @@ public sealed class IslandSettings(IslandSection s)
     {
         "net" => "network",
         "lang" => "language",
+        "perf" => "perf-window",
         _ => id,
     };
 

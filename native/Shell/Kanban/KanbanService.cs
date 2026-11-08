@@ -75,7 +75,10 @@ public sealed class KanbanService
         messages.Resumed += () => { if (_timer.IsRunning) _ = Refresh(); };
     }
 
-    /// Число задач «В работе» во всех проектах (на значке).
+    /// Число «Нужно от тебя» на значке (П10): неархивные waiting в неархивных проектах.
+    public int Waiting => Board.WaitingCount(Items, Projects);
+
+    /// Число задач «В работе» во всех проектах.
     public int Doing => Items.Count(i => !i.Archived && i.Status == KStatus.Doing && Projects.Any(p => p.Id == i.ProjectId));
 
     /// Зовётся при каждой смене конфига и при запуске.

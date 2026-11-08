@@ -90,6 +90,7 @@ public static class IslandWidgets
         "bin" => new BinWidget(s, body),
         "shelf" => new ShelfWidget(s, body),
         "settings" => new SettingsWidget(s, body),
+        "perf" => new PerfWidget(s, body),
         _ => new LangWidget(s, body),
     };
 }
