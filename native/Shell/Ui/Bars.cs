@@ -233,7 +233,9 @@ public sealed class Bars
         var fg = GetForegroundWindow();
         if (fg == IntPtr.Zero || ProcessId(fg) == (uint)Environment.ProcessId) return set;
         var cls = ClassName(fg);
-        if (cls is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd") return set;
+        // Пуск и поиск Windows по клавише Win, переключатель задач: впереди на миг, игра не
+        // «снимается» и не «появляется» (E22: окно Explorer по Win считалось «весь экран»).
+        if (Island.Core.ShellUi.Is(cls, ProcNames.Of(fg))) return cls is "Progman" or "WorkerW" ? set : _fullscreen;
         if (!GetWindowRect(fg, out var r)) return set;
         var screen = screens.FirstOrDefault(s => s.Contains((r.Left + r.Right) / 2, (r.Top + r.Bottom) / 2));
         if (screen is null) return set;
@@ -250,7 +252,8 @@ public sealed class Bars
         var style = (long)GetWindowLongPtrW(fg, GWL_STYLE);
         var zoomed = IsZoomed(fg);
         var resizable = (style & WS_THICKFRAME) != 0;
-        var full = exclusive || (covers && (!zoomed || !resizable));
+        // Эксклюзив общий на весь сеанс: «полным» считается только окно-владелец (E22, И2).
+        var full = _exclusive.Judge((long)fg, exclusive, covers, zoomed, resizable);
         if (full) set.Add(screen.Name);
         // В журнал — каждое новое решение по окну, чтобы разбирать «док не выезжает над X».
         var why = $"{cls} стиль {style:X8} развёрнуто {zoomed} весь экран {covers} состояние {state} → {(full ? "полный экран" : "обычное")}";
@@ -262,6 +265,7 @@ public sealed class Bars
 
     IntPtr _lastFg;
     string? _lastWhy;
+    readonly Island.Core.ExclusiveOwner _exclusive = new();
 
     static string ProcessName(IntPtr h)
     {
