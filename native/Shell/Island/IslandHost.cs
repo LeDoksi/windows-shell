@@ -59,6 +59,7 @@ public sealed class IslandHost
         _s.Shots.Changed += () => { Indicators(); UpdateRecording(); };
         _s.Shots.Tick += () => { Indicators(); UpdateRecording(); };
         _s.Shots.IslandSaved = ShotSaved;
+        _s.Shots.IslandOcr = ShowOcr;
         _s.Bin.Changed += Indicators;
         _s.Shelf.Changed += Indicators;
         _s.Notifications.Changed += Indicators;
@@ -484,6 +485,14 @@ public sealed class IslandHost
         }
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(row, away ? $"Идёт запись экрана {ScreenNumber(recorded)}" : "Идёт запись экрана");
         return row;
+    }
+
+    /// Распознанный текст (OCR): «Снимки» с результатом на экране активного окна (в игре — на другом).
+    bool ShowOcr()
+    {
+        if (!_running || Route(EventKind.Shot) is not { } screen || !_bodies.TryGetValue(screen, out var body)) return false;
+        body.OpenWidget("shots", byUser: true);
+        return true;
     }
 
     /// Результат снимка (пилюля, эскиз Events). true — остров взял событие на себя.

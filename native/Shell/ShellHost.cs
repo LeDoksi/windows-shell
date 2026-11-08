@@ -84,6 +84,7 @@ public sealed class ShellHost
         RegisterHotkeys();
         _s.Keys.Start += () => ToggleStart(null);
         _s.Keys.Snapshot += record => { if (record) _s.Shots.Record(); else _s.Shots.Snap(); };
+        _s.Keys.TextShot += () => _s.Shots.SnapText();
         // Миниатюра снимка — над значком «Снимки» в доке монитора хвоста.
         _s.Shots.Anchor = () => _docks.Values.FirstOrDefault(d => d.FullTail)?.ShotsAnchorPx();
         // Предупреждения о заряде в игре: сигнал и плашка на мониторе с полноэкранной игрой.

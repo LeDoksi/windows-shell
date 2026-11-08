@@ -7,10 +7,11 @@ using Color = Windows.UI.Color;
 
 namespace WindowsShell.Island.Widgets;
 
-/// Снимки и запись в острове (эскиз ShotsOcr, без OCR — это волна 4). Сверху — «Снимок» и
-/// «Запись»; во время записи — управление ею (стоп, пауза, микрофон, звук системы). Ниже —
-/// галерея: сегодня или всё за 3 дня, 4 в ряд; клик выбирает, у выбранного — действия;
-/// миниатюру можно перетащить в любое окно (StartDragAsync).
+/// Снимки и запись в острове (эскиз ShotsOcr). Сверху — «Снимок», «Запись» и «Текст»; во время
+/// записи — управление ею (стоп, пауза, микрофон, звук системы). Ниже — галерея: сегодня или
+/// всё за 3 дня, 4 в ряд; клик выбирает, у выбранного — действия; миниатюру можно перетащить
+/// в любое окно (StartDragAsync). Распознанный текст (OCR, волна 4) сначала виден здесь: его
+/// можно поправить и только потом скопировать.
 public sealed class ShotsWidget(Services s, IslandBody body) : IslandWidget(s, body)
 {
     const int Cols = 4;
@@ -26,9 +27,12 @@ public sealed class ShotsWidget(Services s, IslandBody body) : IslandWidget(s, b
     public override string Id => "shots";
     public override double Width => 602;
 
+    TextBox? _ocrBox;
+
     protected override void OnOpen()
     {
         S.Shots.Changed += Later;
+        S.Shots.OcrChanged += Later;
         S.Shots.Tick += OnTick;
         S.Shots.Refresh();
     }
@@ -36,7 +40,17 @@ public sealed class ShotsWidget(Services s, IslandBody body) : IslandWidget(s, b
     protected override void OnClose()
     {
         S.Shots.Changed -= Later;
+        S.Shots.OcrChanged -= Later;
         S.Shots.Tick -= OnTick;
+        // Закрыли остров, не скопировав, — результат больше не нужен.
+        S.Shots.DropOcr();
+        _ocrBox = null;
+    }
+
+    public override void FocusFirst()
+    {
+        if (_ocrBox != null) { _ocrBox.Focus(FocusState.Programmatic); return; }
+        base.FocusFirst();
     }
 
     void OnTick() => S.Queue.TryEnqueue(() =>
@@ -48,6 +62,12 @@ public sealed class ShotsWidget(Services s, IslandBody body) : IslandWidget(s, b
     {
         var shots = S.Shots;
         _time = null;
+        _ocrBox = null;
+        if (shots.Ocr is { } job)
+        {
+            BuildOcr(job);
+            return;
+        }
         if (!shots.Enabled)
         {
             Root.Children.Add(Header("Снимки", out _));
@@ -62,10 +82,14 @@ public sealed class ShotsWidget(Services s, IslandBody body) : IslandWidget(s, b
             var big = new Grid { ColumnSpacing = 8 };
             big.ColumnDefinitions.Add(new ColumnDefinition());
             big.ColumnDefinitions.Add(new ColumnDefinition());
-            big.Children.Add(Big("Снимок", "PrtSc · область, окно, экран", Group, Ink, () => Start(record: false)));
+            big.ColumnDefinitions.Add(new ColumnDefinition());
+            big.Children.Add(Big("Снимок", "PrtSc · область, окно", Group, Ink, () => Start(record: false)));
             var rec = Big("● Запись", "Shift+PrtSc", RecBg, RedText, () => Start(record: true));
             Grid.SetColumn(rec, 1);
             big.Children.Add(rec);
+            var text = Big("Текст", "Ctrl+PrtSc · с экрана", Group, Ink, StartText);
+            Grid.SetColumn(text, 2);
+            big.Children.Add(text);
             Root.Children.Add(big);
         }
 
@@ -104,6 +128,76 @@ public sealed class ShotsWidget(Services s, IslandBody body) : IslandWidget(s, b
         t.IsRepeating = false;
         t.Tick += (_, _) => { if (record) S.Shots.Record(); else S.Shots.Snap(); };
         t.Start();
+    }
+
+    void StartText()
+    {
+        Body.Sleep(restoreFocus: true);
+        var t = S.Queue.CreateTimer();
+        t.Interval = TimeSpan.FromMilliseconds(180);
+        t.IsRepeating = false;
+        t.Tick += (_, _) => S.Shots.SnapText();
+        t.Start();
+    }
+
+    /// Результат распознавания: язык, правка, «Копировать» (И6: в буфер только после проверки).
+    void BuildOcr(OcrJob job)
+    {
+        Root.Children.Add(Header("Текст с картинки", out var right));
+        right.Text = job.Source;
+        var langs = Ocr.Languages();
+        if (langs.Count > 1)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            foreach (var (tag, name) in langs)
+            {
+                var on = string.Equals(tag, job.Lang, StringComparison.OrdinalIgnoreCase);
+                var b = Btn((on ? "✓ " : "") + name, click: () => { if (!on) S.Shots.OcrLanguage(tag); });
+                b.Opacity = on ? 1 : 0.65;
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, $"Язык распознавания: {name}{(on ? ", выбран" : "")}");
+                row.Children.Add(b);
+            }
+            Root.Children.Add(row);
+        }
+        if (job.Text.Length == 0)
+        {
+            Root.Children.Add(Text(job.Error ?? "Текст не найден.", 13, AmberText, wrap: true));
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            if (langs.Count == 0) buttons.Children.Add(Btn("Языки Windows ↗", click: () => { Body.Sleep(restoreFocus: false); Apps.Launcher.Open("ms-settings:regionlanguage"); }));
+            buttons.Children.Add(Btn("Ещё раз с экрана", click: () => { S.Shots.DropOcr(); StartText(); }));
+            buttons.Children.Add(Btn("Закрыть", click: () => { S.Shots.DropOcr(); Body.Sleep(); }));
+            Root.Children.Add(buttons);
+            return;
+        }
+        var box = new TextBox
+        {
+            Text = job.Text,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            MinHeight = 120,
+            MaxHeight = 320,
+            FontSize = 14,
+            IsSpellCheckEnabled = false,
+        };
+        ScrollViewer.SetVerticalScrollBarVisibility(box, ScrollBarVisibility.Auto);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, "Распознанный текст, можно поправить");
+        _ocrBox = box;
+        Root.Children.Add(box);
+        var actions = new Grid { ColumnSpacing = 8 };
+        actions.ColumnDefinitions.Add(new ColumnDefinition());
+        actions.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actions.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        actions.Children.Add(Text("Проверь и поправь — в буфер попадёт то, что в поле.", 12, Faint, wrap: true));
+        var cancel = Btn("Отмена", click: () => { S.Shots.DropOcr(); Body.Sleep(); });
+        Grid.SetColumn(cancel, 1);
+        actions.Children.Add(cancel);
+        var copy = Btn("Копировать", primary: true, click: () =>
+        {
+            if (S.Shots.CopyOcr(box.Text)) Body.Sleep();
+        });
+        Grid.SetColumn(copy, 2);
+        actions.Children.Add(copy);
+        Root.Children.Add(actions);
     }
 
     static Button Big(string title, string sub, Color bg, Color fg, Action click)
@@ -221,6 +315,7 @@ public sealed class ShotsWidget(Services s, IslandBody body) : IslandWidget(s, b
         }
         Add("Открыть", () => Apps.Launcher.Open(item.Path));
         if (item.IsImage) Add("Изменить", () => S.Shots.Edit(item));
+        if (item.IsImage) Add("Текст", () => S.Shots.TextOf(item), close: false);
         Add("Копировать", () => S.Shots.Copy(item), close: false);
         Add("Показать в папке", () => S.Shots.Reveal(item));
         Add("Сохранить как…", () => S.Shots.SaveAs(item, Body.Hwnd), close: false);

@@ -318,7 +318,7 @@ public sealed class SettingsPages(Services s, Panel body, Action<Action<ConfigDa
         var shots = _s.Shots.Settings;
         var shotRows = new List<UIElement>
         {
-            Switch("Снимки и запись экрана", "PrtSc — снимок (область, окно или весь монитор), Shift+PrtSc — запись, ещё раз Shift+PrtSc — стоп. Выключено — клавиши работают как в Windows.", shotsOn, on =>
+            Switch("Снимки и запись экрана", "PrtSc — снимок (область, окно или весь монитор), Shift+PrtSc — запись, ещё раз Shift+PrtSc — стоп, Ctrl+PrtSc — текст с экрана (проверяешь в острове и копируешь). Выключено — клавиши работают как в Windows.", shotsOn, on =>
             {
                 Change(_ => _s.Config.Widget("shots").Enabled = on);
                 _rebuild();
