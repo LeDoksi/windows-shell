@@ -128,7 +128,8 @@ public static class SelfTest
             }
             check("подписи как на сайте", string.Join(" · ", Board.Columns.Select(Board.StatusName)) == "Hold · Backlog · В работе · Нужно от тебя · Готово", "");
             say($"     нужно от тебя: {Board.WaitingCount(items, projects)}");
-            if (write) await Write(api, first, check, say);
+            // Пишем в проект самой оболочки (WSH), чтобы не занимать номера в чужих проектах.
+            if (write) await Write(api, projects.FirstOrDefault(p => p.Prefix == "WSH") ?? first, check, say);
             else say("     запись не проверялась (--kanban-test write — создать и удалить проверочные эпик и задачу)");
         }
     }
