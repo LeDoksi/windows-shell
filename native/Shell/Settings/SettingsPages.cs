@@ -634,7 +634,7 @@ public sealed class SettingsPages(Services s, Panel body, Action<Action<ConfigDa
         var k = _s.Kanban;
         var s = k.Settings;
         KanbanBuilt = KanbanState();
-        Add(Card(Switch("Канбан", "Твой канбан с сайта, не копия: что меняешь здесь, сразу видно там, и наоборот. Значок в хвосте дока — быстрая задача, на нём число задач «В работе».",
+        Add(Card(Switch("Канбан", "Твой канбан с сайта, не копия: что меняешь здесь, сразу видно там, и наоборот. Значок в хвосте дока — быстрая задача, на нём число «Нужно от тебя».",
             k.Enabled, on =>
             {
                 Change(_ => _s.Config.Widget("kanban").Enabled = on);
@@ -665,7 +665,7 @@ public sealed class SettingsPages(Services s, Panel body, Action<Action<ConfigDa
         Add(Section("Окно канбана"));
         var rows = new List<UIElement>
         {
-            Switch("Окно канбана", "Доска целиком: слева проекты, колонки, перетаскивание карточек, клик — задача с описанием, шагами и комментариями. Помнит монитор, место и размер.",
+            Switch("Окно канбана", "Доска как на сайте: колонки Hold · Backlog · В работе · Нужно от тебя · Готово, задачи по эпикам, поиск, архив. Клик — задача с описанием, шагами и комментариями. Помнит монитор, место и размер.",
                 s.Window, on => Change(_ => _s.Kanban.Settings.Window = on)),
             Switch("Поверх всех окон", "Выключено — обычное окно.", s.WindowTopmost, on => Change(_ => _s.Kanban.Settings.WindowTopmost = on)),
         };
@@ -683,15 +683,13 @@ public sealed class SettingsPages(Services s, Panel body, Action<Action<ConfigDa
             })));
         }
         rows.Add(Row("Колонки", null, columns));
-        rows.Add(Switch("«Готово» внизу", "Свёрнутая полоса: клик — последние сделанные задачи, туда же можно бросить карточку.", s.ShowDone,
+        rows.Add(Switch("Колонка «Готово»", "Последние пять закрытых, остальные — в архиве (кнопка «Архив» в окне).", s.ShowDone,
             on => Change(_ => _s.Kanban.Settings.ShowDone = on)));
         rows.Add(Row("Карточки", null, Combo(["Обычные", "Компактные"], s.Compact ? 1 : 0, i => _s.Kanban.Settings.Compact = i == 1)));
-        string[] surfaces = [KanbanSettings.SurfaceShell, KanbanSettings.SurfaceGlass, KanbanSettings.SurfaceTint];
-        rows.Add(Row("Фон окна", null, Combo(["Как во всей оболочке", "Стекло", "Тонировка"], Array.IndexOf(surfaces, s.Surface), i => _s.Kanban.Settings.Surface = surfaces[i])));
         Add(Card(rows.ToArray()));
 
         Add(Section("Значок"));
-        Add(Card(Switch("Число задач «В работе»", "Голубой кружок на значке канбана в хвосте дока.", s.Badge, on => Change(_ => _s.Kanban.Settings.Badge = on))));
+        Add(Card(Switch("Число «Нужно от тебя»", "Кружок на значке канбана в доке и в ленте острова.", s.Badge, on => Change(_ => _s.Kanban.Settings.Badge = on))));
         Add(Note("Задачи читаются раз в 15 секунд, пока окно открыто, и раз в 2 минуты для значка. В окне: Ctrl+N — новая задача, F5 — обновить, Esc — закрыть карточку. Правый клик по карточке — перенести в другую колонку."));
     }
 

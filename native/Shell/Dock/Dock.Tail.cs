@@ -236,10 +236,11 @@ public sealed partial class Dock
         _chargeDot.Visibility = low.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (Equals(_tooltipFor, _chargeSlot)) { _tooltipText.Text = SlotTooltip(_chargeSlot); PlaceTooltip(); }
         var kanban = _s.Kanban;
-        Show(_kanbanSlot, full && kanban.Enabled);
-        var doing = kanban.Api.SignedIn && kanban.Settings.Badge ? kanban.Doing : 0;
-        _kanbanCount.Text = doing > 99 ? "99+" : doing.ToString();
-        _kanbanBadge.Visibility = doing > 0 ? Visibility.Visible : Visibility.Collapsed;
+        Show(_kanbanSlot, full && kanban.Enabled && dock("kanban"));
+        // П10: на значке — «Нужно от тебя», не «В работе».
+        var waiting = kanban.Api.SignedIn && kanban.Settings.Badge ? kanban.Waiting : 0;
+        _kanbanCount.Text = waiting > 99 ? "99+" : waiting.ToString();
+        _kanbanBadge.Visibility = waiting > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (Equals(_tooltipFor, _kanbanSlot)) { _tooltipText.Text = SlotTooltip(_kanbanSlot); PlaceTooltip(); }
         Show(_traySlot, full && t.Tray && _s.Tray.Running);
         Show(_netSlot, full && t.Network && dock("network"));
@@ -310,7 +311,7 @@ public sealed partial class Dock
             {
                 var k = _s.Kanban;
                 if (!k.Api.SignedIn) return "Канбан\nКлик — войти";
-                return k.LoadedAt is null ? "Канбан" : $"Канбан · в работе {k.Doing}\nКлик — новая задача";
+                return k.LoadedAt is null ? "Канбан" : $"Канбан · нужно от тебя {k.Waiting}\nКлик — новая задача";
             }
             case "network":
             {

@@ -275,15 +275,79 @@ public sealed class KanbanService
     // ---------- запись ----------
 
     /// Быстрая задача в бэклог.
-    public async Task<KItem> Create(string project, string title, string? epic)
+    public async Task<KItem> Create(string project, string title, string? epic, string type = "task")
     {
         var p = Project(project) ?? throw new KanbanException("Проект не найден, обнови канбан.");
-        var item = await Api.Create(p, title.Trim(), epic);
+        var item = await Api.Create(p, title.Trim(), epic, type);
         if (Items.All(i => i.Id != item.Id)) Items = [.. Items, item];
         Error = null;
         Changed?.Invoke();
         Log.Write($"канбан: создана {item.Id}");
         return item;
+    }
+
+    /// Задача с новым эпиком одним действием (П12): сначала эпик — не создался, задачи нет
+    /// (исключение, черновик остаётся у вызывающего); потом задача в этом эпике.
+    public async Task<KItem> CreateWithEpic(string project, string title, string type, string? epic, string? newEpicTitle)
+    {
+        if (newEpicTitle is { } et && et.Trim().Length > 0)
+        {
+            var p = Project(project) ?? throw new KanbanException("Проект не найден, обнови канбан.");
+            var created = await Api.CreateEpic(p, et.Trim());
+            if (Epics.All(e => e.Id != created.Id)) Epics = [.. Epics, created];
+            Log.Write($"канбан: создан эпик {created.Id}");
+            epic = created.Id;
+        }
+        return await Create(project, title, epic, type);
+    }
+
+    /// Что вернуть по «Отменить» после смены статуса (undoPatch сайта).
+    public sealed record Undo(KItem Item, string Status, double Position, DateTimeOffset? ClosedAt);
+
+    /// Карточку перевели в другую колонку из острова или окна: показать «Отменить».
+    public event Action<KItem, Undo>? Moved;
+
+    /// «Готово» одной кнопкой (П11). Возвращает, что вернуть по «Отменить».
+    public Undo Done(KItem item) => MoveWithUndo(item, KStatus.Done);
+
+    /// Перевести с «Отменить» (галочка, «Вернуть в работу»).
+    public Undo MoveWithUndo(KItem item, string status)
+    {
+        var (st, pos, closed) = Board.Undo(item);
+        var undo = new Undo(item, st, pos, closed);
+        var column = Column(item.ProjectId, status);
+        var position = status == KStatus.Done ? item.Position : PositionAt(column, column.Count);
+        _ = Move(item, status, position);
+        Log.Write($"канбан: {item.Id} → {Board.StatusName(status)}");
+        Moved?.Invoke(item, undo);
+        return undo;
+    }
+
+    /// «Отменить»: статус, место и исходная дата закрытия как были.
+    public Task UndoMove(Undo u)
+    {
+        var fields = new JsonObject { ["status"] = u.Status, ["position"] = u.Position, ["closed_at"] = u.ClosedAt?.ToString("O") };
+        Log.Write($"канбан: {u.Item.Id} — отменено, снова {Board.StatusName(u.Status)}");
+        return Change(u.Item, fields, i => { i.Status = u.Status; i.Position = u.Position; i.ClosedAt = u.ClosedAt; });
+    }
+
+    public Task SetType(KItem item, string type) =>
+        Change(item, new JsonObject { ["type"] = type }, i => i.Type = type);
+
+    /// В архив (как на сайте — у закрытых).
+    public Task Archive(KItem item)
+    {
+        var at = DateTimeOffset.UtcNow;
+        return Change(item, new JsonObject { ["archived_at"] = at.ToString("O") }, i => i.ArchivedAt = at);
+    }
+
+    /// Вернуть из архива (как на сайте: в «В работе»).
+    public Task Restore(KItem item)
+    {
+        var column = Column(item.ProjectId, KStatus.Doing);
+        var position = PositionAt(column, column.Count);
+        return Change(item, new JsonObject { ["status"] = KStatus.Doing, ["archived_at"] = null, ["closed_at"] = null, ["position"] = position },
+            i => { i.Status = KStatus.Doing; i.ArchivedAt = null; i.ClosedAt = null; i.Position = position; });
     }
 
     /// Перенести карточку: статус и место в колонке.
@@ -320,7 +384,7 @@ public sealed class KanbanService
         catch (Exception e)
         {
             if (e is not KanbanException) Log.Write($"канбан: запись {item.Id}: {e}");
-            if (Item(item.Id) is { } now) Restore(now, before);
+            if (Item(item.Id) is { } now) RollBack(now, before);
             Error = e is KanbanException k ? k.Message : "Изменение не сохранилось, подробности в журнале оболочки.";
         }
         finally
@@ -352,8 +416,10 @@ public sealed class KanbanService
         Status = i.Status, Position = i.Position, CreatedBy = i.CreatedBy, UpdatedAt = i.UpdatedAt, ClosedAt = i.ClosedAt, ArchivedAt = i.ArchivedAt,
     };
 
-    static void Restore(KItem to, KItem from)
+    static void RollBack(KItem to, KItem from)
     {
+        to.Type = from.Type;
+        to.ArchivedAt = from.ArchivedAt;
         to.EpicId = from.EpicId;
         to.Title = from.Title;
         to.Status = from.Status;
