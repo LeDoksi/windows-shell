@@ -171,4 +171,41 @@ public static class IslandUi
     public static VariableSizedWrapGrid Wrap() => new() { Orientation = Orientation.Horizontal, ItemHeight = 48, ItemWidth = 176 };
 
     public static SolidColorBrush B(Color c) => Theme.Brush(c);
+
+    /// Элемент, который можно перетащить файлом в другое окно (StartDragAsync, урок PR #43),
+    /// а короткий клик — `click`. `dropped` — файл куда-то бросили.
+    public static void Draggable(UIElement element, Func<string?> path, Action click, Action? dropped = null)
+    {
+        var pressed = false;
+        var at = new Windows.Foundation.Point();
+        element.PointerPressed += (_, e) =>
+        {
+            var p = e.GetCurrentPoint(element);
+            if (!p.Properties.IsLeftButtonPressed) return;
+            pressed = true;
+            at = p.Position;
+            element.CapturePointer(e.Pointer);
+            e.Handled = true;
+        };
+        element.PointerMoved += (_, e) =>
+        {
+            if (!pressed) return;
+            var point = e.GetCurrentPoint(element);
+            var p = point.Position;
+            if (Math.Abs(p.X - at.X) + Math.Abs(p.Y - at.Y) < 6) return;
+            pressed = false;
+            element.ReleasePointerCaptures();
+            if (path() is { } file && File.Exists(file))
+                Shots.FileDrag.Start(element, point, file, ok => { if (ok) dropped?.Invoke(); });
+        };
+        element.PointerReleased += (_, e) =>
+        {
+            if (!pressed) return;
+            pressed = false;
+            element.ReleasePointerCaptures();
+            e.Handled = true;
+            click();
+        };
+        element.PointerCaptureLost += (_, _) => pressed = false;
+    }
 }

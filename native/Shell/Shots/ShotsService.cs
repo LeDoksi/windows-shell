@@ -59,6 +59,9 @@ public sealed class ShotsService
     public IReadOnlyList<ShotItem> Items => _items;
 
     public bool Recording => _rec != null;
+
+    /// Монитор, который пишется (имя, как в Monitors), пока идёт запись.
+    public string? RecordingScreen { get; private set; }
     public TimeSpan RecordingTime => _rec?.Elapsed ?? TimeSpan.Zero;
     public bool RecordingPaused => _rec?.Paused ?? false;
     public bool RecordMic => _rec?.Mic ?? Settings.Mic;
@@ -92,17 +95,17 @@ public sealed class ShotsService
     /// PrtSc: экран замирает, выбираешь область, окно или монитор.
     public async void Snap()
     {
-        if (_busy || Selector.IsOpen) return;
+        if (Skipped("снимок")) return;
         _busy = true;
         try
         {
             _thumb?.Hide();
             Selection? sel;
             D.Bitmap bmp;
-            using (var frozen = Frozen.Capture())
+            using (var frozen = Capture())
             {
                 sel = await Selector.Pick(frozen, _monitors.All, record: false);
-                if (sel is null) return;
+                if (sel is null) { Log.Write("снимок: выбор отменён"); return; }
                 bmp = frozen.Crop(sel.Rect);
             }
             using (bmp)
@@ -129,8 +132,34 @@ public sealed class ShotsService
         }
     }
 
+    /// Нажатие не потеряно молча (И11): если идёт захват или уже открыт выбор — строка в логе.
+    bool Skipped(string what)
+    {
+        if (!_busy && !Selector.IsOpen) return false;
+        Log.Write($"{what}: нажатие пропущено — {(Selector.IsOpen ? "уже открыт выбор области" : "ещё идёт прошлый снимок")}");
+        return true;
+    }
+
+    /// Снимок всех мониторов с отметкой времени в логе.
+    static Frozen Capture()
+    {
+        var t = System.Diagnostics.Stopwatch.StartNew();
+        var f = Frozen.Capture();
+        Log.Write($"снимок: экран захвачен за {t.ElapsedMilliseconds} мс ({f.Width}×{f.Height})");
+        return f;
+    }
+
+    /// Остров показывает результат снимка (пилюля). true — остров взял событие на себя
+    /// (включён и событие «снимок» включено), даже если тихо положил снимок в галерею.
+    public Func<ShotItem, string, bool>? IslandSaved { get; set; }
+
     void ShowThumb(ShotItem item, string caption)
     {
+        var island = false;
+        try { island = IslandSaved?.Invoke(item, caption) ?? false; }
+        catch (Exception e) { Log.Error("снимки: пилюля острова", e); }
+        // Миграция дублированием (П24): миниатюра в углу остаётся, пока «Снимки» в доке.
+        if (island && !_config.Island.InDock("shots")) return;
         if (_thumb is null)
         {
             _thumb = new ShotThumb(_queue);
@@ -152,14 +181,14 @@ public sealed class ShotsService
     public async void Record()
     {
         if (_rec != null) { StopRecording(); return; }
-        if (_busy || Selector.IsOpen) return;
+        if (Skipped("запись")) return;
         _busy = true;
         try
         {
             _thumb?.Hide();
             Selection? sel;
-            using (var frozen = Frozen.Capture()) sel = await Selector.Pick(frozen, _monitors.All, record: true);
-            if (sel is null) return;
+            using (var frozen = Capture()) sel = await Selector.Pick(frozen, _monitors.All, record: true);
+            if (sel is null) { Log.Write("запись: выбор отменён"); return; }
             // Запись — в пределах одного монитора (того, где середина рамки); размер чётный.
             var cx = (sel.Rect.Left + sel.Rect.Right) / 2;
             var cy = (sel.Rect.Top + sel.Rect.Bottom) / 2;
@@ -183,6 +212,7 @@ public sealed class ShotsService
             if (!rec.HasSound && (s.SystemSound || s.Mic))
                 Toasts.Show("Запись идёт без звука", "Кодировщик Windows не принял звук. Подробности в журнале оболочки.", silent: true);
             _rec = rec;
+            RecordingScreen = screen.Name;
             _frame = new RecordFrame(this, r, screen);
             _tick.Start();
             Changed?.Invoke();
@@ -203,6 +233,7 @@ public sealed class ShotsService
         var rec = _rec;
         if (rec is null) return;
         _rec = null;
+        RecordingScreen = null;
         _tick.Stop();
         _frame?.Close();
         _frame = null;

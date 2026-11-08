@@ -30,7 +30,7 @@ public sealed class WinKeys
     // Сочетание забрали себе: Windows видела только Win и на отпускании открыла бы свой Пуск.
     bool _swallowedCombo;
     readonly HashSet<int> _swallowUp = [];
-    bool _snapDown;
+    readonly Island.Core.SnapKey _snap = new();
 
     /// Что из наших сочетаний включено (окно настроек → «Клавиши»). Выключенное Windows
     /// получает как обычно: Win одна — родной Пуск, Win+X — родное меню.
@@ -123,18 +123,34 @@ public sealed class WinKeys
             var vk = (int)k.vkCode;
             var down = (int)w is WM_KEYDOWN or WM_SYSKEYDOWN;
 
-            // PrtSc: забираем себе, Windows («Ножницы» по PrtSc) его не видит. Автоповтор, пока
-            // держат, — не новый снимок. Если нажатие не пришло, а пришло только отпускание — снимок по нему.
-            if (vk == VK_SNAPSHOT && PrintScreen && !_winDown && !Down(VK_CONTROL) && !Down(VK_MENU))
+            // Win держали, а отпускание не дошло (Win+L уносит его на экран блокировки): иначе
+            // PrtSc и Win-сочетания думают, что Win зажата, до следующего нажатия Win.
+            if (_winDown && vk is not (VK_LWIN or VK_RWIN) && !Down(VK_LWIN) && !Down(VK_RWIN))
             {
-                var fire = !_snapDown;
-                _snapDown = down;
-                if (fire)
+                Log.Write("хук клавиатуры: Win считалась зажатой без отпускания — сброшено");
+                _winDown = false;
+            }
+
+            // PrtSc: забираем себе, Windows («Ножницы» по PrtSc) его не видит. Автоповтор, пока
+            // держат, — не новый снимок (SnapKey, И11). Каждое событие — строка в логе.
+            if (vk == VK_SNAPSHOT)
+            {
+                var ctrl = Down(VK_CONTROL);
+                var alt = Down(VK_MENU);
+                if (PrintScreen && !_winDown && !ctrl && !alt)
                 {
+                    var fire = _snap.Step(down, k.time);
                     var shift = Down(VK_SHIFT);
-                    Post(() => Snapshot?.Invoke(shift));
+                    // Автоповтор, пока держат, в лог не пишем (их десятки).
+                    if (fire || !down || _snap.Last != "автоповтор")
+                        Log.Write($"PrtSc {(down ? "↓" : "↑")}{(shift ? " +Shift" : "")}{((k.flags & LLKHF_INJECTED) != 0 ? " (программное)" : "")} t={k.time} → {_snap.Last}");
+                    if (fire) Post(() => Snapshot?.Invoke(shift));
+                    return 1;
                 }
-                return 1;
+                if (down) Log.Write($"PrtSc ↓ t={k.time} → Windows ({(!PrintScreen ? "снимки выключены" : _winDown ? "с Win" : ctrl ? "с Ctrl" : "с Alt")})");
+                // Отпускание Windows после нашего нажатия — тоже сброс: следующее нажатие снова наше.
+                if (!down) _snap.Reset();
+                return CallNextHookEx(IntPtr.Zero, code, w, l);
             }
 
             if (vk is VK_LWIN or VK_RWIN)

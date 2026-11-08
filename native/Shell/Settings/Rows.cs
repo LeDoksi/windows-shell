@@ -8,13 +8,20 @@ namespace WindowsShell.Settings;
 /// «название и пояснение — переключатель (или другой элемент) справа».
 public static class Rows
 {
+    /// Строим лист настроек острова (П14): те же строки в цветах острова (Astra v3) —
+    /// группы на тёмной подложке без рамок, светлый текст. Только в потоке интерфейса.
+    public static bool IslandStyle;
+
+    static Windows.UI.Color Ink => IslandStyle ? Island.IslandUi.Ink : Theme.Text;
+    static Windows.UI.Color Sub => IslandStyle ? Island.IslandUi.Sub : Theme.TextSecondary;
+
     public static TextBlock Text(string text, double size = 14, bool secondary = false, bool bold = false) => new()
     {
         Text = text,
         FontFamily = Theme.Font,
         FontSize = size,
         FontWeight = bold ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
-        Foreground = Theme.Brush(secondary ? Theme.TextSecondary : Theme.Text),
+        Foreground = Theme.Brush(secondary ? Sub : Ink),
         TextWrapping = TextWrapping.Wrap,
         VerticalAlignment = VerticalAlignment.Center,
     };
@@ -22,7 +29,7 @@ public static class Rows
     /// Заголовок страницы.
     public static TextBlock Title(string text)
     {
-        var t = Text(text, 28, bold: true);
+        var t = Text(text, IslandStyle ? 20 : 28, bold: true);
         t.Margin = new Thickness(0, 0, 0, 12);
         return t;
     }
@@ -49,15 +56,15 @@ public static class Rows
         var stack = new StackPanel();
         for (var i = 0; i < rows.Length; i++)
         {
-            if (i > 0) stack.Children.Add(new Border { Height = 1, Background = Theme.Brush(Theme.Separator), Margin = new Thickness(-16, 0, -16, 0) });
+            if (i > 0) stack.Children.Add(new Border { Height = 1, Background = Theme.Brush(IslandStyle ? Island.IslandUi.RowOn : Theme.Separator), Margin = new Thickness(-16, 0, -16, 0) });
             stack.Children.Add(rows[i]);
         }
         return new Border
         {
-            Background = Theme.Brush(Theme.Card),
-            BorderBrush = Theme.Brush(Theme.Stroke),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(6),
+            Background = Theme.Brush(IslandStyle ? Island.IslandUi.Group : Theme.Card),
+            BorderBrush = Theme.Brush(IslandStyle ? Microsoft.UI.Colors.Transparent : Theme.Stroke),
+            BorderThickness = new Thickness(IslandStyle ? 0 : 1),
+            CornerRadius = new CornerRadius(IslandStyle ? 16 : 6),
             Padding = new Thickness(16, 2, 16, 2),
             Margin = new Thickness(0, 0, 0, 4),
             Child = stack,

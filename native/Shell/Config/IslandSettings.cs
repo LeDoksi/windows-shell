@@ -20,8 +20,11 @@ public sealed class IslandSection
 /// Чтение секции острова с порядком и соответствием значкам дока.
 public sealed class IslandSettings(IslandSection s)
 {
-    /// Виджеты острова в волне 1, порядок по умолчанию (медиа — постоянное место слева, В3).
-    public static readonly string[] Known = ["media", "charge", "net", "sound", "lang"];
+    /// Виджеты острова (волны 1–2), порядок по умолчанию (медиа — постоянное место слева, В3).
+    public static readonly string[] Known = ["media", "charge", "net", "sound", "lang", "shots", "bin", "shelf"];
+
+    /// Виджеты, у которых есть значок в доке (их можно перенести, П24). Полки в доке нет.
+    public static readonly string[] Movable = ["media", "charge", "net", "sound", "lang", "shots", "bin"];
 
     public static string Title(string id) => id switch
     {
@@ -30,6 +33,10 @@ public sealed class IslandSettings(IslandSection s)
         "net" => "Сеть",
         "sound" => "Звук",
         "lang" => "Раскладка",
+        "shots" => "Снимки",
+        "bin" => "Корзина",
+        "shelf" => "Полка",
+        "settings" => "Настройки",
         _ => id,
     };
 
@@ -52,7 +59,12 @@ public sealed class IslandSettings(IslandSection s)
 
     public bool EventOn(EventKind k) => !s.Events.TryGetValue(EventKey(k), out var on) || on;
 
-    public static string EventKey(EventKind k) => k == EventKind.Language ? "lang" : "charge";
+    public static string EventKey(EventKind k) => k switch
+    {
+        EventKind.Language => "lang",
+        EventKind.Shot => "shots",
+        _ => "charge",
+    };
 
     /// Значок виджета остаётся в доке (по id дока: network, language, sound, media, charge).
     public bool InDock(string dockId) => !s.Enabled || !s.OutOfDock.Any(id => DockId(id) == dockId);

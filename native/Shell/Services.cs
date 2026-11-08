@@ -82,6 +82,11 @@ public sealed class Services
     public Charge.ChargeFlyout ChargeFlyout => _chargeFlyout ??= new Charge.ChargeFlyout(Charge) { OpenSettings = () => OpenSettings("widgets") };
     public Kanban.KanbanFlyout KanbanFlyout => _kanbanFlyout ??= new Kanban.KanbanFlyout(Kanban);
 
+    Shelf.ShelfStore? _shelf;
+
+    /// Полка файлов острова (П17).
+    public Shelf.ShelfStore Shelf => _shelf ??= new Shelf.ShelfStore(Queue);
+
     /// Остров у верхнего края (WSH-E23); null, пока оболочка не запущена.
     public Island.IslandHost? Island { get; set; }
 
