@@ -4,7 +4,7 @@ using System.Text;
 namespace WindowsShell.Tail;
 
 /// Сеть Wi-Fi в списке окошка сети.
-public sealed record WifiNetwork(string Ssid, string? Profile, int Signal, bool Secured, bool Connected);
+public sealed record WifiNetwork(string Ssid, string? Profile, int Signal, bool Secured, bool Connected, Island.Core.WifiSecurity Security = Island.Core.WifiSecurity.Personal);
 
 /// Native Wifi API (wlanapi.dll): список сетей, подключение к знакомой, отключение.
 /// В Windows 11 24H2 список сетей отдаётся, только если программам разрешён доступ к
@@ -37,9 +37,11 @@ public static class Wlan
                     var ssid = Encoding.UTF8.GetString(ssidBytes);
                     var signal = Marshal.ReadInt32(p, 604);
                     var secured = Marshal.ReadInt32(p, 608) != 0;
+                    var auth = Marshal.ReadInt32(p, 612);
                     var flags = Marshal.ReadInt32(p, 620);
                     if (string.IsNullOrEmpty(ssid)) continue;
-                    nets.Add(new WifiNetwork(ssid, (flags & 2) != 0 && !string.IsNullOrEmpty(profile) ? profile : null, signal, secured, (flags & 1) != 0));
+                    var security = secured ? Island.Core.WifiAuth.Of(auth) : Island.Core.WifiSecurity.Open;
+                    nets.Add(new WifiNetwork(ssid, (flags & 2) != 0 && !string.IsNullOrEmpty(profile) ? profile : null, signal, secured, (flags & 1) != 0, security));
                 }
                 // У одной сети бывает две строки: со знакомым профилем и без. Оставляем лучшую.
                 var unique = nets
@@ -70,6 +72,42 @@ public static class Wlan
             Marshal.FreeHGlobal(name);
             WlanCloseHandle(h, IntPtr.Zero);
         }
+    }
+
+    /// Новая сеть (И5): профиль из XML (пароль в нём, в лог не пишется) и подключение.
+    /// null — Windows приняла просьбу; иначе текст ошибки для острова.
+    public static string? ConnectNew(string ssid, Island.Core.WifiSecurity security, string? password)
+    {
+        if (WlanOpenHandle(2, IntPtr.Zero, out _, out var h) != 0) return "Wi-Fi недоступен";
+        try
+        {
+            if (Interface(h) is not { } iface) return "Нет Wi-Fi-адаптера";
+            var xml = Island.Core.WifiProfile.Xml(ssid, security, password);
+            var err = WlanSetProfile(h, ref iface, 0, xml, null, true, IntPtr.Zero, out var reason);
+            if (err != 0)
+            {
+                Log.Write($"сеть: профиль «{ssid}» не принят (ошибка {err}, причина {reason})");
+                return "Windows не приняла настройки этой сети";
+            }
+            var name = Marshal.StringToHGlobalUni(ssid);
+            try
+            {
+                var p = new WLAN_CONNECTION_PARAMETERS { wlanConnectionMode = 0, strProfile = name, dot11BssType = 1 };
+                var c = WlanConnect(h, ref iface, ref p, IntPtr.Zero);
+                if (c != 0) { Log.Write($"сеть: подключение к «{ssid}» не началось (ошибка {c})"); return "Не удалось начать подключение"; }
+                return null;
+            }
+            finally { Marshal.FreeHGlobal(name); }
+        }
+        finally { WlanCloseHandle(h, IntPtr.Zero); }
+    }
+
+    /// Убрать профиль, созданный островом, если подключиться не вышло (неверный пароль).
+    public static void DeleteProfile(string name)
+    {
+        if (WlanOpenHandle(2, IntPtr.Zero, out _, out var h) != 0) return;
+        try { if (Interface(h) is { } iface) WlanDeleteProfile(h, ref iface, name, IntPtr.Zero); }
+        finally { WlanCloseHandle(h, IntPtr.Zero); }
     }
 
     public static void Disconnect()
@@ -114,4 +152,6 @@ public static class Wlan
     [DllImport("wlanapi.dll")] static extern uint WlanConnect(IntPtr h, ref Guid iface, ref WLAN_CONNECTION_PARAMETERS p, IntPtr reserved);
     [DllImport("wlanapi.dll")] static extern uint WlanDisconnect(IntPtr h, ref Guid iface, IntPtr reserved);
     [DllImport("wlanapi.dll")] static extern void WlanFreeMemory(IntPtr p);
+    [DllImport("wlanapi.dll", CharSet = CharSet.Unicode)] static extern uint WlanSetProfile(IntPtr h, ref Guid iface, uint flags, string xml, string? security, bool overwrite, IntPtr reserved, out uint reason);
+    [DllImport("wlanapi.dll", CharSet = CharSet.Unicode)] static extern uint WlanDeleteProfile(IntPtr h, ref Guid iface, string name, IntPtr reserved);
 }

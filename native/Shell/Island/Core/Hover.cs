@@ -13,6 +13,9 @@ public sealed class HoverGate(int wakeMs = 150, int leaveMs = 400)
 
     public bool Awake => _awake;
 
+    /// Идёт отсчёт (наведения или ухода): опросу нужны такты и без движения курсора.
+    public bool Waiting => _since >= 0;
+
     /// Остров свернули или раскрыли извне (клик, Escape, событие).
     public void Reset(bool awake = false)
     {
