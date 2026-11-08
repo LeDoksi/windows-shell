@@ -447,7 +447,21 @@ public static class Watchdog
         DesktopBin.Restore("оболочка не запускается");
         Toasts.Show("Оболочка не запускается", "Она упала 3 раза за 5 минут, панель задач Windows вернулась. Запустить снова: кнопка ниже, ярлык «Windows Shell» или Ctrl+Alt+Shift+R.",
             silent: false, button: "Запустить ещё раз");
+        // «Не беспокоить» Windows прячет баннер в центр уведомлений (баннеры заменяет остров, а его
+        // сейчас нет) — тогда ещё и обычное окно сообщения, чтобы это не прошло незаметно.
+        if (Tail.Notifications.QuietMode()) new Thread(() =>
+        {
+            const uint MB_YESNO = 0x4, MB_ICONWARNING = 0x30, MB_TOPMOST = 0x40000, MB_SETFOREGROUND = 0x10000, IDYES = 6;
+            var r = MessageBoxW(IntPtr.Zero, "Оболочка упала 3 раза за 5 минут, панель задач Windows вернулась.\n\nЗапустить оболочку ещё раз?",
+                "Windows Shell", MB_YESNO | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND);
+            Log.Write($"окно «оболочка не запускается»: {(r == IDYES ? "запустить" : "закрыто")}");
+            // Как кнопка уведомления: сообщение окну сторожа, запуск — в его потоке.
+            if (r == IDYES && Find() is var h && h != IntPtr.Zero) PostMessageW(h, WM_LAUNCH, IntPtr.Zero, IntPtr.Zero);
+        }) { IsBackground = true }.Start();
     }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    static extern uint MessageBoxW(IntPtr hwnd, string text, string caption, uint type);
 
     static void StartShell(string arg)
     {

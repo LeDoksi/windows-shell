@@ -246,6 +246,9 @@ public sealed class IslandBody
 
     public bool HasBadge(string slot) => _badges.ContainsKey(slot);
 
+    /// Эта пилюля события сейчас видна (пачка уведомлений обновляет её, а не встаёт в очередь).
+    public bool ShowingPill(UIElement? content) => content != null && Mode == BodyMode.Event && _pillHost.Child == content;
+
     /// Задать или убрать часть постоянной пилюли. Тот же элемент ещё раз — пересчитать размер (таймер вырос).
     public void SetBadge(string slot, UIElement? content, Action? click)
     {
@@ -737,7 +740,8 @@ public sealed class IslandBody
         var rest = Mode == BodyMode.Rest && h < RestH + 1;
         // П21: идёт запись — кромка красная.
         _shape.Fill = B(rest && _s.Shots.Recording ? Red : Body);
-        _dot.Visibility = rest && !_s.Shots.Recording && _s.Notifications.Unread && !_s.Notifications.DoNotDisturb ? Visibility.Visible : Visibility.Collapsed;
+        // П21: точка — есть непрочитанное в нашем центре (и в «Не беспокоить» острова: тихо, но видно).
+        _dot.Visibility = rest && !_s.Shots.Recording && _s.Notifications.Unread ? Visibility.Visible : Visibility.Collapsed;
 
         // Область кликов = контур: вне его клики уходят окнам под островом.
         var poly = new POINT[pts.Count];

@@ -52,6 +52,7 @@ public sealed class SettingsPages(Services s, Panel body, Action<Action<ConfigDa
             case "w-charge": WidgetsCharge(); break;
             case "w-perf": BuildPerf(); break;
             case "w-kanban": BuildKanban(); break;
+            case "w-notif": WidgetsNotif(); break;
             case "i-ribbon": IslandRibbon(withSwitch: true); break;
             case "i-move": IslandMove(); break;
         }
@@ -71,7 +72,7 @@ public sealed class SettingsPages(Services s, Panel body, Action<Action<ConfigDa
     {
         var island = _s.Config.Island;
         Add(Card(
-            Switch("Остров у верхнего края", "Наведи курсор на самый верх экрана — откроется лента: звук, медиа, сеть, заряд, раскладка, снимки, корзина, полка, монитор ПК, канбан. На каждом мониторе свой.",
+            Switch("Остров у верхнего края", "Наведи курсор на самый верх экрана — откроется лента: звук, медиа, сеть, заряд, раскладка, снимки, корзина, полка, монитор ПК, канбан, уведомления. На каждом мониторе свой.",
                 island.Enabled, on => { Change(c => c.Island.Enabled = on); _rebuild(); })));
         if (island.Enabled) return true;
         Add(Note("Пока остров выключен, всё остаётся в доке как раньше."));
@@ -134,13 +135,16 @@ public sealed class SettingsPages(Services s, Panel body, Action<Action<ConfigDa
         var lang = Island.Core.EventKind.Language;
         var charge = Island.Core.EventKind.Charge;
         var shot = Island.Core.EventKind.Shot;
+        var notice = Island.Core.EventKind.Notice;
         Add(Card(
             Switch("Смена раскладки", "Короткая пилюля с языком у верхнего края. В полноэкранных играх и видео не показывается.",
                 island.EventOn(lang), on => Change(c => c.Island.Events[IslandSettings.EventKey(lang)] = on)),
             Switch("Низкий заряд", "Пилюля вместо уведомления Windows. В игре на весь экран — на другом мониторе, если он есть.",
                 island.EventOn(charge), on => Change(c => c.Island.Events[IslandSettings.EventKey(charge)] = on)),
             Switch("Снимок готов", "Пилюля с миниатюрой: клик — галерея, миниатюру можно сразу перетащить в окно. В игре на весь экран — на другом мониторе или тихо в галерею.",
-                island.EventOn(shot), on => Change(c => c.Island.Events[IslandSettings.EventKey(shot)] = on))));
+                island.EventOn(shot), on => Change(c => c.Island.Events[IslandSettings.EventKey(shot)] = on)),
+            Switch("Новое уведомление", "Пилюля вместо баннера Windows: значок, приложение, текст; клик открывает приложение. Выключено — уведомления тихо собираются в центре острова.",
+                island.EventOn(notice), on => Change(c => c.Island.Events[IslandSettings.EventKey(notice)] = on))));
         Add(Note("Значок записи с таймером виден всегда, пока идёт запись, — его выключить нельзя."));
     }
 
@@ -285,6 +289,27 @@ public sealed class SettingsPages(Services s, Panel body, Action<Action<ConfigDa
         clear.IsEnabled = shelf.Count > 0;
         Add(Card(Row("Полка файлов", shelf.Count == 0 ? "Пусто. Перетащи файл к верхнему краю экрана и брось на «Полку»." : $"Сейчас ссылок: {shelf.Count}. Очистка убирает только ссылки — файлы остаются на месте.", clear)));
         Add(Note("Перетащи файлы к верхнему краю экрана — остров покажет две цели: «Корзина» (удалить) и «Полка» (отложить ссылку)."));
+    }
+
+    /// Уведомления (WSH-E26): свой центр в острове вместо баннеров Windows.
+    void WidgetsNotif()
+    {
+        var island = _s.Config.Island;
+        var n = _s.Notifications;
+        Add(Card(
+            Switch("Не беспокоить", "Уведомления тихо собираются в центре острова: без всплытий и звука. После выключения не высыпаются.",
+                island.Quiet, on => Change(c => c.Island.Quiet = on)),
+            Switch("Звук уведомления", "Звук Windows «Уведомление» вместе со всплытием. В игре на весь экран — без звука.",
+                island.NoticeSound, on => Change(c => c.Island.NoticeSound = on))));
+        Add(Section("Баннеры Windows"));
+        Add(Card(
+            Row("Доступ к уведомлениям", n.Listening ? "Есть: оболочка видит всё, что приходит в центр уведомлений Windows." : $"Нет ({n.Access}). Без него остров не видит чужие уведомления.",
+                n.Listening ? null : Button("Открыть параметры", () => Apps.Launcher.Open("ms-settings:privacy-notifications"))),
+            Row("«Не беспокоить» Windows", n.DoNotDisturb
+                    ? "Включено: баннеры Windows не показываются, всплывает только остров. Оригиналы остаются в центре Windows (Win+N)."
+                    : "Выключено: Windows сама показывает баннеры, поэтому остров пока только собирает уведомления в центр (без всплытий — иначе было бы два раза). Включи «Не беспокоить» — и баннеры заменит остров.",
+                Button("Параметры уведомлений ↗", () => Apps.Launcher.Open("ms-settings:notifications")))));
+        Add(Note("Оболочка сама настройки Windows не меняет. Уведомления хранятся 3 дня; если оболочка была выключена, пришедшее за это время подхватится при запуске."));
     }
 
     void WidgetsShots()

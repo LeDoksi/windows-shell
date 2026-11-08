@@ -13,6 +13,8 @@ public sealed class Notice
     public string Body { get; set; } = "";
     public DateTimeOffset Time { get; set; }
     public bool Read { get; set; }
+    /// Значок приложения (PNG в кэше), null — нет.
+    public string? Icon { get; set; }
 }
 
 public sealed record NoticeGroup(string App, string Aumid, List<Notice> Items)
@@ -41,6 +43,8 @@ public sealed class NoticeStore
 
     readonly string? _path;
     List<Notice> _items = [];
+    // Очищенные у нас: оригинал остаётся в центре Windows (П25), при перезапуске не подхватываем снова.
+    Dictionary<uint, DateTimeOffset> _cleared = [];
     string? _burstApp;
     int _burst;
 
@@ -51,7 +55,10 @@ public sealed class NoticeStore
     public int UnreadCount => _items.Count(n => !n.Read);
 
     /// Уже есть в центре (по id Windows).
-    public bool Known(uint winId) => winId != 0 && _items.Any(n => n.WinId == winId);
+    public bool Known(uint winId) => winId != 0 && (_cleared.ContainsKey(winId) || _items.Any(n => n.WinId == winId));
+
+    /// Все id Windows, о которых центр уже знает (опрос берёт подробности только у новых).
+    public HashSet<uint> KnownIds() => _items.Select(n => n.WinId).Concat(_cleared.Keys).Where(id => id != 0).ToHashSet();
 
     /// Новое уведомление. `pill` — правило разрешает пилюлю (NoticeRule).
     public NoticeAdd Add(Notice n, bool pill)
@@ -103,12 +110,26 @@ public sealed class NoticeStore
         .OrderByDescending(g => g.Items[0].Time)
         .ToList();
 
-    public void Clear(string app) => _items.RemoveAll(n => n.App == app);
+    public void Remove(Notice n) => _items.Remove(n);
 
-    public void ClearAll() => _items.Clear();
+    public void Clear(string app)
+    {
+        foreach (var n in _items.Where(n => n.App == app && n.WinId != 0)) _cleared[n.WinId] = n.Time;
+        _items.RemoveAll(n => n.App == app);
+    }
+
+    public void ClearAll()
+    {
+        foreach (var n in _items.Where(n => n.WinId != 0)) _cleared[n.WinId] = n.Time;
+        _items.Clear();
+    }
 
     /// Старше трёх суток — долой. true — что-то убрали.
-    public bool Expire(DateTimeOffset now) => _items.RemoveAll(n => now - n.Time > Keep) > 0;
+    public bool Expire(DateTimeOffset now)
+    {
+        foreach (var id in _cleared.Where(c => now - c.Value > Keep).Select(c => c.Key).ToList()) _cleared.Remove(id);
+        return _items.RemoveAll(n => now - n.Time > Keep) > 0;
+    }
 
     void Trim()
     {
@@ -117,19 +138,35 @@ public sealed class NoticeStore
 
     static readonly JsonSerializerOptions Json = new() { WriteIndented = false };
 
+    sealed class FileData
+    {
+        public List<Notice> Items { get; set; } = [];
+        public Dictionary<uint, DateTimeOffset> Cleared { get; set; } = [];
+    }
+
     public void Load()
     {
         if (_path is null || !File.Exists(_path)) return;
-        try { _items = JsonSerializer.Deserialize<List<Notice>>(File.ReadAllText(_path), Json) ?? []; }
-        catch { _items = []; }
+        try
+        {
+            var d = JsonSerializer.Deserialize<FileData>(File.ReadAllText(_path), Json);
+            _items = d?.Items ?? [];
+            _cleared = d?.Cleared ?? [];
+        }
+        catch { _items = []; _cleared = []; }
     }
 
-    public void Save()
+    /// Снимок для записи (берётся в потоке интерфейса, пишется в фоне).
+    public string Serialize() => JsonSerializer.Serialize(new FileData { Items = _items.ToList(), Cleared = new(_cleared) }, Json);
+
+    public void Save() => Write(_path, Serialize());
+
+    public static void Write(string? path, string json)
     {
-        if (_path is null) return;
-        var tmp = _path + ".tmp";
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        File.WriteAllText(tmp, JsonSerializer.Serialize(_items, Json));
-        File.Move(tmp, _path, overwrite: true);
+        if (path is null) return;
+        var tmp = path + ".tmp";
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(tmp, json);
+        File.Move(tmp, path, overwrite: true);
     }
 }

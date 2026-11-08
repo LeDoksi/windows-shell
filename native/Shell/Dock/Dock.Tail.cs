@@ -247,7 +247,7 @@ public sealed partial class Dock
         Show(_soundSlot, full && _s.Config.WidgetEnabled("audio") && dock("sound"));
         Show(_batSlot, full && t.Battery && _s.Battery.State.Present);
         Show(_langSlot, full && t.Language && dock("language"));
-        Show(_bellSlot, full && t.Notifications);
+        Show(_bellSlot, full && t.Notifications && dock("notifications"));
         Show(_clockSlot, true);
 
         _mediaCover.Source = media != null ? _s.Media.Cover : null;
@@ -263,8 +263,10 @@ public sealed partial class Dock
         _batIcon.Foreground = Theme.Brush(bat.Color);
         _lang.Text = _s.Language.Current.Short;
         var n = _s.Notifications;
-        _bellIcon.Glyph = n.DoNotDisturb ? "" : "";
-        _bellDot.Visibility = n.Unread && !n.DoNotDisturb ? Visibility.Visible : Visibility.Collapsed;
+        // С островом «тихо» — его собственное «Не беспокоить» (баннеры Windows заменяет остров).
+        var quiet = island.Enabled ? island.Quiet : n.DoNotDisturb;
+        _bellIcon.Glyph = quiet ? "" : "";
+        _bellDot.Visibility = n.Unread && !quiet ? Visibility.Visible : Visibility.Collapsed;
         return changed;
     }
 
@@ -325,7 +327,7 @@ public sealed partial class Dock
                 return $"Батарея {b.Percent} %{(b.Charging ? ", заряжается" : b.Plugged ? ", от сети" : "")}";
             }
             case "language": return _s.Language.Current.Name;
-            case "notifications": return _s.Notifications.DoNotDisturb ? "Не беспокоить" : "Уведомления";
+            case "notifications": return (_s.Config.Island.Enabled ? _s.Config.Island.Quiet : _s.Notifications.DoNotDisturb) ? "Не беспокоить" : "Уведомления";
             default:
             {
                 var d = DateTime.Now.ToString("dddd, d MMMM yyyy");

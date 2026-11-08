@@ -92,6 +92,24 @@ public class NoticeStoreTests
     }
 
     [Fact]
+    public void ClearedNotReimported()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"notices-{Guid.NewGuid():N}.json");
+        try
+        {
+            var s = new NoticeStore(path);
+            s.Add(N(1, "Telegram"), true);
+            s.ClearAll();
+            s.Save();
+            var t = new NoticeStore(path);
+            t.Load();
+            Assert.Equal(0, t.Import([N(1, "Telegram")], T0));
+            Assert.Contains(1u, t.KnownIds());
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public void SaveLoad()
     {
         var path = Path.Combine(Path.GetTempPath(), $"notices-{Guid.NewGuid():N}.json");

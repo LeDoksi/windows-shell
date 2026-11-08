@@ -291,6 +291,17 @@ public sealed class RibbonView
                 tip = !k.Api.SignedIn ? "Канбан: войди через Google" : n > 0 ? $"Канбан · нужно от тебя {n}" : "Канбан · от тебя ничего не нужно";
                 break;
             }
+            case "notif":
+            {
+                // П20: число непрочитанных; «Не беспокоить» острова — полумесяц.
+                var n = _s.Notifications;
+                var quiet = _s.Config.Island.Quiet;
+                s.Icon.Glyph = quiet ? "\uE708" : "\uEA8F";
+                var unread = n.UnreadCount;
+                if (unread > 0) { s.Count.Text = unread > 99 ? "99+" : unread.ToString(); s.Count.Visibility = Visibility.Visible; s.Count.Foreground = B(Theme.Accent); }
+                tip = (quiet ? "Не беспокоить · " : "") + (unread > 0 ? $"Уведомления · новых {unread}" : "Уведомления · новых нет");
+                break;
+            }
             default:
                 s.Icon.Glyph = "\uE713";
                 tip = "Настройки";
