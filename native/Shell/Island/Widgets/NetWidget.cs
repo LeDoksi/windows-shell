@@ -15,9 +15,13 @@ namespace WindowsShell.Island.Widgets;
 /// «нет сети»), знакомые Wi-Fi сразу, незнакомые — в раскрывающейся секции; подключение
 /// к новой открытой или WPA2/WPA3-Personal сети с паролем — прямо здесь. Неверный пароль:
 /// форма остаётся с введённым, созданный профиль удаляется. Корпоративные и скрытые сети —
-/// в Параметры Windows. Пароль нигде не логируется.
+/// в Параметры Windows. Пароль нигде не логируется. Вкладка «Bluetooth» (волна 4) — `BtPane`.
 public sealed class NetWidget(Services s, IslandBody body) : IslandWidget(s, body)
 {
+    // Последняя вкладка — на время работы оболочки.
+    static string _tab = "wifi";
+    BtPane? _bt;
+
     Wlan.Result? _wifi;
     Radio? _radio;
     int _version;
@@ -30,8 +34,20 @@ public sealed class NetWidget(Services s, IslandBody body) : IslandWidget(s, bod
     public override string Id => "net";
     public override double Width => 600;
 
+    BtPane Bt => _bt ??= new BtPane(S, Body, () => { if (IsOpen && _tab == "bt") Rebuild(); });
+
+    void SetTab(string tab)
+    {
+        if (_tab == tab) return;
+        _tab = tab;
+        if (tab == "bt") Bt.Open();
+        else _bt?.Close();
+        Rebuild();
+    }
+
     protected override void OnOpen()
     {
+        if (_tab == "bt") Bt.Open();
         _connecting = null;
         _formFor = null;
         _error = null;
@@ -57,6 +73,7 @@ public sealed class NetWidget(Services s, IslandBody body) : IslandWidget(s, bod
 
     protected override void OnClose()
     {
+        _bt?.Close();
         _version++;
         S.Network.Changed -= OnNet;
         _poll?.Stop();
@@ -68,6 +85,7 @@ public sealed class NetWidget(Services s, IslandBody body) : IslandWidget(s, bod
     /// Пересобрать, но не под пальцами: пока вводят пароль, список не трогаем (поле не теряет фокус).
     void Soft()
     {
+        if (_tab == "bt") return; // на вкладке Bluetooth Wi-Fi не перерисовываем
         if (_formFor != null && _connecting is null) return; // форма открыта — пересоберём при «Отмена»/подключении
         Rebuild();
     }
@@ -87,6 +105,12 @@ public sealed class NetWidget(Services s, IslandBody body) : IslandWidget(s, bod
 
     protected override void Build()
     {
+        Root.Children.Add(Tabs());
+        if (_tab == "bt")
+        {
+            Bt.Build(Root);
+            return;
+        }
         var st = S.Network.State;
         var hasWifi = _radio != null || _wifi is { HasAdapter: true };
 
@@ -142,6 +166,28 @@ public sealed class NetWidget(Services s, IslandBody body) : IslandWidget(s, bod
         Grid.SetColumn(link, 1);
         foot.Children.Add(link);
         Root.Children.Add(foot);
+    }
+
+    UIElement Tabs()
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Padding = new Thickness(4), Background = B(Group), CornerRadius = new CornerRadius(14), HorizontalAlignment = HorizontalAlignment.Left };
+        foreach (var (id, title) in new[] { ("wifi", "Wi-Fi и сеть"), ("bt", "Bluetooth") })
+        {
+            var on = _tab == id;
+            var b = new Button
+            {
+                Content = Text(title, 13, on ? Ink : Sub, bold: on),
+                Background = B(on ? SelectedSlot : Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(14, 6, 14, 7),
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, $"{title}{(on ? ", выбрано" : "")}");
+            var key = id;
+            b.Click += (_, _) => SetTab(key);
+            row.Children.Add(b);
+        }
+        return row;
     }
 
     static TextBlock Note(string text)
