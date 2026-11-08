@@ -198,6 +198,9 @@ public sealed partial class Dock
     {
         var t = _s.Config.Tail;
         var full = _fullTail;
+        // Страница «Перенос» (П24): значок пропадает, только если Георгий сам убрал его из дока.
+        var island = _s.Config.Island;
+        bool dock(string id) => island.InDock(id);
         var changed = false;
         void Show(Slot s, bool on)
         {
@@ -208,7 +211,7 @@ public sealed partial class Dock
             changed = true;
         }
         var media = _s.Media.Current;
-        Show(_mediaSlot, full && _s.Config.TempWidgetVisible("media", media != null));
+        Show(_mediaSlot, full && dock("media") && _s.Config.TempWidgetVisible("media", media != null));
         var shots = _s.Shots;
         var recording = shots.Recording;
         Show(_shotsSlot, full && shots.Enabled && (shots.Settings.Icon || recording));
@@ -226,7 +229,7 @@ public sealed partial class Dock
         Show(_binSlot, full && _s.Config.TempWidgetVisible("bin", !_s.Bin.Empty || _binDrag));
         // Заряд: пока у какого-то устройства не выше порога.
         var low = _s.Charge.Low;
-        Show(_chargeSlot, full && _s.Config.TempWidgetVisible("charge", low.Count > 0));
+        Show(_chargeSlot, full && dock("charge") && _s.Config.TempWidgetVisible("charge", low.Count > 0));
         var weakest = low.FirstOrDefault() ?? _s.Charge.Watched.FirstOrDefault(d => d.Percent != null);
         _chargeIcon.Glyph = weakest?.Percent is { } wp ? Charge.ChargeDevice.LevelGlyph(wp, weakest.Charging) : "\uE83F";
         _chargeIcon.Foreground = Theme.Brush(low.Count > 0 ? Theme.Warning : Theme.Text);
@@ -239,10 +242,10 @@ public sealed partial class Dock
         _kanbanBadge.Visibility = doing > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (Equals(_tooltipFor, _kanbanSlot)) { _tooltipText.Text = SlotTooltip(_kanbanSlot); PlaceTooltip(); }
         Show(_traySlot, full && t.Tray && _s.Tray.Running);
-        Show(_netSlot, full && t.Network);
-        Show(_soundSlot, full && _s.Config.WidgetEnabled("audio"));
+        Show(_netSlot, full && t.Network && dock("network"));
+        Show(_soundSlot, full && _s.Config.WidgetEnabled("audio") && dock("sound"));
         Show(_batSlot, full && t.Battery && _s.Battery.State.Present);
-        Show(_langSlot, full && t.Language);
+        Show(_langSlot, full && t.Language && dock("language"));
         Show(_bellSlot, full && t.Notifications);
         Show(_clockSlot, true);
 

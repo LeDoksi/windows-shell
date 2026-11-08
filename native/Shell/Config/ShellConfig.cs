@@ -109,6 +109,7 @@ public sealed class ConfigData
     public StartSection Start { get; set; } = new();
     public KeysSection Keys { get; set; } = new();
     public TailSection Tail { get; set; } = new();
+    public IslandSection Island { get; set; } = new();
 }
 
 /// Конфиг оболочки на диске: `%APPDATA%\WindowsShellNative\config.json`. Запись атомарная,
@@ -143,6 +144,7 @@ public sealed class ShellConfig
     public StartSection Start => Data.Start;
     public KeysSection Keys => Data.Keys;
     public TailSection Tail => Data.Tail;
+    public IslandSettings Island => new(Data.Island);
 
     enum Read { Ok, Missing, Broken, Unavailable }
 
@@ -347,6 +349,10 @@ public sealed class ShellConfig
         Data.Start ??= new();
         Data.Keys ??= new();
         Data.Tail ??= new();
+        Data.Island ??= new();
+        Data.Island.Hidden ??= [];
+        Data.Island.Events ??= [];
+        Data.Island.OutOfDock ??= [];
         Data.Start.Folders ??= ["explorer", "downloads", "settings"];
         Data.Start.Launches ??= [];
         var seen = new HashSet<string>();

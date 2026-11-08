@@ -25,6 +25,17 @@ public sealed class ChargeSettings(WidgetEntry entry)
         set => S["gameSound"] = value;
     }
 
+    /// Свой порог устройства (null — как у всех).
+    public int? DeviceThreshold(string key) =>
+        S["thresholds"] is JsonObject o && o[key] is JsonValue v && v.TryGetValue<int>(out var n) && n is >= 5 and <= 50 ? n : null;
+
+    public void SetDeviceThreshold(string key, int? value)
+    {
+        if (S["thresholds"] is not JsonObject o) S["thresholds"] = o = new JsonObject();
+        if (value is { } n) o[key] = n;
+        else o.Remove(key);
+    }
+
     /// Устройства, за которыми не следим: ключ → имя (имя — чтобы показать в настройках).
     public IReadOnlyDictionary<string, string> Ignored =>
         S["ignored"] is JsonObject o ? o.ToDictionary(p => p.Key, p => p.Value?.GetValue<string>() ?? p.Key) : new Dictionary<string, string>();
