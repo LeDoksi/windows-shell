@@ -74,7 +74,20 @@ public sealed class ChargeService
     /// Севшие: подключены, не заряжаются, уровень не выше порога.
     public List<ChargeDevice> Low => Watched.Where(IsLow).ToList();
 
-    public bool IsLow(ChargeDevice d) => d.Connected && !d.Charging && d.Percent is { } p && p <= Threshold;
+    public bool IsLow(ChargeDevice d) => d.Connected && !d.Charging && d.Percent is { } p && p <= ThresholdFor(d);
+
+    /// Порог устройства: свой (правый клик в виджете острова) или общий.
+    public int ThresholdFor(ChargeDevice d) => Settings.DeviceThreshold(d.Key) ?? Threshold;
+
+    public void SetDeviceThreshold(ChargeDevice d, int? value)
+    {
+        _config.Update(_ => Settings.SetDeviceThreshold(d.Key, value));
+        Merge();
+        Changed?.Invoke();
+    }
+
+    /// Остров показал предупреждение пилюлей (true) — тост Windows и плашка не нужны (без дубля).
+    public Func<ChargeDevice, int, string, bool>? IslandAlert { get; set; }
 
     /// Включить или выключить по настройке (зовётся при каждой смене конфига).
     public void Apply()
@@ -139,12 +152,12 @@ public sealed class ChargeService
 
     void Check()
     {
-        var threshold = Threshold;
-        // Снова предупредим, только когда зарядили заметно выше порога (по умолчанию выше 30 %).
-        var rearm = Math.Max(30, threshold + 10);
         var dirty = false;
         foreach (var d in Watched)
         {
+            var threshold = ThresholdFor(d);
+            // Снова предупредим, только когда зарядили заметно выше порога (по умолчанию выше 30 %).
+            var rearm = Math.Max(30, threshold + 10);
             if (!d.Connected || d.Percent is not { } p) continue;
             var stage = _alerted.GetValueOrDefault(d.Key);
             if (p > rearm)
@@ -170,6 +183,12 @@ public sealed class ChargeService
         var text = second ? "Совсем мало, пора зарядить" : "Пора зарядить";
         var game = GameScreen();
         Log.Write($"заряд: предупреждение «{title}»{(game != null ? " (идёт игра)" : "")}");
+        // Остров: пилюля вместо тоста и плашки; сигнал в наушники в игре остаётся.
+        if (IslandAlert?.Invoke(d, percent, text) == true)
+        {
+            if (game != null && Settings.GameSound) Play(second);
+            return;
+        }
         // В игре Windows уведомление не покажет (оно тихо уйдёт в центр уведомлений): свой сигнал и плашка.
         Toasts.Show(title, text, silent: game != null);
         if (game is null) return;

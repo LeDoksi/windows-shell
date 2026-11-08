@@ -34,6 +34,7 @@ public sealed class SettingsWindow
 
     static readonly (string Id, string Title, string Glyph)[] Pages =
     [
+        ("island", "Остров", "\uE737"),
         ("dock", "Док и хвост", ""),
         ("start", "Пуск", ""),
         ("look", "Внешний вид", ""),
@@ -193,6 +194,7 @@ public sealed class SettingsWindow
         _body.Children.Add(Title(Pages.First(x => x.Id == _page).Title));
         switch (_page)
         {
+            case "island": BuildIsland(); break;
             case "dock": BuildDock(); break;
             case "start": BuildStart(); break;
             case "look": BuildLook(); break;
@@ -209,6 +211,69 @@ public sealed class SettingsWindow
     void Add(UIElement e) => _body.Children.Add(e);
 
     // ---------- страницы ----------
+
+    /// Остров (WSH-E23): включение, «Перенос» из дока (П24), порядок ленты, события.
+    void BuildIsland()
+    {
+        var island = _s.Config.Island;
+        var data = _s.Config.Data.Island;
+        Add(Card(
+            Switch("Остров у верхнего края", "Наведи курсор на самый верх экрана — откроется лента со звуком, медиа, сетью, зарядом и раскладкой. На каждом мониторе свой.",
+                island.Enabled, on => { Change(c => c.Island.Enabled = on); Build(); })));
+        if (!island.Enabled)
+        {
+            Add(Note("Пока остров выключен, всё остаётся в доке как раньше."));
+            return;
+        }
+
+        Add(Section("Перенос из дока"));
+        var moveRows = new List<UIElement>();
+        foreach (var id in IslandSettings.Known)
+        {
+            var inDock = !data.OutOfDock.Contains(id);
+            var key = id;
+            moveRows.Add(Row(IslandSettings.Title(id), inDock ? "В острове ✓ · в доке ✓" : "В острове ✓ · в доке —",
+                inDock
+                    ? Button("Проверил — убрать из дока", () => { Change(c => { if (!c.Island.OutOfDock.Contains(key)) c.Island.OutOfDock.Add(key); }); Build(); })
+                    : Button("Вернуть в док", () => { Change(c => c.Island.OutOfDock.Remove(key)); Build(); })));
+        }
+        Add(Card(moveRows.ToArray()));
+        Add(Note("Пока виджет есть и там и там, попробуй его в острове. Когда всё работает, убери значок из дока кнопкой. Вернуть можно в любой момент."));
+
+        Add(Section("Лента"));
+        var order = island.Order;
+        var ribbonRows = new List<UIElement>();
+        for (var i = 0; i < order.Count; i++)
+        {
+            var id = order[i];
+            var title = IslandSettings.Title(id);
+            var shown = island.Shown(id);
+            var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+            var up = Button("↑", () => { Change(c => c.Island.Ribbon = Island.Core.RibbonOrder.Move(_s.Config.Island.Order, id, -1)); Build(); });
+            up.IsEnabled = i > 0;
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(up, $"{title}: левее");
+            var down = Button("↓", () => { Change(c => c.Island.Ribbon = Island.Core.RibbonOrder.Move(_s.Config.Island.Order, id, 1)); Build(); });
+            down.IsEnabled = i < order.Count - 1;
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(down, $"{title}: правее");
+            right.Children.Add(up);
+            right.Children.Add(down);
+            var toggle = Toggle(shown, on => { Change(c => { c.Island.Hidden.Remove(id); if (!on) c.Island.Hidden.Add(id); }); Build(); });
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(toggle, $"{title} в ленте");
+            right.Children.Add(toggle);
+            ribbonRows.Add(Row(title, shown ? "в ленте" : "скрыт из ленты", right));
+        }
+        Add(Card(ribbonRows.ToArray()));
+        Add(Note("↑ и ↓ — порядок значков слева направо. Скрытый значок пропадает из ленты, но его события (например, низкий заряд) остаются."));
+
+        Add(Section("События"));
+        var lang = Island.Core.EventKind.Language;
+        var charge = Island.Core.EventKind.Charge;
+        Add(Card(
+            Switch("Смена раскладки", "Короткая пилюля с языком у верхнего края. В полноэкранных играх и видео не показывается.",
+                island.EventOn(lang), on => Change(c => c.Island.Events[IslandSettings.EventKey(lang)] = on)),
+            Switch("Низкий заряд", "Пилюля вместо уведомления Windows. В игре на весь экран — на другом мониторе, если он есть.",
+                island.EventOn(charge), on => Change(c => c.Island.Events[IslandSettings.EventKey(charge)] = on))));
+    }
 
     void BuildDock()
     {

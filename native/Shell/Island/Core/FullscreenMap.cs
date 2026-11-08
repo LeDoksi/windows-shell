@@ -42,5 +42,8 @@ public sealed class FullscreenMap
 
     public bool IsFull(string screen) => _full.ContainsKey(screen);
 
+    /// Окно, из-за которого монитор занят (0 — не занят).
+    public long Holder(string screen) => _full.GetValueOrDefault(screen);
+
     public IReadOnlyCollection<string> FullScreens => _full.Keys.ToList();
 }

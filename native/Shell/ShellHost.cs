@@ -99,6 +99,10 @@ public sealed class ShellHost
         _s.Keys.Combo += OnWinCombo;
         _s.Keys.Captured += (vk, shift) => { foreach (var d in _docks.Values) if (d.KeyboardActive) d.KeyboardKey(vk, shift); };
         _s.Keys.CaptureBroken += () => { foreach (var d in _docks.Values) d.EndKeyboard(); };
+        // Остров у верхнего края — рядом с доком (миграция дублированием, WSH-E23).
+        _s.Island = new Island.IslandHost(_s);
+        _s.Charge.IslandAlert = _s.Island.ChargeAlert;
+        _s.Island.Start();
         // Док показывается на пару секунд при запуске: видно, что оболочка запустилась.
         foreach (var d in _docks.Values) _s.Bars.Reveal(d, holdMs: 2000);
     }
@@ -368,6 +372,7 @@ public sealed class ShellHost
     void Shutdown()
     {
         _s.Keys.Stop();
+        _s.Island?.Stop();
         _s.Perf.Shutdown();
         Popups.CloseAll();
         _s.Bars.Shutdown();

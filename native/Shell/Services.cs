@@ -82,6 +82,9 @@ public sealed class Services
     public Charge.ChargeFlyout ChargeFlyout => _chargeFlyout ??= new Charge.ChargeFlyout(Charge) { OpenSettings = () => OpenSettings("widgets") };
     public Kanban.KanbanFlyout KanbanFlyout => _kanbanFlyout ??= new Kanban.KanbanFlyout(Kanban);
 
+    /// Остров у верхнего края (WSH-E23); null, пока оболочка не запущена.
+    public Island.IslandHost? Island { get; set; }
+
     /// На ⌃ точка: программа из трея что-то сообщила, а окошко трея ещё не открывали.
     public bool TrayAttention { get; set; }
 

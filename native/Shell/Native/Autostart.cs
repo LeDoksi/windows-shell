@@ -62,6 +62,13 @@ public static class Autostart
             // Какой exe прописан в задаче, помним сами: вывод schtasks в разных кодировках, а в пути кириллица.
             var registered = File.Exists(PathFile) ? File.ReadAllText(PathFile).Trim() : null;
             if (string.Equals(registered, Exe, StringComparison.OrdinalIgnoreCase)) return;
+            // Прописанный exe на месте — значит, запущена другая сборка (проверочная из соседней
+            // папки): автозапуск остаётся за основной. Переносим, только если прежнего exe больше нет.
+            if (!string.IsNullOrEmpty(registered) && File.Exists(registered))
+            {
+                Log.Write($"автозапуск: остаётся на {registered} (эта сборка запущена из другой папки)");
+                return;
+            }
             var (code, _) = Schtasks($"/query /tn \"{TaskName}\"");
             if (code == 0)
             {
