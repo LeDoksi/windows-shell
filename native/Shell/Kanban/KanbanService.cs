@@ -116,17 +116,17 @@ public sealed class KanbanService
     }
 
     /// Открыть окно канбана (уже открыто — вывести вперёд).
-    public void OpenWindow(string? project = null)
+    public void OpenWindow(string? project = null, string? item = null)
     {
         if (project != null) _config.Update(_ => Settings.Project = project);
-        if (_window is { } w) { w.Activate(project); return; }
+        if (_window is { } w) { w.Activate(project, item); return; }
         _config.Update(c =>
         {
             var e = c.Widgets.FirstOrDefault(x => x.Id == "kanban");
             if (e != null) e.Enabled = true;
             Settings.Window = true;
         });
-        _window?.Activate(project);
+        _window?.Activate(project, item);
     }
 
     public void OpenSite() => Launcher.Open(KanbanApi.Site);

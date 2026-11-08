@@ -91,6 +91,7 @@ public static class IslandWidgets
         "shelf" => new ShelfWidget(s, body),
         "settings" => new SettingsWidget(s, body),
         "perf" => new PerfWidget(s, body),
+        "kanban" => new KanbanWidget(s, body),
         _ => new LangWidget(s, body),
     };
 }

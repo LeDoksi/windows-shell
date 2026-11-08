@@ -167,9 +167,11 @@ public sealed class KanbanWindow
         Build();
     }
 
-    public void Activate(string? project)
+    /// Вывести вперёд; `item` — сразу открыть эту карточку (из острова).
+    public void Activate(string? project, string? item = null)
     {
         if (project != null && project != _project) { _project = project; _epicFilter = null; _quickEpic = null; _card.Hide(); Build(force: true); }
+        if (item != null && _k.Item(item) is { } it) { _card.Show(it); Build(force: true); }
         _window.Activate();
         ShellWindow.ForceForeground(_hwnd);
         _quick.Focus(FocusState.Programmatic);
