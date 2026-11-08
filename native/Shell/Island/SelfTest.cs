@@ -16,6 +16,8 @@ public static class SelfTest
 {
     public const string Arg = "--island-test";
     public const string WindowTitle = "Остров";
+    /// Сообщение окну сообщений оболочки: «проверь волну 2 изнутри».
+    public const string SelfCheckMessage = "WindowsShellNative.IslandSelfCheck";
     const long WS_EX_TRANSPARENT = 0x20, WS_EX_LAYERED = 0x80000;
 
     public static bool Cli(string[] args)
@@ -116,6 +118,36 @@ public static class SelfTest
         }
         finally { SetCursorPos(saved.X, saved.Y); }
 
+        say("== Изнутри: снимки, корзина, полка, лист настроек, пилюля записи");
+        try
+        {
+            var msgWin = IntPtr.Zero;
+            EnumWindows((hw, _) =>
+            {
+                if (ProcessId(hw) == (uint)proc.Id && ClassName(hw) == "WindowsShellNative.Messages") { msgWin = hw; return false; }
+                return true;
+            }, IntPtr.Zero);
+            check(msgWin != IntPtr.Zero, "окно сообщений оболочки найдено");
+            if (msgWin != IntPtr.Zero)
+            {
+                var mark = DateTime.Now;
+                PostMessageW(msgWin, RegisterWindowMessageW(SelfCheckMessage), IntPtr.Zero, IntPtr.Zero);
+                var sw2 = Stopwatch.StartNew();
+                List<string> got = [];
+                while (sw2.ElapsedMilliseconds < 60_000)
+                {
+                    Thread.Sleep(500);
+                    got = ReadTail(Log.File, 300).Where(l => l.Contains("остров: самопроверка:") && Stamp(l) >= mark.AddSeconds(-1)).ToList();
+                    if (got.Any(l => l.Contains("ГОТОВО"))) break;
+                }
+                foreach (var l in got) say($"   {l[(l.IndexOf("самопроверка:") + 14)..]}");
+                check(got.Any(l => l.Contains("ГОТОВО")), "самопроверка изнутри закончилась");
+                var misses = got.Count(l => l.Contains("самопроверка: НЕТ"));
+                check(misses == 0, $"изнутри всё прошло (не прошло {misses})");
+            }
+        }
+        catch (Exception e) { say($"   изнутри не проверено: {e.Message}"); }
+
         say("== Покой 30 с (курсор не трогаем)");
         Thread.Sleep(1500);
         proc.Refresh();
@@ -175,6 +207,14 @@ public static class SelfTest
     }
 
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern uint RegisterWindowMessageW(string name);
+
+    /// Время строки журнала (начало строки); не разобрали — самое раннее.
+    static DateTime Stamp(string line)
+    {
+        var head = line.Length >= 12 ? line[..12] : line;
+        return TimeSpan.TryParseExact(head, @"hh\:mm\:ss\.fff", null, out var t) ? DateTime.Today + t : DateTime.MinValue;
+    }
     [DllImport("user32.dll")] static extern bool GetWindowDisplayAffinity(IntPtr h, out uint affinity);
     [DllImport("user32.dll")] static extern int GetWindowRgnBox(IntPtr h, out RECT box);
     [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr ctx);

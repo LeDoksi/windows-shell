@@ -26,6 +26,8 @@ public sealed class IslandHost
     long _lastFrame;
     string _lastLang = "";
     readonly RecordRoute _recRoute = new();
+    uint _selfCheckMsg;
+    bool _checking;
     string? _badgeOn;
     bool _badgeAway, _badgePaused;
     TextBlock? _badgeTime;
@@ -55,6 +57,8 @@ public sealed class IslandHost
         _s.Notifications.Changed += Indicators;
         _lastLang = _s.Language.Current.Short;
         _s.Language.Changed += () => { Indicators(); LanguageChanged(); };
+        _selfCheckMsg = RegisterWindowMessageW(SelfTest.SelfCheckMessage);
+        _s.Messages.Message += (msg, _, _) => { if (msg == _selfCheckMsg && _selfCheckMsg != 0) SelfCheck(); };
         new Thread(Poll) { IsBackground = true, Name = "остров" }.Start();
         Apply();
     }
@@ -204,7 +208,7 @@ public sealed class IslandHost
     public void PublishZones()
     {
         _zones = _bodies.Values.Select(b => b.Zone()).Where(z => z.Right > z.Left).ToArray();
-        _active = _bodies.Values.Any(b => b.Mode != BodyMode.Rest);
+        _active = _bodies.Values.Any(b => b.Mode != BodyMode.Rest || b.Probing);
     }
 
     // ---------- кадры ----------
@@ -419,6 +423,92 @@ public sealed class IslandHost
         body.ShowPill(row, text, 2200, () => body.OpenWidget(widget, byUser: true));
     }
 
+    // ---------- самопроверка изнутри (--island-test, волна 2) ----------
+
+    /// Открыть по очереди виджеты волны 2 и все страницы листа настроек, показать пилюлю
+    /// записи, положить файл на полку и убрать. Итог — строки «остров: самопроверка: …» в журнале
+    /// (их читает --island-test). Фокус не забираем: виджеты открываются как по событию.
+    async void SelfCheck()
+    {
+        if (_checking || !_running) return;
+        _checking = true;
+        var ok = 0;
+        var total = 0;
+        void Say(string t) => Log.Write($"остров: самопроверка: {t}");
+        void Check(bool good, string what) { total++; if (good) ok++; Say($"{(good ? "OK " : "НЕТ")} {what}"); }
+        try
+        {
+            var body = _bodies.Values.FirstOrDefault(b => !b.Full);
+            if (body is null) { Say("нет монитора без игры на весь экран"); return; }
+            Say($"монитор {body.Screen.Name}");
+            foreach (var id in new[] { "shots", "bin", "shelf" })
+            {
+                body.OpenWidget(id, byUser: false);
+                await Task.Delay(700);
+                Check(body.Mode == BodyMode.Widget && body.Widget?.Id == id, $"виджет «{Config.IslandSettings.Title(id)}» открылся");
+            }
+
+            // Полка: временный файл туда и обратно.
+            var file = Path.Combine(Path.GetTempPath(), "остров-проверка-полки.txt");
+            File.WriteAllText(file, "проверка полки");
+            var before = _s.Shelf.Count;
+            _s.Shelf.Add([file]);
+            await Task.Delay(300);
+            Check(_s.Shelf.Count == before + 1 && _s.Shelf.Paths[0] == file, "файл лёг на полку");
+            _s.Shelf.Remove(file);
+            File.Delete(file);
+            Check(_s.Shelf.Count == before, "файл убран с полки, сам файл не тронут полкой");
+
+            // Лист настроек и все его страницы.
+            body.OpenWidget("settings", byUser: false);
+            await Task.Delay(800);
+            var sheet = body.Widget as Widgets.SettingsWidget;
+            Check(body.Mode == BodyMode.Widget && sheet != null, "лист настроек открылся");
+            if (sheet != null)
+            {
+                GetWindowRect(body.Hwnd, out var r);
+                var hDip = (r.Bottom - r.Top) / body.Screen.Scale;
+                var screenH = (body.Screen.Bounds.Bottom - body.Screen.Bounds.Top) / body.Screen.Scale;
+                Check(hDip >= screenH * 0.6 - 1 && hDip <= screenH + 1, $"окно листа выросло до {hDip:0} из {screenH:0} DIP");
+                foreach (var page in Widgets.SettingsWidget.PageIds)
+                {
+                    var errors = sheet.TestPage(page);
+                    await Task.Delay(120);
+                    Check(errors == null, $"страница «{page}»{(errors == null ? "" : " — " + errors)}");
+                }
+            }
+            body.Sleep(restoreFocus: false);
+            await Task.Delay(900);
+            GetWindowRect(body.Hwnd, out var after);
+            Check((after.Bottom - after.Top) / body.Screen.Scale <= 641, "после листа окно сжалось обратно");
+
+            // Пилюля записи (без настоящей записи).
+            if (!_s.Shots.Recording)
+            {
+                var badge = RecordBadge(body.Screen.Name, body.Screen.Name, away: false, paused: false);
+                body.SetBadge(badge, null);
+                await Task.Delay(700);
+                Check(body.Mode == BodyMode.Badge, "пилюля записи висит вместо кромки");
+                body.Wake();
+                await Task.Delay(500);
+                body.Sleep(restoreFocus: false);
+                await Task.Delay(700);
+                Check(body.Mode == BodyMode.Badge, "после ленты тело вернулось в пилюлю записи");
+                body.SetBadge(null, null);
+                _badgeTime = null;
+                await Task.Delay(500);
+                Check(body.Mode == BodyMode.Rest, "пилюля убрана — снова кромка");
+            }
+        }
+        catch (Exception e) { Log.Error("остров: самопроверка", e); }
+        finally
+        {
+            _checking = false;
+            Say($"ГОТОВО {ok} из {total}");
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] static extern uint RegisterWindowMessageW(string name);
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr ctx);
 }

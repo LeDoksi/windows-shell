@@ -118,6 +118,19 @@ public sealed class SettingsWidget(Services s, IslandBody body) : IslandWidget(s
         BuildPage();
     }
 
+    public static IEnumerable<string> PageIds => Nav.SelectMany(g => g.Items).Select(i => i.Id);
+
+    /// Самопроверка: построить страницу. null — без ошибок, иначе текст ошибки.
+    public string? TestPage(string page)
+    {
+        _page = page;
+        _lastError = null;
+        BuildPage();
+        return _lastError ?? (_pageBody.Children.Count > 1 ? null : "пустая страница");
+    }
+
+    string? _lastError;
+
     void Go(string page)
     {
         if (_page == page) return;
@@ -143,7 +156,7 @@ public sealed class SettingsWidget(Services s, IslandBody body) : IslandWidget(s
             _pageBody.Children.Add(Rows.Title(title));
             _pages.Build(_page);
         }
-        catch (Exception e) { Log.Error($"остров: настройки {_page}", e); }
+        catch (Exception e) { _lastError = e.Message; Log.Error($"остров: настройки {_page}", e); }
         finally { Rows.IslandStyle = false; }
         S.Queue.TryEnqueue(() => _pageScroll.ChangeView(null, offset, null, disableAnimation: true));
     }

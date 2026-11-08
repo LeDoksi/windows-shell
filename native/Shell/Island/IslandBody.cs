@@ -536,12 +536,16 @@ public sealed class IslandBody
 
     // ---------- приём файлов (П2, И9) ----------
 
+    public bool Probing => _probe;
+
     void StartProbe()
     {
         if (_probe) return;
         _probe = true;
         LeaveRest();
         Draw();
+        // Опрос должен увидеть отпускание кнопки где угодно, иначе полоса у края так и ловила бы клики.
+        _host.PublishZones();
     }
 
     void EndProbe()
@@ -550,6 +554,7 @@ public sealed class IslandBody
         _probe = false;
         if (Mode == BodyMode.Rest && !_moving) EnterRest();
         Draw();
+        _host.PublishZones();
     }
 
     static bool HasFiles(DragEventArgs e) => e.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems);
