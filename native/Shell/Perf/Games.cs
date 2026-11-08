@@ -33,6 +33,9 @@ public static partial class Games
     /// Сколько игр знает Windows (Game Bar).
     public static int KnownCount { get { lock (Lock) return _known.Count; } }
 
+    /// В списке «никогда не игра» (браузеры, плееры, лаунчеры, мессенджеры).
+    public static bool InNever(string exe) => Never.Contains(Path.GetFileNameWithoutExtension(exe));
+
     /// Игра ли это. `marks` — ручные отметки из настроек.
     public static bool IsGame(string? exe, IReadOnlyDictionary<string, bool> marks) => Why(exe, marks) != null;
 

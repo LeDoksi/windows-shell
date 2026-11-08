@@ -36,12 +36,13 @@ public static class Toasts
     }
 
     /// `button` — подпись кнопки «запустить оболочку», null — без кнопок. Клик по самому
-    /// уведомлению ничего не запускает.
-    public static void Show(string title, string text, bool silent, string? button = null)
+    /// уведомлению ничего не запускает. `register: false` — не перезаписывать имя и ссылку
+    /// кнопок (пробы из другой папки не должны перенаправить кнопки на себя).
+    public static void Show(string title, string text, bool silent, string? button = null, bool register = true)
     {
         try
         {
-            Register();
+            if (register) Register();
             var actions = button is null ? "" :
                 $"""<actions><action content="{SecurityElement.Escape(button)}" activationType="protocol" arguments="{Protocol}:launch"/></actions>""";
             var xml = $"""
