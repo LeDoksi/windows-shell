@@ -1,11 +1,10 @@
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
-using Windows.Foundation;
 using WindowsShell.Kanban;
 using WindowsShell.Ui;
 using static WindowsShell.Island.IslandUi;
-using static WindowsShell.Native.Win32;
 using VirtualKey = Windows.System.VirtualKey;
 
 namespace WindowsShell.Island.Widgets;
@@ -13,10 +12,13 @@ namespace WindowsShell.Island.Widgets;
 /// Быстрая задача в острове (эскиз KanbanIsland, П12): проект, тип «Задача / Баг / Долг»,
 /// эпик (последний пункт — «+ Новый эпик», поле раскрывается тут же), название, «Создать».
 /// Эпик и задача создаются одним действием; не вышло — черновик остаётся, ошибка видна.
+/// Та же форма — в окне канбана по «+ Задача»: меню показывает тот, кто её держит.
 public sealed class KanbanQuick
 {
-    readonly Services _s;
-    readonly IslandBody _body;
+    readonly KanbanService _k;
+    readonly DispatcherQueue _queue;
+    /// Показать меню под элементом: (элемент, "project" | "epic", пункты).
+    readonly Action<FrameworkElement, string, List<MenuItem>> _menu;
     readonly Action _resized;
     readonly TextBox _title, _epicTitle;
     string? _project, _epic;
@@ -26,12 +28,16 @@ public sealed class KanbanQuick
 
     public StackPanel View { get; } = new() { Spacing = 8 };
 
-    KanbanService K => _s.Kanban;
+    KanbanService K => _k;
 
-    public KanbanQuick(Services s, IslandBody body, Action resized)
+    /// Задача создана (окно может закрыть форму).
+    public event Action<KItem>? Created;
+
+    public KanbanQuick(KanbanService k, DispatcherQueue queue, Action<FrameworkElement, string, List<MenuItem>> menu, Action resized)
     {
-        _s = s;
-        _body = body;
+        _k = k;
+        _queue = queue;
+        _menu = menu;
         _resized = resized;
         _title = Input("Название задачи");
         _title.KeyDown += (_, e) => { if (e.Key == VirtualKey.Enter) { e.Handled = true; Submit(); } };
@@ -58,6 +64,22 @@ public sealed class KanbanQuick
     string? ValidEpic(string project, string? epic) => K.OpenEpics(project).Any(e => e.Id == epic) ? epic : null;
 
     public void Focus() => _title.Focus(FocusState.Programmatic);
+
+    /// Проект задаёт хозяин формы (окно — открытый проект).
+    public void SetProject(string project)
+    {
+        if (project == _project || K.Project(project) is null) return;
+        _project = project;
+        _epic = ValidEpic(project, K.Settings.Epic(project));
+        _newEpic = false;
+    }
+
+    /// Эпик задаёт хозяин формы (окно — фильтр по эпику).
+    public void SetEpicChoice(string? epic)
+    {
+        if (_project is null || _newEpic) return;
+        _epic = ValidEpic(_project, epic);
+    }
 
     /// Пересобрать (данные канбана поменялись). Введённый текст не теряется: поля те же.
     public void Build()
@@ -149,13 +171,7 @@ public sealed class KanbanQuick
         return b;
     }
 
-    void ShowMenu(FrameworkElement at, string key, List<MenuItem> items)
-    {
-        var scale = _body.Screen.Scale;
-        GetWindowRect(_body.Hwnd, out var r);
-        var p = at.TransformToVisual(null).TransformPoint(new Point(0, at.ActualHeight));
-        _s.Menu.Show(("island-kanban", key), new Rect(r.Left + p.X * scale, r.Top + p.Y * scale, at.ActualWidth * scale, 1), items, Placement.AtPoint, owner: _body);
-    }
+    void ShowMenu(FrameworkElement at, string key, List<MenuItem> items) => _menu(at, key, items);
 
     void ProjectMenu(FrameworkElement at)
     {
@@ -188,7 +204,7 @@ public sealed class KanbanQuick
                 _newEpic = true;
                 Build();
                 _resized();
-                _s.Queue.TryEnqueue(() => _epicTitle.Focus(FocusState.Programmatic));
+                _queue.TryEnqueue(() => _epicTitle.Focus(FocusState.Programmatic));
             },
         });
         ShowMenu(at, "epic", items);
@@ -222,6 +238,7 @@ public sealed class KanbanQuick
             _epic = item.EpicId;
             _note = ($"✓ {item.Id} создана", false);
             K.RememberQuick(project, item.EpicId);
+            Created?.Invoke(item);
         }
         catch (KanbanException e) { _note = (e.Message, true); }
         catch (Exception e)

@@ -27,7 +27,7 @@ public sealed class KanbanWidget(Services s, IslandBody body) : IslandWidget(s, 
 
     protected override void OnOpen()
     {
-        _quick ??= new KanbanQuick(S, Body, Resized);
+        _quick ??= new KanbanQuick(K, S.Queue, ShowMenu, Resized);
         K.Changed += Later;
         // Данные старше полуминуты — перечитать (на сайте могли поменять).
         if (K.LoadedAt is not { } t || DateTime.Now - t > Fresh) _ = K.Refresh();
@@ -88,6 +88,15 @@ public sealed class KanbanWidget(Services s, IslandBody body) : IslandWidget(s, 
             _quick.Build();
             Root.Children.Add(_quick.View);
         }
+    }
+
+    /// Меню проекта / эпика под полем быстрой задачи (физические пиксели экрана острова).
+    void ShowMenu(FrameworkElement at, string key, List<WindowsShell.Ui.MenuItem> items)
+    {
+        var scale = Body.Screen.Scale;
+        WindowsShell.Native.Win32.GetWindowRect(Body.Hwnd, out var r);
+        var p = at.TransformToVisual(null).TransformPoint(new Windows.Foundation.Point(0, at.ActualHeight));
+        S.Menu.Show(("island-kanban", key), new Windows.Foundation.Rect(r.Left + p.X * scale, r.Top + p.Y * scale, at.ActualWidth * scale, 1), items, WindowsShell.Ui.Placement.AtPoint, owner: Body);
     }
 
     /// «Нужно от тебя» во всех проектах: по проекту, потом по месту в колонке.
