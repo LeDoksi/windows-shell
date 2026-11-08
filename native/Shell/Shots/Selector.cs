@@ -41,6 +41,8 @@ internal sealed class Selector
     IntPtr _hwnd;
     POINT _cursor, _start;
     bool _dragging, _wasActive, _finished;
+    long _shownAt;
+    int _regrabs;
     List<RECT> _drawn = [];
 
     Selector(Frozen f, IReadOnlyList<Screen> screens, bool record)
@@ -82,6 +84,8 @@ internal sealed class Selector
         ShowWindow(_hwnd, 5 /* SW_SHOW */);
         SetWindowPos(_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
         Ui.ShellWindow.ForceForeground(_hwnd);
+        _shownAt = Environment.TickCount64;
+        Log.Write($"снимок: выбор области показан{(GetForegroundWindow() == _hwnd ? "" : " (впереди чужое окно: " + Who(GetForegroundWindow()) + ")")}");
         SetCursor(LoadCursorW(IntPtr.Zero, 32515 /* IDC_CROSS */));
     }
 
@@ -160,14 +164,52 @@ internal sealed class Selector
                 return true;
             case WM_ACTIVATE:
                 if (((int)w & 0xFFFF) != 0) _wasActive = true;
-                // Ушли в другое окно (Alt+Tab) — отмена.
-                else if (_wasActive) Finish(null);
+                else if (_wasActive)
+                {
+                    // И11: в первые 0,6 с фокус забирает кто-то сам (всплывашка, игра, наше же окно) —
+                    // не отменяем молча, а возвращаем фокус. Позже — это Alt+Tab: отмена.
+                    var age = Environment.TickCount64 - _shownAt;
+                    var hwnd = _hwnd;
+                    if (age < 600 && _regrabs < 3)
+                    {
+                        _regrabs++;
+                        Log.Write($"снимок: окно выбора потеряло фокус через {age} мс — забираю обратно");
+                        PostMessageW(hwnd, WM_REGRAB, IntPtr.Zero, IntPtr.Zero);
+                    }
+                    else
+                    {
+                        Log.Write($"снимок: выбор закрыт — фокус ушёл через {age} мс");
+                        Finish(null);
+                    }
+                }
+                return true;
+            case WM_REGRAB:
+                if (!_finished)
+                {
+                    SetWindowPos(_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                    Ui.ShellWindow.ForceForeground(_hwnd);
+                    Log.Write($"снимок: фокус {(GetForegroundWindow() == _hwnd ? "вернулся" : "не вернулся, впереди " + Who(GetForegroundWindow()))}");
+                }
                 return true;
             case WM_KEYDOWN:
                 Key((int)w);
                 return true;
         }
         return false;
+    }
+
+    const uint WM_REGRAB = 0x8000 + 0x51; // WM_APP + 0x51
+
+    /// Чьё окно (класс и процесс) — для лога.
+    static string Who(IntPtr h)
+    {
+        if (h == IntPtr.Zero) return "никто";
+        try
+        {
+            using var p = System.Diagnostics.Process.GetProcessById((int)ProcessId(h));
+            return $"{Win32.ClassName(h)} / {p.ProcessName}";
+        }
+        catch { return Win32.ClassName(h); }
     }
 
     void Key(int vk)

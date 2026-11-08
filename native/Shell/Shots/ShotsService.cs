@@ -92,17 +92,17 @@ public sealed class ShotsService
     /// PrtSc: экран замирает, выбираешь область, окно или монитор.
     public async void Snap()
     {
-        if (_busy || Selector.IsOpen) return;
+        if (Skipped("снимок")) return;
         _busy = true;
         try
         {
             _thumb?.Hide();
             Selection? sel;
             D.Bitmap bmp;
-            using (var frozen = Frozen.Capture())
+            using (var frozen = Capture())
             {
                 sel = await Selector.Pick(frozen, _monitors.All, record: false);
-                if (sel is null) return;
+                if (sel is null) { Log.Write("снимок: выбор отменён"); return; }
                 bmp = frozen.Crop(sel.Rect);
             }
             using (bmp)
@@ -129,6 +129,23 @@ public sealed class ShotsService
         }
     }
 
+    /// Нажатие не потеряно молча (И11): если идёт захват или уже открыт выбор — строка в логе.
+    bool Skipped(string what)
+    {
+        if (!_busy && !Selector.IsOpen) return false;
+        Log.Write($"{what}: нажатие пропущено — {(Selector.IsOpen ? "уже открыт выбор области" : "ещё идёт прошлый снимок")}");
+        return true;
+    }
+
+    /// Снимок всех мониторов с отметкой времени в логе.
+    static Frozen Capture()
+    {
+        var t = System.Diagnostics.Stopwatch.StartNew();
+        var f = Frozen.Capture();
+        Log.Write($"снимок: экран захвачен за {t.ElapsedMilliseconds} мс ({f.Width}×{f.Height})");
+        return f;
+    }
+
     void ShowThumb(ShotItem item, string caption)
     {
         if (_thumb is null)
@@ -152,14 +169,14 @@ public sealed class ShotsService
     public async void Record()
     {
         if (_rec != null) { StopRecording(); return; }
-        if (_busy || Selector.IsOpen) return;
+        if (Skipped("запись")) return;
         _busy = true;
         try
         {
             _thumb?.Hide();
             Selection? sel;
-            using (var frozen = Frozen.Capture()) sel = await Selector.Pick(frozen, _monitors.All, record: true);
-            if (sel is null) return;
+            using (var frozen = Capture()) sel = await Selector.Pick(frozen, _monitors.All, record: true);
+            if (sel is null) { Log.Write("запись: выбор отменён"); return; }
             // Запись — в пределах одного монитора (того, где середина рамки); размер чётный.
             var cx = (sel.Rect.Left + sel.Rect.Right) / 2;
             var cy = (sel.Rect.Top + sel.Rect.Bottom) / 2;

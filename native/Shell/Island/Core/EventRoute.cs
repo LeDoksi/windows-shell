@@ -1,6 +1,6 @@
 namespace WindowsShell.Island.Core;
 
-public enum EventKind { Language, Charge }
+public enum EventKind { Language, Charge, Shot }
 
 /// На каком экране показать событие (раздел 2, В2, П6). Вне игры — на экране активного окна.
 /// Раскладка в fullscreen не показывается вовсе и на другой экран не уходит. Низкий заряд —
@@ -14,6 +14,10 @@ public static class EventRoute
         {
             case EventKind.Language:
                 return full.Contains(active) ? null : active;
+            case EventKind.Shot:
+                // Результат снимка: в игре — на свободный другой экран, иначе тихо (он в галерее).
+                if (!full.Contains(active)) return active;
+                return screens.FirstOrDefault(s => s != active && !full.Contains(s));
             default:
                 if (exclusive != active) return active;
                 return screens.FirstOrDefault(s => s != active && !full.Contains(s))
