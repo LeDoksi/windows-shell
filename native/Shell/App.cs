@@ -34,6 +34,7 @@ public sealed class App : Application, IXamlMetadataProvider
         if (Perf.SelfTest.Cli(args)) return;
         if (Kanban.SelfTest.Cli(args)) return;
         if (Perf.PerfAccess.Cli(args)) return;
+        if (Island.SelfTest.Cli(args)) return;
         if (Island.Spike.OvertopTest.Cli(args)) return;
         if (Island.Spike.NotifTest.Cli(args)) return;
         if (Island.Spike.GamesTest.Cli(args)) return;

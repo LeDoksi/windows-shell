@@ -79,6 +79,8 @@ public sealed class IslandBody
         _s = s;
         Screen = screen;
         _win = new ShellWindow(Surface.Transparent, noActivate: true, rounded: false, transitions: false);
+        // Имя окна: его читает экранный диктор и находит проверка --island-test.
+        _win.Window.Title = SelfTest.WindowTitle;
         var canvas = new Canvas();
         _win.Root.Children.Add(canvas);
         _shape = new XPath { Fill = B(Body), Stroke = B(Outline), StrokeThickness = 1 };
