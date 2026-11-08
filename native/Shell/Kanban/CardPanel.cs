@@ -129,8 +129,8 @@ sealed class CardPanel
         var head = new Grid();
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var type = item.Type switch { "bug" => "ошибка", "chore" => "дело", _ => "задача" };
-        head.Children.Add(Text(12, Muted, $"{item.Id} · {type}"));
+        var type = Board.TypeName(item.Type) ?? "задача";
+        head.Children.Add(Text(12, Muted, $"{item.Id} · {type}{(item.Archived ? " · в архиве" : "")}"));
         var close = new Button
         {
             Content = new FontIcon { Glyph = "", FontFamily = Theme.Icons, FontSize = 12 },
@@ -184,6 +184,39 @@ sealed class CardPanel
             if (to != c.EpicId) _ = _k.SetEpic(c, to);
         };
         _body.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { _status, _epic } });
+
+        // Тип явно и с выбором (П10): задача · баг · долг, как на сайте.
+        var types = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        foreach (var (id, name) in Board.TypeChoice)
+        {
+            var t = id;
+            var on = item.Type == id || (id == "task" && Board.TypeName(item.Type) is null);
+            var b = new Button
+            {
+                Content = Text(13, on ? Theme.Text : Muted, name),
+                Padding = new Thickness(12, 5, 12, 6),
+                CornerRadius = new CornerRadius(9),
+                Background = new SolidColorBrush(on ? Color.FromArgb(255, 0x2C, 0x2C, 0x30) : Color.FromArgb(255, 0x16, 0x16, 0x18)),
+                BorderThickness = new Thickness(0),
+            };
+            b.Click += (_, _) => { if (Current is { } c && c.Type != t) { _ = _k.SetType(c, t); Build(); } };
+            types.Children.Add(b);
+        }
+        _body.Children.Add(types);
+
+        // Архив как на сайте: «В архив» у закрытых, «Вернуть» у архивных (уходит в «В работе»).
+        if (item.Archived)
+        {
+            var back = new Button { Content = "Вернуть из архива", Padding = new Thickness(12, 6, 12, 7) };
+            back.Click += (_, _) => { if (Current is { } c) _ = _k.Restore(c); };
+            _body.Children.Add(back);
+        }
+        else if (item.Status == KStatus.Done)
+        {
+            var arch = new Button { Content = "В архив", Padding = new Thickness(12, 6, 12, 7) };
+            arch.Click += (_, _) => { if (Current is { } c) { _ = _k.Archive(c); Hide(); } };
+            _body.Children.Add(arch);
+        }
 
         var meta = new List<string> { item.CreatedBy == "claude" ? "создал Claude" : "создал ты" };
         if (item.UpdatedAt is { } u) meta.Add($"изменена {u.ToLocalTime():dd.MM HH:mm}");

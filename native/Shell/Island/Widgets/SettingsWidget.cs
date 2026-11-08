@@ -16,7 +16,7 @@ public sealed class SettingsWidget(Services s, IslandBody body) : IslandWidget(s
 
     static readonly (string Group, (string Id, string Title)[] Items)[] Nav =
     [
-        ("ВИДЖЕТЫ", [("w-sound", "Звук"), ("w-media", "Медиа"), ("w-charge", "Заряд"), ("w-shots", "Снимки и запись"), ("w-bin", "Корзина и полка"), ("w-clips", "Буфер обмена")]),
+        ("ВИДЖЕТЫ", [("w-sound", "Звук"), ("w-media", "Медиа"), ("w-charge", "Заряд"), ("w-shots", "Снимки и запись"), ("w-bin", "Корзина и полка"), ("w-clips", "Буфер обмена"), ("w-perf", "Монитор ПК"), ("w-kanban", "Канбан")]),
         ("ОСТРОВ", [("i-ribbon", "Лента и события"), ("i-move", "Перенос")]),
         ("ОБОЛОЧКА", [("dock", "Док"), ("start", "Пуск"), ("look", "Внешний вид"), ("perf", "Монитор ПК"), ("kanban", "Канбан"), ("keys", "Клавиши"), ("system", "Система")]),
     ];

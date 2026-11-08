@@ -22,6 +22,7 @@ internal sealed class Overlay : IDisposable
 
     IntPtr _hwnd;
     bool _shown;
+    bool? _inCapture;
     long _raisedAt;
 
     public bool Visible => _shown;
@@ -33,6 +34,12 @@ internal sealed class Overlay : IDisposable
         using var bmp = Render(s, now, scale);
         if (bmp is null) { Hide(); return; }
         Create();
+        // П9: по умолчанию оверлея нет в снимках и записи экрана.
+        if (_inCapture != s.OverlayInCapture)
+        {
+            _inCapture = s.OverlayInCapture;
+            SetWindowDisplayAffinity(_hwnd, s.OverlayInCapture ? 0u : 0x11u /* WDA_EXCLUDEFROMCAPTURE */);
+        }
         var margin = (int)Math.Round(12 * scale);
         var x = s.Corner is PerfSettings.TopRight or PerfSettings.BottomRight ? screen.Right - margin - bmp.Width : screen.Left + margin;
         var y = s.Corner is PerfSettings.BottomLeft or PerfSettings.BottomRight ? screen.Bottom - margin - bmp.Height : screen.Top + margin;
@@ -75,9 +82,10 @@ internal sealed class Overlay : IDisposable
         var groups = new List<(string Group, string Label, List<Run> Runs)>();
         foreach (var id in s.Items)
         {
+            if (id == "graph") continue; // график — отдельной полосой под цифрами
             var (group, label) = id switch
             {
-                "fps" or "frametime" => ("fps", "FPS"),
+                "fps" or "low1" or "frametime" => ("fps", "FPS"),
                 "cpu" or "cputemp" => ("cpu", "ЦП"),
                 "gpu" or "gputemp" => ("gpu", "ГП"),
                 "ram" => ("ram", "ОЗУ"),
@@ -90,10 +98,18 @@ internal sealed class Overlay : IDisposable
             {
                 case "fps":
                     runs.Add(new(now.Fps is { } f ? $"{f:0}" : "—", Kind.Value, now.Fps is { } ff && s.FpsWarn > 0 && ff < s.FpsWarn ? Warn : Value, "000"));
+                    // Кадров нет совсем — честно, а не пустое место (П16, эксклюзив CS2 в E22).
+                    if (now.Fps is null && now.State is FpsState.NoData) runs.Add(new("нет данных", Kind.Unit, Label));
+                    else if (now.Fps is null && now.State is FpsState.Denied) runs.Add(new("нет разрешения", Kind.Unit, Label));
+                    break;
+                case "low1":
+                    runs.Add(new("1% low", Kind.Unit, Label));
+                    runs.Add(new(now.Low1 is { } l ? $"{l:0}" : "—", Kind.Value, now.Low1 is { } ll && s.FpsWarn > 0 && ll < s.FpsWarn ? Warn : Value, "000"));
                     break;
                 case "frametime":
-                    runs.Add(new(now.Fps is { } f2 && f2 > 0 ? $"{1000 / f2:0.0}" : "—", Kind.Value, Value, "00.0"));
-                    if (now.Fps is > 0) runs.Add(new("мс", Kind.Unit, Label));
+                    var ms = now.FrameMs ?? (now.Fps is { } f2 && f2 > 0 ? 1000 / f2 : null);
+                    runs.Add(new(ms is { } m ? m.ToString("0.0", System.Globalization.CultureInfo.GetCultureInfo("ru-RU")) : "—", Kind.Value, Value, "00.0"));
+                    if (ms != null) runs.Add(new("мс", Kind.Unit, Label));
                     break;
                 case "cpu":
                     runs.Add(new(smp is null ? "—" : $"{smp.Cpu:0}%", Kind.Value, Value, "00%"));
@@ -135,7 +151,8 @@ internal sealed class Overlay : IDisposable
     public static Bitmap? Render(PerfSettings s, PerfNow now, double scale)
     {
         var groups = Groups(s, now);
-        if (groups.Count == 0) return null;
+        var graph = s.Items.Contains("graph") ? now.Recent : null;
+        if (groups.Count == 0 && graph is not { Length: > 0 }) return null;
         var size = (float)(s.FontSize * scale);
         using var family = new FontFamily("Segoe UI");
         using var valueFont = new Font("Segoe UI Semibold", size, FontStyle.Regular, GraphicsUnit.Pixel);
@@ -155,7 +172,7 @@ internal sealed class Overlay : IDisposable
         var padY = size * 0.32f;
         var lineH = size * 1.32f;
         // Ширина метки — по самой длинной, чтобы столбик был ровным.
-        var labelW = s.Column ? groups.Max(g => W(g.Label, labelFont)) : 0;
+        var labelW = s.Column && groups.Count > 0 ? groups.Max(g => W(g.Label, labelFont)) : 0;
 
         // Раскладка: каждая группа — список (x, run, ширина).
         var lines = new List<List<(float X, Run Run, float Width)>>();
@@ -183,11 +200,15 @@ internal sealed class Overlay : IDisposable
             }
             x += reserve;
         }
-        lines.Add(cur);
-        widths.Add(x);
+        if (cur.Count > 0) { lines.Add(cur); widths.Add(x); }
 
-        var width = (int)Math.Ceiling(widths.Max() + padX * 2);
-        var height = (int)Math.Ceiling(lines.Count * lineH + padY * 2);
+        // График времени кадра (П16): 40 последних кадров полосками, рывки (дольше 2× среднего) — янтарные.
+        var barW = (float)Math.Max(2, Math.Round(3 * scale));
+        var barGap = (float)Math.Max(1, Math.Round(1 * scale));
+        var graphH = graph is { Length: > 0 } ? size * 1.15f : 0;
+        var graphW = graph is { Length: > 0 } ? 40 * (barW + barGap) : 0;
+        var width = (int)Math.Ceiling(Math.Max(widths.Count > 0 ? widths.Max() : 0, graphW) + padX * 2);
+        var height = (int)Math.Ceiling(lines.Count * lineH + (graphH > 0 ? graphH + padY : 0) + padY * 2);
         var bmp = new Bitmap(Math.Max(1, width), Math.Max(1, height), PixelFormat.Format32bppArgb);
         using var g = Graphics.FromImage(bmp);
         g.Clear(Color.Transparent);
@@ -218,6 +239,20 @@ internal sealed class Overlay : IDisposable
                 }
                 using var brush = new SolidBrush(run.Color);
                 g.DrawString(run.Text, font, brush, padX + rx + dx, y, fmt);
+            }
+        }
+        if (graph is { Length: > 0 })
+        {
+            var top = padY + lines.Count * lineH + (lines.Count > 0 ? padY : 0);
+            var avg = graph.Average();
+            var max = Math.Max(avg * 2.5, graph.Max());
+            using var ok = new SolidBrush(Color.FromArgb(0x7D, 0xFF, 0xA6));
+            using var spike = new SolidBrush(Warn);
+            for (var i = 0; i < graph.Length; i++)
+            {
+                var h = (float)Math.Max(barW, graphH * Math.Min(1, graph[i] / max));
+                var bx = padX + (40 - graph.Length + i) * (barW + barGap);
+                g.FillRectangle(graph[i] > avg * 2 ? spike : ok, bx, top + graphH - h, barW, h);
             }
         }
         return bmp;
@@ -257,6 +292,7 @@ internal sealed class Overlay : IDisposable
         }
         _hwnd = CreateWindowExW((uint)(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE) | 0x20 /* TRANSPARENT */ | 0x80000 /* LAYERED */,
             ClassName, "Монитор ПК", 0x80000000 /* WS_POPUP */, 0, 0, 1, 1, IntPtr.Zero, IntPtr.Zero, GetModuleHandleW(null), IntPtr.Zero);
+        _inCapture = null;
     }
 
     void Push(Bitmap bmp, int x, int y)
@@ -303,6 +339,7 @@ internal sealed class Overlay : IDisposable
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateWindowExW(uint ex, string cls, string name, uint style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr inst, IntPtr param);
     [DllImport("user32.dll")] static extern IntPtr DefWindowProcW(IntPtr h, uint msg, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] static extern bool DestroyWindow(IntPtr h);
+    [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr h, uint affinity);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
     [DllImport("user32.dll")] static extern bool UpdateLayeredWindow(IntPtr h, IntPtr dst, ref POINT pt, ref SIZE size, IntPtr src, ref POINT srcPt, int key, ref BLENDFUNCTION blend, uint flags);
     [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr h);

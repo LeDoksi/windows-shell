@@ -11,10 +11,12 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../Shell/Island/Core/**/*.cs" LinkBase="Core" />
+    <Compile Include="../../Shell/Kanban/KanbanData.cs;../../Shell/Kanban/Board.cs" LinkBase="Kanban" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="WindowsShell.Island.Core" />
+    <Using Include="WindowsShell.Kanban" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />

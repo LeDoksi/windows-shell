@@ -57,9 +57,12 @@ public sealed class IslandBody
     Action? _pillClick, _chipClick;
     double _cursorX, _cursorY;
     bool _cursorOn;
-    // Постоянная пилюля (идущая запись): тело возвращается в неё, а не в кромку.
-    UIElement? _badge;
-    Action? _badgeClick;
+    // Постоянная пилюля: идущая запись («rec») и закреплённый монитор ПК («pin», П8) — одной
+    // строкой; тело возвращается в неё, а не в кромку.
+    static readonly string[] BadgeOrder = ["rec", "pin"];
+    readonly Dictionary<string, (Border Part, Action? Click)> _badges = [];
+    readonly StackPanel _badgeRow = new() { Orientation = Orientation.Horizontal, Spacing = 0 };
+    UIElement? _badge => _badges.Count > 0 ? _badgeRow : null;
     // Приём файлов (П2): кнопку зажали не у края, курсор пришёл к краю — окно ловит DragEnter.
     bool _probe, _wasAtHot;
     long _dropLeftAt, _dropReleasedAt;
@@ -68,6 +71,9 @@ public sealed class IslandBody
     public BodyMode Mode { get; private set; } = BodyMode.Rest;
     public IslandWidget? Widget { get; private set; }
     public bool Full { get; private set; }
+
+    /// Виджет раскрыт кликом без фокуса (строка закрепления): Esc всё равно закрывает.
+    bool _openedUnfocused;
     public IntPtr Hwnd => _win.Hwnd;
     public bool Moving => _moving || _magnet.Moving;
     public bool Waiting => _gate.Waiting;
@@ -114,6 +120,16 @@ public sealed class IslandBody
         _pillHost.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, e) =>
         {
             if (!e.GetCurrentPoint(_pillHost).Properties.IsLeftButtonPressed) return;
+            if (Mode == BodyMode.Badge)
+            {
+                // В строке несколько частей (запись, монитор): у каждой своё действие.
+                foreach (var (part, partClick) in _badges.Values)
+                {
+                    var pt = e.GetCurrentPoint(part).Position;
+                    if (pt.X >= 0 && pt.Y >= 0 && pt.X <= part.ActualWidth && pt.Y <= part.ActualHeight) { partClick?.Invoke(); return; }
+                }
+                return;
+            }
             var click = _pillClick;
             if (click != null) click();
             else Sleep();
@@ -225,35 +241,62 @@ public sealed class IslandBody
 
     // ---------- постоянная пилюля (запись) ----------
 
-    public UIElement? BadgeContent => _badge;
+    /// Содержимое постоянной пилюли в слоте ("rec" — запись, "pin" — монитор ПК), null — слота нет.
+    public UIElement? BadgeContent(string slot) => _badges.TryGetValue(slot, out var b) ? b.Part.Child : null;
 
-    /// Задать или убрать постоянную пилюлю. Тот же элемент ещё раз — пересчитать размер (таймер вырос).
-    public void SetBadge(UIElement? content, Action? click)
+    public bool HasBadge(string slot) => _badges.ContainsKey(slot);
+
+    /// Задать или убрать часть постоянной пилюли. Тот же элемент ещё раз — пересчитать размер (таймер вырос).
+    public void SetBadge(string slot, UIElement? content, Action? click)
     {
         if (_disposed) return;
-        var same = content != null && content == _badge;
-        _badge = content;
-        _badgeClick = click;
+        var had = _badges.TryGetValue(slot, out var old);
         if (content == null)
         {
-            if (Mode == BodyMode.Badge) SetMode(BodyMode.Rest, RestW, RestH);
-            return;
+            if (!had) return;
+            old.Part.Child = null;
+            _badges.Remove(slot);
+            ComposeBadges();
+            if (_badges.Count == 0)
+            {
+                if (Mode == BodyMode.Badge) SetMode(BodyMode.Rest, RestW, RestH);
+                return;
+            }
+        }
+        else if (!had || old.Part.Child != content || old.Click != click)
+        {
+            var part = had ? old.Part : new Border { VerticalAlignment = VerticalAlignment.Center };
+            if (part.Child != content) part.Child = content;
+            _badges[slot] = (part, click);
+            if (!had) ComposeBadges();
         }
         if (Mode == BodyMode.Rest) EnterBadge();
         else if (Mode == BodyMode.Badge)
         {
-            if (!same) _pillHost.Child = content;
-            _pillClick = click;
+            if (_pillHost.Child != _badgeRow) _pillHost.Child = _badgeRow;
             var (w, h) = PillSize();
             if (Math.Abs(w - _w.Target) > 0.5 || Math.Abs(h - _h.Target) > 0.5) { _targetW = w; _content.Width = w; Canvas.SetLeft(_content, WinW / 2 - w / 2); Retarget(w, h, Springs.Ribbon); }
+        }
+    }
+
+    /// Части строки по порядку, между ними тонкая черта.
+    void ComposeBadges()
+    {
+        _badgeRow.Children.Clear();
+        foreach (var slot in BadgeOrder)
+        {
+            if (!_badges.TryGetValue(slot, out var b)) continue;
+            if (_badgeRow.Children.Count > 0)
+                _badgeRow.Children.Add(new Border { Width = 1, Height = 18, Background = B(Track), VerticalAlignment = VerticalAlignment.Center });
+            _badgeRow.Children.Add(b.Part);
         }
     }
 
     void EnterBadge()
     {
         if (_badge == null) return;
-        _pillHost.Child = _badge;
-        _pillClick = _badgeClick;
+        _pillHost.Child = _badgeRow;
+        _pillClick = null;
         if (_hidden) { _win.Show(false); _hidden = false; }
         _win.Raise();
         _raisedAt = Environment.TickCount64;
@@ -270,8 +313,9 @@ public sealed class IslandBody
         return (Math.Max(64, size.Width), Math.Max(30, size.Height));
     }
 
-    /// Открыть виджет в теле. byUser — кликом (берём фокус: Escape, Tab, ввод пароля).
-    public void OpenWidget(string id, bool byUser)
+    /// Открыть виджет в теле. byUser — кликом (можно и поверх игры; берём фокус: Escape, Tab, ввод
+    /// пароля). focus: false — без фокуса (клик по строке закреплённого монитора не выбивает игру, П8).
+    public void OpenWidget(string id, bool byUser, bool focus = true)
     {
         if (_disposed) return;
         if (Full && !byUser) return;
@@ -292,7 +336,8 @@ public sealed class IslandBody
         _pillTimer.Stop();
         _pillClick = null;
         _gate.Reset(awake: true);
-        if (byUser) Activate();
+        if (byUser && focus) Activate();
+        _openedUnfocused = byUser && !focus;
         var (tw, th) = WidgetSize(w);
         SetMode(BodyMode.Widget, tw, th);
     }
@@ -514,7 +559,8 @@ public sealed class IslandBody
             return false;
         }
 
-        if (esc && (Mode is BodyMode.Ribbon or BodyMode.Event || (Mode == BodyMode.Widget && GetForegroundWindow() == _win.Hwnd)))
+        // Esc закрывает и монитор, раскрытый кликом по строке без фокуса (игра остаётся впереди).
+        if (esc && (Mode is BodyMode.Ribbon or BodyMode.Event || (Mode == BodyMode.Widget && (GetForegroundWindow() == _win.Hwnd || _openedUnfocused))))
         {
             Sleep();
             return false;

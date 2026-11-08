@@ -90,6 +90,8 @@ public sealed class ShellHost
         _s.Charge.GameScreen = () =>
             _s.Perf.GameScreen is { } game ? _s.Monitors.All.FirstOrDefault(m => m.Bounds.Left == game.Left && m.Bounds.Top == game.Top)
             : _s.Monitors.All.FirstOrDefault(_s.Bars.IsFullscreen);
+        // И8: окно впереди развернулось на весь экран — «Монитор ПК» решает, игра ли это.
+        _s.Bars.FullscreenChanged += _s.Perf.Reevaluate;
         // «Монитор ПК»: правый клик по окну — меню оболочки, «Настройки…» — его страница.
         _s.Perf.OpenSettings = () => _s.OpenSettings("perf");
         _s.Perf.ShowMenu = (x, y, items) => _s.Menu.Show("perf-window", new Rect(x, y, 0, 0), items, Placement.AtPoint);

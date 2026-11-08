@@ -22,6 +22,10 @@ public sealed class KanbanFlyout : Popup
     readonly TextBox _input;
     readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _closeTimer;
     string? _project, _epic;
+    string _type = "task";
+    /// «+ Новый эпик» (П12): поле названия раскрыто, эпик создастся вместе с задачей.
+    bool _newEpic;
+    readonly TextBox _epicInput = new() { PlaceholderText = "Название нового эпика", FontFamily = Theme.Font, FontSize = 13, MaxLength = 200 };
     (string Text, Windows.UI.Color Color)? _note;
     bool _busy;
 
@@ -36,6 +40,7 @@ public sealed class KanbanFlyout : Popup
             MaxLength = 300,
         };
         _input.PreviewKeyDown += OnInputKey;
+        _epicInput.KeyDown += (_, e) => { if (e.Key == VirtualKey.Enter) { e.Handled = true; Submit(); } };
         _input.TextChanged += (_, _) => { if (_input.Text.Length > 0) _closeTimer?.Stop(); };
         SetContent(_body);
         _closeTimer = Win.Window.DispatcherQueue.CreateTimer();
@@ -64,6 +69,9 @@ public sealed class KanbanFlyout : Popup
     public void Show(object anchor, Rect anchorPx, object owner)
     {
         _note = null;
+        _newEpic = false;
+        _epicInput.Text = "";
+        _type = "task";
         _closeTimer.Stop();
         var s = _k.Settings;
         _project = _k.Project(s.QuickProject)?.Id ?? _k.Project(s.Project)?.Id ?? _k.Projects.FirstOrDefault()?.Id;
@@ -115,10 +123,29 @@ public sealed class KanbanFlyout : Popup
         _input.IsEnabled = !_busy;
         _body.Children.Add(_input);
 
+        // Тип как на сайте (П10): задача · баг · долг.
+        var types = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+        foreach (var (id, name) in Board.TypeChoice)
+        {
+            var t = id;
+            var on = _type == id;
+            var b = new Button
+            {
+                Content = Label(name, 12),
+                Padding = new Thickness(10, 3, 10, 4),
+                CornerRadius = new CornerRadius(12),
+                Background = Theme.Brush(on ? Windows.UI.Color.FromArgb(0x30, 0x4C, 0xC2, 0xFF) : Microsoft.UI.Colors.Transparent),
+                IsTabStop = false,
+            };
+            b.Click += (_, _) => { _type = t; Build(); Layout(); _input.Focus(FocusState.Programmatic); };
+            types.Children.Add(b);
+        }
+        _body.Children.Add(types);
+
         var epic = _k.Epic(_epic);
         var pill = new Button
         {
-            Content = Label(epic is null ? "без эпика ▾" : $"{epic.Short} {epic.Title} ▾", 12),
+            Content = Label(_newEpic ? "новый эпик ▾" : epic is null ? "без эпика ▾" : $"{epic.Short} {epic.Title} ▾", 12),
             FontSize = 12,
             Padding = new Thickness(10, 3, 10, 4),
             CornerRadius = new CornerRadius(12),
@@ -127,6 +154,11 @@ public sealed class KanbanFlyout : Popup
         pill.Click += (_, _) => EpicMenu(pill);
         var epicRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Label("Эпик:", 12, secondary: true), pill } };
         _body.Children.Add(epicRow);
+        if (_newEpic)
+        {
+            _epicInput.IsEnabled = !_busy;
+            _body.Children.Add(_epicInput);
+        }
 
         var note = _note ?? (_k.Error is { } err ? (err, Theme.Warning) : ("Enter — в бэклог · ↑↓ — проект", Theme.TextTertiary));
         var text = Label(note.Text, 12);
@@ -184,8 +216,10 @@ public sealed class KanbanFlyout : Popup
         foreach (var e in epics)
         {
             var id = e.Id;
-            items.Add(new() { Text = $"{e.Short} {e.Title}", Checked = _epic == id, Invoke = () => SetEpic(id) });
+            items.Add(new() { Text = $"{e.Short} {e.Title}", Checked = !_newEpic && _epic == id, Invoke = () => SetEpic(id) });
         }
+        items.Add(MenuItem.Sep);
+        items.Add(new() { Text = "+ Новый эпик", Checked = _newEpic, Invoke = () => { _newEpic = true; Build(); Layout(); _epicInput.Focus(FocusState.Programmatic); } });
         var scale = Win.Scale;
         GetWindowRect(Hwnd, out var r);
         var at = pill.TransformToVisual(null).TransformPoint(new Point(0, 0));
@@ -195,6 +229,7 @@ public sealed class KanbanFlyout : Popup
     void SetEpic(string? epic)
     {
         _epic = epic;
+        _newEpic = false;
         Build();
         Layout();
         _input.Focus(FocusState.Programmatic);
@@ -225,19 +260,36 @@ public sealed class KanbanFlyout : Popup
         if (title.Length == 0 || _busy || _project is null) return;
         var project = _project;
         var epic = _epic;
+        var newEpic = _newEpic ? _epicInput.Text.Trim() : null;
+        if (_newEpic && string.IsNullOrEmpty(newEpic))
+        {
+            _note = ("Напиши название нового эпика.", Theme.Warning);
+            Build();
+            Layout();
+            _epicInput.Focus(FocusState.Programmatic);
+            return;
+        }
+        var type = _type;
         _busy = true;
         _note = ("Создаю…", Theme.TextSecondary);
         Build();
         Layout();
         try
         {
-            var item = await _k.Create(project, title, epic);
+            var item = await _k.CreateWithEpic(project, title, type, epic, newEpic);
             _input.Text = "";
             _note = ($"✓ {item.Id} «{(title.Length > 40 ? title[..40] + "…" : title)}» создана", Green);
-            _k.RememberQuick(project, epic);
+            _newEpic = false;
+            _epicInput.Text = "";
+            _epic = item.EpicId;
+            _k.RememberQuick(project, item.EpicId);
             _closeTimer.Start();
         }
-        catch (KanbanException e) { _note = (e.Message, Theme.Warning); }
+        catch (KanbanException e)
+        {
+            if (e.KeptEpic is { } kept) { _newEpic = false; _epic = kept; _epicInput.Text = ""; }
+            _note = (e.Message, Theme.Warning);
+        }
         catch (Exception e)
         {
             Log.Write($"канбан: быстрая задача: {e}");

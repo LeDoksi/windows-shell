@@ -73,7 +73,8 @@ public static class SelfTest
         say("== Картинки оверлея");
         var entry = new WidgetEntry { Id = "perf" };
         var s = new PerfSettings(entry) { Shown = PerfSettings.Metrics.ToHashSet() };
-        var now = new PerfNow(144, 118, last, "Проверка");
+        var graph = Enumerable.Range(0, 40).Select(i => i == 30 ? 22.0 : 6.9).ToArray();
+        var now = new PerfNow(144, 118, last, "Проверка", 6.9, graph, FpsState.Ok);
         foreach (var column in new[] { false, true })
         {
             s.Column = column;
@@ -81,6 +82,15 @@ public static class SelfTest
             var file = Path.Combine(AppContext.BaseDirectory, column ? "perf-overlay-column.png" : "perf-overlay-row.png");
             bmp?.Save(file, ImageFormat.Png);
             say($"   {Path.GetFileName(file)}: {bmp?.Width}×{bmp?.Height}");
+        }
+        // По умолчанию (П16): FPS + 1% low; кадров нет совсем — «нет данных».
+        var plain = new PerfSettings(new WidgetEntry { Id = "perf" });
+        say($"   по умолчанию в оверлее: {string.Join(", ", plain.Items)}");
+        foreach (var (name, n) in new[] { ("perf-overlay-default.png", now), ("perf-overlay-nodata.png", new PerfNow(null, null, null, "Проверка", null, null, FpsState.NoData)) })
+        {
+            using var bmp = Overlay.Render(plain, n, 1.5);
+            bmp?.Save(Path.Combine(AppContext.BaseDirectory, name), ImageFormat.Png);
+            say($"   {name}: {bmp?.Width}×{bmp?.Height}");
         }
 
         say("== Счёт кадров: своё окно DirectX 11, 10 секунд");
@@ -148,7 +158,8 @@ public static class SelfTest
         frames.Track(Environment.ProcessId);
         // Настоящее окно оверлея над окном «игры»: снимок экрана с ним и проверка, что клики проходят сквозь.
         var overlay = new Overlay();
-        var ovSettings = new PerfSettings(new WidgetEntry { Id = "perf" }) { Shown = ["fps", "frametime", "cpu", "gpu"] };
+        // Снимок экрана проверяет, что оверлей виден: здесь его разрешено снимать.
+        var ovSettings = new PerfSettings(new WidgetEntry { Id = "perf" }) { Shown = ["fps", "low1", "frametime", "cpu", "gpu"], OverlayInCapture = true };
         var gameRect = new Native.Win32.RECT { Left = 120, Top = 120, Right = 760, Bottom = 480 };
         var shot = false;
         var sw = Stopwatch.StartNew();
@@ -168,7 +179,7 @@ public static class SelfTest
             presents++;
             if (r == 0x087A0001) occluded++; // DXGI_STATUS_OCCLUDED
             if (sw.ElapsedMilliseconds > 2000 && sw.ElapsedMilliseconds % 500 < 20)
-                overlay.Show(ovSettings, new PerfNow(frames.Fps ?? 0, null, null, "Проверка"), gameRect, 1.0);
+                overlay.Show(ovSettings, new PerfNow(frames.Fps ?? 0, frames.Low1, null, "Проверка", frames.FrameMs, null, FpsState.Ok), gameRect, 1.0);
             if (!shot && sw.ElapsedMilliseconds > 6000 && overlay.Visible)
             {
                 shot = true;
@@ -182,6 +193,7 @@ public static class SelfTest
                 say($"   {sw.ElapsedMilliseconds / 1000.0:0.0} с: FPS {fps?.ToString("0.0") ?? "—"}, вызовов Present {presents}");
             }
         }
+        say($"   кадры: состояние {frames.State}{(frames.Wide ? ", широкий режим" : "")}, 1% low после 10 с {(frames.Low1 is null ? "НЕТ" : "есть")}");
         say($"   итог: средний FPS {(samples.Count > 0 ? samples.Average().ToString("0.0") : "—")}, 1% low {frames.Low1?.ToString("0.0") ?? "—"}, Present {presents} за 10 с, закрыто окнами {occluded}");
         if (frames.AccessDenied) say("   НЕТ ПРАВ: PresentMon не открыл сессию событий");
         if (frames.Error.Length > 0) say($"   PresentMon: {frames.Error.Trim().Replace('\n', ' ')}");

@@ -1,36 +1,62 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using WindowsShell.Island.Core;
 
 namespace WindowsShell.Perf;
 
-/// Счёт кадров игры (design-v2 п. 8): события показа кадров Windows (ETW DxgKrnl/DXGI) читает
+/// Счёт кадров игры (design-v2 п. 8, И8): события показа кадров Windows (ETW DxgKrnl/DXGI) читает
 /// Intel PresentMon — тот же движок, что у FrameView и CapFrameX; в игру не встраиваемся.
-/// Считаем только кадры, реально показанные на экране (DisplayedTime ≠ NA). Нужен админ или
-/// группа «Пользователи журналов производительности» (PerfAccess).
+/// Считаем кадры, реально показанные на экране (DisplayedTime ≠ NA); если показ не виден —
+/// время между кадрами самой программы (FrameStats). Нет ни одной строки за 4 с — «широкий»
+/// режим (все процессы, строки только этого pid, в логе — кто рисует); и там пусто — NoData.
+/// Нужен админ или группа «Пользователи журналов производительности» (PerfAccess).
 public sealed class Frames : IDisposable
 {
+    public enum Status { Idle, Waiting, Ok, NoData, Denied }
+
     const string DefaultSession = "WindowsShellFps";
+    /// Сколько ждать первой строки, прежде чем расширить поиск или сказать «нет данных».
+    const long FirstRowMs = 4000;
     readonly string _session;
+    readonly Timer _watch;
 
     /// `session` — имя сессии событий; у пробы своё, чтобы не остановить счёт кадров оболочки.
-    public Frames(string session = DefaultSession) => _session = session;
-    /// Сколько секунд кадров держим (1% low и график за минуту).
-    const double KeepMs = 60_000;
+    public Frames(string session = DefaultSession)
+    {
+        _session = session;
+        _watch = new Timer(_ => Watch(), null, 1000, 1000);
+    }
 
     public static string Tool => Path.Combine(AppContext.BaseDirectory, "Tools", "PresentMon.exe");
 
     readonly object _lock = new();
-    /// Показанные кадры: когда показан (мс QPC) и сколько был на экране (мс).
-    readonly Queue<(double At, double Shown)> _frames = new();
+    readonly FrameStats _stats = new();
+    /// Широкий режим: сколько строк от каждой программы (для лога).
+    readonly Dictionary<string, int> _presenters = new(StringComparer.OrdinalIgnoreCase);
     Process? _proc;
     int _pid;
+    bool _wide, _rows, _listening;
+    long _startedAt, _presentersAt;
+    Status _status = Status.Idle;
     string _error = "";
 
     /// PresentMon не смог открыть сессию событий: нет прав.
     public bool AccessDenied { get; private set; }
 
+    /// Что с кадрами сейчас.
+    public Status State { get { lock (_lock) return AccessDenied && !_rows ? Status.Denied : _status; } }
+
+    /// Идёт поиск кадров по всем программам (у своего pid строк не было).
+    public bool Wide { get { lock (_lock) return _wide; } }
+
     /// Процесс, кадры которого считаем (0 — никакой).
     public int Pid { get { lock (_lock) return _pid; } }
+
+    /// PresentMon для этого процесса запущен и прислал заголовок (с этого момента ждать кадры честно).
+    public bool Listening { get { lock (_lock) return _listening; } }
+
+    /// Кадров за последнюю минуту.
+    public int Count { get { lock (_lock) return _stats.Count; } }
 
     public static double NowMs => Stopwatch.GetTimestamp() * 1000.0 / Stopwatch.Frequency;
 
@@ -42,19 +68,69 @@ public sealed class Frames : IDisposable
         {
             if (pid == _pid) return;
             _pid = pid;
-            _frames.Clear();
-            _chain = _chain.ContinueWith(_ => Apply(pid), TaskScheduler.Default);
+            Reset(pid == 0 ? Status.Idle : Status.Waiting);
+            _wide = false;
+            _chain = _chain.ContinueWith(_ => Apply(pid, wide: false), TaskScheduler.Default);
         }
+    }
+
+    void Reset(Status status)
+    {
+        _stats.Clear();
+        _presenters.Clear();
+        _rows = false;
+        _listening = false;
+        _status = status;
+        _startedAt = Environment.TickCount64;
+        _presentersAt = _startedAt;
     }
 
     Task _chain = Task.CompletedTask;
 
-    void Apply(int pid)
+    /// Раз в секунду: строк нет 4 с — расширить поиск, потом сказать «нет данных».
+    void Watch()
+    {
+        try
+        {
+            lock (_lock)
+            {
+                if (_pid == 0 || _rows || AccessDenied) return;
+                var now = Environment.TickCount64;
+                if (now - _startedAt < FirstRowMs) return;
+                if (!_wide)
+                {
+                    _wide = true;
+                    _startedAt = now;
+                    _presentersAt = now;
+                    var pid = _pid;
+                    Log.Write($"FPS: у процесса {pid} нет кадров за {FirstRowMs / 1000} с — ищу по всем программам");
+                    _chain = _chain.ContinueWith(_ => Apply(pid, wide: true), TaskScheduler.Default);
+                    return;
+                }
+                if (_status == Status.Waiting)
+                {
+                    _status = Status.NoData;
+                    Log.Write($"FPS: процесс {_pid} кадров не отдаёт — «нет данных»; {Presenters()}");
+                }
+                else if (now - _presentersAt > 10_000)
+                {
+                    _presentersAt = now;
+                    Log.Write($"FPS: широкий режим, {Presenters()}");
+                }
+            }
+        }
+        catch { }
+    }
+
+    string Presenters() => _presenters.Count == 0 ? "строк PresentMon нет совсем"
+        : "рисуют: " + string.Join(", ", _presenters.OrderByDescending(p => p.Value).Take(5).Select(p => $"{p.Key} {p.Value}"));
+
+    void Apply(int pid, bool wide)
     {
         Process? old;
         lock (_lock)
         {
-            if (pid != _pid) return;
+            if (pid != _pid || wide != _wide) return;
             old = _proc;
             _proc = null;
         }
@@ -72,19 +148,29 @@ public sealed class Frames : IDisposable
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
-        foreach (var a in new[] { "--process_id", pid.ToString(), "--output_stdout", "--no_console_stats", "--qpc_time_ms",
-                     "--session_name", _session, "--stop_existing_session", "--terminate_on_proc_exit", "--no_track_input", "--no_track_gpu" })
-            psi.ArgumentList.Add(a);
+        var args = new List<string>();
+        if (!wide) args.AddRange(["--process_id", pid.ToString(), "--terminate_on_proc_exit"]);
+        args.AddRange(["--output_stdout", "--no_console_stats", "--qpc_time_ms", "--session_name", _session, "--stop_existing_session", "--no_track_input", "--no_track_gpu"]);
+        foreach (var a in args) psi.ArgumentList.Add(a);
         try
         {
             var p = Process.Start(psi)!;
             Job.Add(p);
-            string[]? header = null;
+            FrameColumns? cols = null;
+            var appCol = -1;
             p.OutputDataReceived += (_, e) =>
             {
                 if (e.Data is not { } line) return;
-                if (header is null) { header = line.Split(','); Log.Write($"FPS: PresentMon {pid}: {line[..Math.Min(line.Length, 300)]}"); return; }
-                Row(p, header, line);
+                if (cols is null)
+                {
+                    var header = line.Split(',');
+                    cols = FrameColumns.Pick(header);
+                    appCol = Array.FindIndex(header, h => h.Trim().Equals("Application", StringComparison.OrdinalIgnoreCase));
+                    Log.Write($"FPS: PresentMon {(wide ? "все программы" : pid.ToString())}: {line[..Math.Min(line.Length, 300)]}");
+                    lock (_lock) if (pid == _pid) _listening = true;
+                    return;
+                }
+                Row(p, cols, appCol, line);
             };
             p.ErrorDataReceived += (_, e) =>
             {
@@ -103,12 +189,12 @@ public sealed class Frames : IDisposable
             lock (_lock)
             {
                 _error = "";
-                if (pid != _pid) { Kill(p, stopSession: false); return; }
+                if (pid != _pid || wide != _wide) { Kill(p, stopSession: false); return; }
                 _proc = p;
             }
             p.BeginOutputReadLine();
             p.BeginErrorReadLine();
-            Log.Write($"FPS: считаю кадры процесса {pid}");
+            Log.Write($"FPS: считаю кадры процесса {pid}{(wide ? " (по всем программам)" : "")}");
         }
         catch (Exception e)
         {
@@ -121,78 +207,56 @@ public sealed class Frames : IDisposable
         try { return $"код {p.ExitCode}"; } catch { return "?"; }
     }
 
-    int _iTime = -1, _iShown = -1, _iLatency = -1, _iDropped = -1, _iPid = -1;
-    string[]? _parsedHeader;
-
-    void Row(Process p, string[] header, string line)
+    static bool Num(string[] cells, int i, out double v)
     {
-        if (!ReferenceEquals(header, _parsedHeader))
-        {
-            _parsedHeader = header;
-            int Col(params string[] names) => names.Select(n => Array.FindIndex(header, h => h.Equals(n, StringComparison.OrdinalIgnoreCase))).FirstOrDefault(i => i >= 0, -1);
-            _iTime = Col("CPUStartQPCTime", "CPUStartTime", "TimeInSeconds");
-            // PresentMon 2.x: DisplayedTime (сколько кадр был на экране); 1.x: msBetweenDisplayChange + Dropped.
-            _iShown = Col("DisplayedTime", "MsBetweenDisplayChange", "msBetweenDisplayChange");
-            _iLatency = Col("DisplayLatency", "MsUntilDisplayed", "msUntilDisplayed");
-            _iDropped = Col("Dropped");
-            _iPid = Col("ProcessID");
-        }
+        v = 0;
+        return i >= 0 && i < cells.Length && double.TryParse(cells[i], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v);
+    }
+
+    void Row(Process p, FrameColumns c, int appCol, string line)
+    {
         var cells = line.Split(',');
-        if (_iShown < 0 || _iShown >= cells.Length) return;
-        if (_iDropped >= 0 && _iDropped < cells.Length && cells[_iDropped] == "1") return;
-        if (!double.TryParse(cells[_iShown], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var shown) || shown <= 0) return;
-        // Время показа: начало кадра + задержка до экрана (QPC в мс); нет — время прихода строки.
-        var at = NowMs;
-        if (_iTime >= 0 && _iTime < cells.Length && header[_iTime].Equals("CPUStartQPCTime", StringComparison.OrdinalIgnoreCase)
-            && double.TryParse(cells[_iTime], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var start))
-        {
-            at = start;
-            if (_iLatency >= 0 && _iLatency < cells.Length && double.TryParse(cells[_iLatency], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var lat) && lat > 0) at += lat;
-        }
         lock (_lock)
         {
             if (!ReferenceEquals(p, _proc)) return;
-            _frames.Enqueue((at, shown));
-            while (_frames.Count > 0 && _frames.Peek().At < at - KeepMs) _frames.Dequeue();
+            if (_wide)
+            {
+                var app = appCol >= 0 && appCol < cells.Length ? cells[appCol] : "?";
+                _presenters[app] = _presenters.GetValueOrDefault(app) + 1;
+                if (!Num(cells, c.Pid, out var rowPid) || (int)rowPid != _pid) return;
+            }
+            // Время показа: начало кадра + задержка до экрана (QPC в мс); нет — время прихода строки.
+            var at = NowMs;
+            if (c.QpcTime && Num(cells, c.Time, out var start))
+            {
+                at = start;
+                if (Num(cells, c.Latency, out var lat) && lat > 0) at += lat;
+            }
+            var dropped = c.Dropped >= 0 && c.Dropped < cells.Length && cells[c.Dropped] == "1";
+            if (!dropped && Num(cells, c.Shown, out var shown) && shown > 0) _stats.Add(at, shown);
+            else if (Num(cells, c.Presented, out var frame) && frame > 0) _stats.AddPresented(at, frame);
+            else return;
+            if (!_rows)
+            {
+                _rows = true;
+                Log.Write($"FPS: первые кадры процесса {_pid}{(_wide ? " (найдены в широком режиме)" : "")}{(_stats.PresentedOnly ? ", показ не виден — считаю кадры программы" : "")}");
+            }
+            _status = Status.Ok;
         }
     }
 
-    /// FPS сейчас: среднее за последние ~0,5 с показанных кадров; null — кадров нет (игра стоит
-    /// или свернута, PresentMon ещё не начал).
-    public double? Fps
-    {
-        get
-        {
-            lock (_lock)
-            {
-                if (_frames.Count == 0) return null;
-                var arr = _frames.ToArray();
-                var last = arr[^1];
-                // Строки идут с задержкой: показ кадра известен только после показа следующего.
-                if (NowMs - last.At > 1500) return null;
-                double sum = 0;
-                var n = 0;
-                for (var i = arr.Length - 1; i >= 0 && sum < 500; i--) { sum += arr[i].Shown; n++; }
-                return sum > 0 ? 1000.0 * n / sum : null;
-            }
-        }
-    }
+    /// FPS сейчас: среднее за последние ~0,5 с; null — кадров нет (игра стоит или свернута,
+    /// PresentMon ещё не начал).
+    public double? Fps { get { lock (_lock) return _stats.Fps(NowMs); } }
 
-    /// 1% low за последнюю минуту: средний FPS худшего 1 % кадров.
-    public double? Low1
-    {
-        get
-        {
-            lock (_lock)
-            {
-                if (_frames.Count < 100) return null;
-                var times = _frames.Select(f => f.Shown).OrderByDescending(t => t).ToArray();
-                var n = Math.Max(1, times.Length / 100);
-                var avg = times.Take(n).Average();
-                return avg > 0 ? 1000.0 / avg : null;
-            }
-        }
-    }
+    /// 1% low за последнюю минуту; null — кадров меньше сотни.
+    public double? Low1 { get { lock (_lock) return _stats.Low1; } }
+
+    /// Время кадра сейчас, мс.
+    public double? FrameMs { get { lock (_lock) return _stats.FrameMs(NowMs); } }
+
+    /// Последние n времён кадра (мс) для графика.
+    public double[] Recent(int n) { lock (_lock) return _stats.Recent(n); }
 
     /// Последняя ошибка PresentMon (для проверки).
     public string Error { get { lock (_lock) return _error; } }
@@ -217,7 +281,11 @@ public sealed class Frames : IDisposable
         catch { }
     }
 
-    public void Dispose() => Track(0);
+    public void Dispose()
+    {
+        Track(0);
+        _watch.Dispose();
+    }
 
     /// Задание Windows «убить вместе с оболочкой»: PresentMon не переживёт её сбой.
     static class Job

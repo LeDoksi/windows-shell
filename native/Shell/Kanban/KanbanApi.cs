@@ -428,7 +428,8 @@ public sealed class KanbanApi
     }
 
     /// Новая задача в бэклог: номер выдаёт база (next_seq, как у сайта), место — в конце.
-    public async Task<KItem> Create(KProject project, string title, string? epicId)
+    /// type — task · bug · chore (на сайте: задача · баг · долг).
+    public async Task<KItem> Create(KProject project, string title, string? epicId, string type = "task")
     {
         for (var attempt = 0; ; attempt++)
         {
@@ -440,7 +441,7 @@ public sealed class KanbanApi
                 ["seq"] = seq,
                 ["project_id"] = project.Id,
                 ["epic_id"] = epicId,
-                ["type"] = "task",
+                ["type"] = type,
                 ["title"] = title,
                 ["status"] = KStatus.Backlog,
                 ["position"] = seq * 100.0,
@@ -456,6 +457,35 @@ public sealed class KanbanApi
         }
     }
 
-    /// Изменить поля задачи (status, position, closed_at, title, body, epic_id, checklist).
+    /// Новый эпик (П12, как CreateModal.tsx сайта): номер из next_seq(p_kind=epic), id «WSH-E27»,
+    /// место seq·100, статус active.
+    public async Task<KEpic> CreateEpic(KProject project, string title)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            var seqJson = await Rest(HttpMethod.Post, "rpc/next_seq", new JsonObject { ["p_project"] = project.Id, ["p_kind"] = "epic" }).ConfigureAwait(false);
+            var seq = seqJson?.GetValue<int>() ?? throw new KanbanException("База не выдала номер эпика.");
+            var body = new JsonObject
+            {
+                ["id"] = $"{project.Prefix}-E{seq}",
+                ["seq"] = seq,
+                ["project_id"] = project.Id,
+                ["title"] = title,
+                ["status"] = "active",
+                ["position"] = Board.EpicPosition(seq),
+            };
+            try
+            {
+                var json = await Rest(HttpMethod.Post, "epics?select=id,seq,project_id,title,status,position", body, "return=representation").ConfigureAwait(false);
+                return json?.Deserialize<List<KEpic>>(Json)?.FirstOrDefault() ?? throw new KanbanException("Эпик не сохранился.");
+            }
+            catch (KanbanException e) when (e.Conflict && attempt < 2) { }
+        }
+    }
+
+    /// Удалить запись (только проверка --kanban-test write убирает за собой).
+    public Task Delete(string table, string id) => Rest(HttpMethod.Delete, $"{table}?id=eq.{Uri.EscapeDataString(id)}", null, "return=minimal");
+
+    /// Изменить поля задачи (status, position, closed_at, archived_at, type, title, body, epic_id, checklist).
     public Task Update(string id, JsonObject fields) => Rest(new HttpMethod("PATCH"), $"items?id=eq.{Uri.EscapeDataString(id)}", fields, "return=minimal");
 }

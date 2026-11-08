@@ -31,7 +31,8 @@ public static class SelfTest
         Say($"---- {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
         try
         {
-            Run(Check, Say).GetAwaiter().GetResult();
+            var i = Array.IndexOf(args, Arg);
+            Run(Check, Say, write: i + 1 < args.Length && args[i + 1] == "write").GetAwaiter().GetResult();
         }
         catch (Exception e)
         {
@@ -42,7 +43,7 @@ public static class SelfTest
         return true;
     }
 
-    static async Task Run(Action<string, bool, string> check, Action<string> say)
+    static async Task Run(Action<string, bool, string> check, Action<string> say, bool write)
     {
         // RFC 7636, приложение B.
         check("PKCE S256", KanbanApi.Challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk") == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", "");
@@ -125,6 +126,39 @@ public static class SelfTest
                 var comments = await api.Comments(some.Id);
                 check("карточка читается", true, $"{some.Id}: шагов {details.Checklist.Count}, комментариев {comments.Count}");
             }
+            check("подписи как на сайте", string.Join(" · ", Board.Columns.Select(Board.StatusName)) == "Hold · Backlog · В работе · Нужно от тебя · Готово", "");
+            say($"     нужно от тебя: {Board.WaitingCount(items, projects)}");
+            // Пишем в проект самой оболочки (WSH), чтобы не занимать номера в чужих проектах.
+            if (write) await Write(api, projects.FirstOrDefault(p => p.Prefix == "WSH") ?? first, check, say);
+            else say("     запись не проверялась (--kanban-test write — создать и удалить проверочные эпик и задачу)");
+        }
+    }
+
+    /// Новый эпик, задача с типом в нём, смена типа, архив и возврат — и всё удаляется (П10–П12).
+    static async Task Write(KanbanApi api, KProject project, Action<string, bool, string> check, Action<string> say)
+    {
+        KEpic? epic = null;
+        KItem? item = null;
+        try
+        {
+            epic = await api.CreateEpic(project, "Проверка оболочки (удалится сама)");
+            check("эпик создаётся", epic.Id.StartsWith(project.Prefix + "-E") && epic.Status == "active", $"{epic.Id}, место {epic.Position}");
+            item = await api.Create(project, "Проверка оболочки (удалится сама)", epic.Id, "bug");
+            check("задача с типом «баг» в новом эпике", item.Type == "bug" && item.EpicId == epic.Id && item.Status == KStatus.Backlog, item.Id);
+            await api.Update(item.Id, new JsonObject { ["type"] = "chore" });
+            await api.Update(item.Id, new JsonObject { ["status"] = KStatus.Done, ["closed_at"] = DateTimeOffset.UtcNow.ToString("O"), ["archived_at"] = DateTimeOffset.UtcNow.ToString("O") });
+            var archived = (await api.Items()).FirstOrDefault(i => i.Id == item.Id);
+            check("тип меняется, задача уходит в архив", archived is { Type: "chore", Archived: true }, $"{archived?.Type} {archived?.ArchivedAt}");
+            await api.Update(item.Id, new JsonObject { ["status"] = KStatus.Doing, ["archived_at"] = null, ["closed_at"] = null });
+            var back = (await api.Items()).FirstOrDefault(i => i.Id == item.Id);
+            check("«Вернуть» — снова в работе", back is { Status: KStatus.Doing, Archived: false }, back?.Status ?? "?");
+        }
+        finally
+        {
+            try { if (item != null) await api.Delete("items", item.Id); } catch (Exception e) { say($"     НЕ УДАЛЕНА задача {item?.Id}: {e.Message}"); }
+            try { if (epic != null) await api.Delete("epics", epic.Id); } catch (Exception e) { say($"     НЕ УДАЛЁН эпик {epic?.Id}: {e.Message}"); }
+            var left = (await api.Items()).Any(i => i.Id == item?.Id) || (await api.Epics()).Any(e => e.Id == epic?.Id);
+            check("проверочные записи удалены", !left, "");
         }
     }
 

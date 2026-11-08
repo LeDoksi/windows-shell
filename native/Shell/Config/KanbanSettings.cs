@@ -5,8 +5,8 @@ namespace WindowsShell.Config;
 /// Настройки виджета «Канбан» (design-v2 п. 9): значок в хвосте и отдельное окно.
 public sealed class KanbanSettings(WidgetEntry entry)
 {
-    /// Колонки окна по порядку (утверждено: В работе · Ждёт · Бэклог · Пауза; «Готово» свёрнуто внизу).
-    public static readonly string[] Columns = ["doing", "waiting", "backlog", "hold"];
+    /// Колонки окна по порядку сайта (П10): Hold · Backlog · В работе · Нужно от тебя; «Готово» — пятая (ShowDone).
+    public static readonly string[] Columns = ["hold", "backlog", "doing", "waiting"];
 
     public const string SurfaceShell = "shell", SurfaceGlass = "glass", SurfaceTint = "tint";
 
@@ -40,7 +40,7 @@ public sealed class KanbanSettings(WidgetEntry entry)
         set => S["columns"] = new JsonArray(Columns.Where(value.Contains).Select(v => (JsonNode)v).ToArray());
     }
 
-    /// Полоса «Готово» внизу окна.
+    /// Колонка «Готово» (последние пять, остальное в архиве).
     public bool ShowDone { get => Bool("showDone", true); set => S["showDone"] = value; }
 
     /// Компактные карточки.
@@ -53,7 +53,7 @@ public sealed class KanbanSettings(WidgetEntry entry)
         set => S["surface"] = value;
     }
 
-    /// Число задач «В работе» на значке в хвосте.
+    /// Число «Нужно от тебя» на значке в хвосте и в ленте острова.
     public bool Badge { get => Bool("badge", true); set => S["badge"] = value; }
 
     /// Проект, открытый в окне.
