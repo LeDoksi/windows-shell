@@ -711,14 +711,22 @@ public sealed class IslandHost
                 foreach (var page in Widgets.SettingsWidget.PageIds)
                 {
                     var errors = sheet.TestPage(page);
-                    await Task.Delay(120);
+                    await Task.Delay(250);
                     Check(errors == null, $"страница «{page}»{(errors == null ? "" : " — " + errors)}");
                 }
             }
             body.Sleep(restoreFocus: false);
-            await Task.Delay(900);
-            GetWindowRect(body.Hwnd, out var after);
-            Check((after.Bottom - after.Top) / body.Screen.Scale <= 641, "после листа окно сжалось обратно");
+            // Пружина сворачивания и сжатие окна: ждём до 3 с, а не наугад.
+            RECT after = default;
+            var shrink = System.Diagnostics.Stopwatch.StartNew();
+            do
+            {
+                await Task.Delay(150);
+                GetWindowRect(body.Hwnd, out after);
+            }
+            while ((after.Bottom - after.Top) / body.Screen.Scale > 641 && shrink.ElapsedMilliseconds < 3000);
+            var afterH = (after.Bottom - after.Top) / body.Screen.Scale;
+            Check(afterH <= 641, $"после листа окно сжалось обратно ({afterH:0} DIP за {shrink.ElapsedMilliseconds} мс{(afterH > 641 ? $", режим {body.Mode}" : "")})");
 
             // Пилюля записи (без настоящей записи).
             if (!_s.Shots.Recording)

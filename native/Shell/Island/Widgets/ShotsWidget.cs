@@ -149,7 +149,7 @@ public sealed class ShotsWidget(Services s, IslandBody body) : IslandWidget(s, b
         if (langs.Count > 1)
         {
             var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-            foreach (var (tag, name) in langs)
+            foreach (var (tag, name) in langs.Prepend((Ocr.Auto, "Авто")))
             {
                 var on = string.Equals(tag, job.Lang, StringComparison.OrdinalIgnoreCase);
                 var b = Btn((on ? "✓ " : "") + name, click: () => { if (!on) S.Shots.OcrLanguage(tag); });

@@ -157,6 +157,57 @@ public class OcrLayoutTests
         var t = OcrLayout.Join([("Вторая", 30, 20), ("Первая", 0, 20), ("Абзац", 100, 20), (" ", 140, 20)]);
         Assert.Equal("Первая\nВторая\n\nАбзац", t);
     }
+
+    // Что реально дали движки Windows на mephPC (--ocr-test, 2026-11-08).
+    [Fact] public void CleanRussianBeatsLatinGarbage() => Assert.True(OcrLayout.Penalty("Привет, мир 2026") < OcrLayout.Penalty("npv•1BeT, 2026"));
+    [Fact] public void CleanEnglishBeatsCyrillicGarbage() => Assert.True(OcrLayout.Penalty("Hello world") < OcrLayout.Penalty("Непо worId"));
+    [Fact] public void LookalikeOnlyRussianLosesToEnglish() => Assert.True(OcrLayout.Penalty("Hello") < OcrLayout.Penalty("Непо"));
+    [Fact] public void MixedLineStillRussian() => Assert.True(OcrLayout.Penalty("Открой Chrome и вставь") < OcrLayout.Penalty("OTkpoN Chrome n BcTaBb"));
+    [Fact] public void CleanTextNoPenalty() => Assert.Equal(0, OcrLayout.Penalty("Сохранить файл? (да/нет) — 100%"));
+    [Fact] public void UrlNotPunished() => Assert.Equal(0, OcrLayout.Penalty("https://example.com/path"));
+
+    static OcrLine L(string t, double top, double left = 0, double w = 300) => new(t, left, top, w, 20);
+
+    [Fact]
+    public void MergePicksPerLine()
+    {
+        var ru = new List<OcrLine> { L("Привет, мир 2026", 6), L("Непо worId", 34) };
+        var en = new List<OcrLine> { L("npv•1BeT, 2026", 7), L("Hello world", 35) };
+        Assert.Equal("Привет, мир 2026\nHello world", OcrLayout.Join(OcrLayout.Merge([ru, en])));
+    }
+
+    [Fact]
+    public void MergeTieKeepsFirst()
+    {
+        var ru = new List<OcrLine> { L("2026", 0) };
+        var en = new List<OcrLine> { L("2O26", 0) };
+        Assert.Equal("2026", OcrLayout.Join(OcrLayout.Merge([ru, en])));
+    }
+
+    [Fact]
+    public void MergeAddsLineFirstMissed()
+    {
+        var ru = new List<OcrLine> { L("Первая строка", 0) };
+        var en = new List<OcrLine> { L("Pervaya", 0), L("Second line", 30) };
+        Assert.Equal("Первая строка\nSecond line", OcrLayout.Join(OcrLayout.Merge([ru, en])));
+    }
+
+    [Fact]
+    public void MergeKeepsColumnsApart()
+    {
+        var ru = new List<OcrLine> { L("Левая колонка", 0, 0, 200), L("Непо", 0, 400, 100) };
+        var en = new List<OcrLine> { L("Hello", 0, 400, 100) };
+        var merged = OcrLayout.Merge([ru, en]);
+        Assert.Equal(["Левая колонка", "Hello"], merged.Select(m => m.Text));
+    }
+
+    [Fact]
+    public void MergeJoinsSplitLine()
+    {
+        var ru = new List<OcrLine> { L("Непо worId", 0, 0, 300) };
+        var en = new List<OcrLine> { L("world", 0, 150, 150), L("Hello", 0, 0, 120) };
+        Assert.Equal("Hello world", OcrLayout.Merge([ru, en])[0].Text);
+    }
 }
 
 public class TextFixTests

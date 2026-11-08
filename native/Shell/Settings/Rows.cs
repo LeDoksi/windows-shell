@@ -120,22 +120,55 @@ public static class Rows
     }
 
     /// Выбор одного из нескольких: кружки нашим акцентом.
+    /// Кружки рисуем сами (не RadioButton): шаблон RadioButton, снятый с экрана посреди своей
+    /// анимации, ронял XAML «Invalid attribute value Unknown for property Stroke» (WSH-E26).
     public static StackPanel Choice(IEnumerable<(string Title, bool Selected, Action Pick)> options)
     {
         var panel = new StackPanel { Padding = new Thickness(0, 6, 0, 6) };
-        var group = Guid.NewGuid().ToString();
-        foreach (var (title, selected, pick) in options)
+        var dots = new List<Microsoft.UI.Xaml.Shapes.Ellipse>();
+        var rings = new List<Microsoft.UI.Xaml.Shapes.Ellipse>();
+        var list = options.ToList();
+        var current = list.FindIndex(o => o.Selected);
+        void Paint()
         {
-            var radio = new RadioButton { Content = Text(title), GroupName = group, IsChecked = selected, MinHeight = 40 };
-            foreach (var key in new[] { "RadioButtonOuterEllipseCheckedFill", "RadioButtonOuterEllipseCheckedFillPointerOver", "RadioButtonOuterEllipseCheckedFillPressed",
-                         "RadioButtonOuterEllipseCheckedStroke", "RadioButtonOuterEllipseCheckedStrokePointerOver", "RadioButtonOuterEllipseCheckedStrokePressed" })
-                radio.Resources[key] = Theme.Brush(Theme.Accent);
-            foreach (var key in new[] { "RadioButtonCheckGlyphFill", "RadioButtonCheckGlyphFillPointerOver", "RadioButtonCheckGlyphFillPressed" })
-                radio.Resources[key] = Theme.Brush(Microsoft.UI.Colors.Black);
-            var p = pick;
-            radio.Checked += (_, _) => p();
-            panel.Children.Add(radio);
+            for (var i = 0; i < dots.Count; i++)
+            {
+                dots[i].Visibility = i == current ? Visibility.Visible : Visibility.Collapsed;
+                rings[i].Stroke = Theme.Brush(i == current ? Theme.Accent : Sub);
+                rings[i].Fill = Theme.Brush(i == current ? Theme.Accent : Microsoft.UI.Colors.Transparent);
+            }
         }
+        for (var i = 0; i < list.Count; i++)
+        {
+            var index = i;
+            var ring = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 20, Height = 20, StrokeThickness = 1.5 };
+            var dot = new Microsoft.UI.Xaml.Shapes.Ellipse { Width = 8, Height = 8, Fill = Theme.Brush(Microsoft.UI.Colors.Black) };
+            rings.Add(ring);
+            dots.Add(dot);
+            var mark = new Grid { Width = 20, Height = 20, VerticalAlignment = VerticalAlignment.Center, Children = { ring, dot } };
+            var label = Text(list[i].Title);
+            var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { mark, label } };
+            var b = new Button
+            {
+                Content = line,
+                Background = Theme.Brush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                MinHeight = 40,
+                Padding = new Thickness(4, 4, 4, 4),
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, list[i].Title);
+            b.Click += (_, _) =>
+            {
+                if (current == index) return;
+                current = index;
+                Paint();
+                list[index].Pick();
+            };
+            panel.Children.Add(b);
+        }
+        Paint();
         return panel;
     }
 

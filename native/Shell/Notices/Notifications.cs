@@ -11,7 +11,7 @@ namespace WindowsShell.Tail;
 
 /// Уведомления (WSH-82 → WSH-E26 «центр уведомлений», И3, П18, П25). Оболочка читает центр
 /// уведомлений Windows через UserNotificationListener: подписка на события у программы без
-/// пакета не работает (итог пробы И3), поэтому раз в секунду сверяем список id и читаем
+/// пакета не работает (итог пробы И3), поэтому раз в 2 секунды сверяем список id и читаем
 /// подробности только у новых. Всё новое ложится в собственный центр (`Store`), оригиналы
 /// в центре Windows не трогаем (П25, Win+N — запасной путь). Пришедшее, пока оболочки не было,
 /// подхватывается при старте тихо. Текст чужих уведомлений в журнал не пишем.
@@ -83,12 +83,13 @@ public sealed class Notifications
             Log.Write($"уведомления: список недоступен ({e.Message})");
         }
         _queue.TryEnqueue(() => Changed?.Invoke());
-        // «Не беспокоить» Windows — раз в секунду (дёшево); список — раз в секунду, если есть доступ.
+        // «Не беспокоить» Windows — раз в секунду (дёшево); список — раз в 2 с, если есть доступ
+        // (опрос ~14 мс: раз в секунду заметно поднимал процессор в покое).
         for (var tick = 0; ; tick++)
         {
             var dnd = QuietMode();
             if (dnd != DoNotDisturb) _queue.TryEnqueue(() => { DoNotDisturb = dnd; Changed?.Invoke(); });
-            if (_listener) Poll();
+            if (_listener && tick % 2 == 0) Poll();
             if (tick % 3600 == 3599) _queue.TryEnqueue(() => { if (Store.Expire(DateTimeOffset.Now)) { QueueSave(); Changed?.Invoke(); } });
             Thread.Sleep(1000);
         }

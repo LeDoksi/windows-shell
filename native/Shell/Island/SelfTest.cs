@@ -54,6 +54,8 @@ public static class SelfTest
         var proc = all.FirstOrDefault(p => Windows((uint)p.Id).Count > 0);
         check(proc != null, $"оболочка с островом запущена (процессов WindowsShellNative: {all.Count})");
         if (proc is null) return;
+        // Журнал читаем только с этого места: старые прогоны (и прошлые сутки) не мешают.
+        var logStart = LogLength();
 
         var screens = Monitors.Snapshot();
         var islands = Windows((uint)proc.Id);
@@ -130,14 +132,14 @@ public static class SelfTest
             check(msgWin != IntPtr.Zero, "окно сообщений оболочки найдено");
             if (msgWin != IntPtr.Zero)
             {
-                var mark = DateTime.Now;
+                var mark = LogLength();
                 PostMessageW(msgWin, RegisterWindowMessageW(SelfCheckMessage), IntPtr.Zero, IntPtr.Zero);
                 var sw2 = Stopwatch.StartNew();
                 List<string> got = [];
                 while (sw2.ElapsedMilliseconds < 90_000)
                 {
                     Thread.Sleep(500);
-                    got = ReadTail(Log.File, 300).Where(l => l.Contains("остров: самопроверка:") && Stamp(l) >= mark.AddSeconds(-1)).ToList();
+                    got = ReadFrom(Log.File, mark).Where(l => l.Contains("остров: самопроверка:")).ToList();
                     if (got.Any(l => l.Contains("ГОТОВО"))) break;
                 }
                 foreach (var l in got) say($"   {l[(l.IndexOf("самопроверка:") + 14)..]}");
@@ -160,14 +162,15 @@ public static class SelfTest
         say($"   процессор оболочки: {percent:0.00} % (всего {used:0} мс за 30 с), память {proc.WorkingSet64 / 1024 / 1024} МБ");
         check(percent < 1, "в покое оболочка почти не тратит процессор");
 
-        say("== Журнал оболочки (остров)");
+        say("== Журнал оболочки за время проверки");
         try
         {
-            // Только строки самой оболочки («остров: …»), без проб и этой проверки.
-            var lines = ReadTail(Log.File, 400).Where(l => l.Contains(" остров: ") || l.Contains("ОШИБКА в остров")).TakeLast(15).ToList();
-            foreach (var l in lines) say($"   {l}");
-            var errors = lines.Count(l => l.Contains("ОШИБКА"));
-            check(errors == 0, $"ошибок острова в журнале нет ({errors})");
+            // Любые ошибки оболочки за время проверки (и XAML, не только «остров: …»); строки этой проверки не в счёт.
+            var lines = ReadFrom(Log.File, logStart).Where(l => !l.Contains("проверка острова:")).ToList();
+            var errors = lines.Where(l => l.Contains("ОШИБКА в ")).ToList();
+            foreach (var l in lines.Where(l => l.Contains(" остров: ") && !l.Contains("самопроверка:")).TakeLast(10)) say($"   {l}");
+            foreach (var l in errors.Take(5)) say($"   {l}");
+            check(errors.Count == 0, $"ошибок в журнале нет ({errors.Count})");
         }
         catch (Exception e) { say($"   журнал не прочитан: {e.Message}"); }
     }
@@ -193,28 +196,27 @@ public static class SelfTest
         return (r.Right - r.Left, r.Bottom - r.Top);
     }
 
-    static IEnumerable<string> ReadTail(string file, int count)
+    static long LogLength()
+    {
+        try { return new FileInfo(Log.File).Length; }
+        catch { return 0; }
+    }
+
+    /// Строки журнала, дописанные после смещения `offset` (байты).
+    static List<string> ReadFrom(string file, long offset)
     {
         using var f = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        if (offset > f.Length) offset = 0; // журнал начат заново
+        f.Seek(offset, SeekOrigin.Begin);
         using var reader = new StreamReader(f, Encoding.UTF8);
-        var q = new Queue<string>();
-        while (reader.ReadLine() is { } line)
-        {
-            q.Enqueue(line);
-            if (q.Count > count) q.Dequeue();
-        }
-        return q;
+        var list = new List<string>();
+        while (reader.ReadLine() is { } line) list.Add(line);
+        return list;
     }
 
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern uint RegisterWindowMessageW(string name);
 
-    /// Время строки журнала (начало строки); не разобрали — самое раннее.
-    static DateTime Stamp(string line)
-    {
-        var head = line.Length >= 12 ? line[..12] : line;
-        return TimeSpan.TryParseExact(head, @"hh\:mm\:ss\.fff", null, out var t) ? DateTime.Today + t : DateTime.MinValue;
-    }
     [DllImport("user32.dll")] static extern bool GetWindowDisplayAffinity(IntPtr h, out uint affinity);
     [DllImport("user32.dll")] static extern int GetWindowRgnBox(IntPtr h, out RECT box);
     [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr ctx);

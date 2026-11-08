@@ -5,6 +5,7 @@ using Windows.Media.Ocr;
 using Windows.Storage.Streams;
 using WindowsShell.Island.Core;
 using D = System.Drawing;
+using OcrLine = WindowsShell.Island.Core.OcrLine;
 
 namespace WindowsShell.Shots;
 
@@ -30,10 +31,21 @@ public static class Ocr
         return n.Length > 0 ? char.ToUpper(n[0]) + n[1..] : l.LanguageTag;
     }
 
-    /// Русский, если есть; иначе язык профиля; иначе первый установленный. null — распознавания нет.
+    /// «Авто»: распознать всеми установленными языками (русский — основа) и по каждой строке
+    /// взять лучший вариант (`OcrLayout.Merge`). Иначе русский движок пишет английский
+    /// кириллицей («Непо worId»), а английский — русский латиницей.
+    public const string Auto = "auto";
+
+    /// «Авто», если языков несколько; иначе тот, что есть. null — распознавания нет.
     public static string? DefaultLang()
     {
         var all = Languages();
+        if (all.Count > 1) return Auto;
+        return SingleLang(all);
+    }
+
+    static string? SingleLang(List<(string Tag, string Name)> all)
+    {
         if (all.FirstOrDefault(l => l.Tag.StartsWith("ru", StringComparison.OrdinalIgnoreCase)) is { Tag: { } ru }) return ru;
         try { if (OcrEngine.TryCreateFromUserProfileLanguages() is { } e) return e.RecognizerLanguage.LanguageTag; } catch { }
         return all.Count > 0 ? all[0].Tag : null;
@@ -51,10 +63,18 @@ public static class Ocr
     {
         try
         {
-            OcrEngine? engine = null;
-            if (lang != null) engine = OcrEngine.TryCreateFromLanguage(new Language(lang));
-            engine ??= OcrEngine.TryCreateFromUserProfileLanguages();
-            if (engine is null) return ("", "В Windows нет пакета распознавания текста. Добавь его в «Время и язык → Язык»: у языка «Русский» — «Оптическое распознавание символов».");
+            var engines = new List<OcrEngine>();
+            if (lang == Auto)
+            {
+                // Основа — русский (или язык по умолчанию), за ним остальные; не больше трёх.
+                var all = Languages();
+                var first = SingleLang(all);
+                foreach (var tag in all.Select(l => l.Tag).OrderBy(t => t == first ? 0 : 1).Take(3))
+                    if (OcrEngine.TryCreateFromLanguage(new Language(tag)) is { } e) engines.Add(e);
+            }
+            else if (lang != null && OcrEngine.TryCreateFromLanguage(new Language(lang)) is { } one) engines.Add(one);
+            if (engines.Count == 0 && OcrEngine.TryCreateFromUserProfileLanguages() is { } profile) engines.Add(profile);
+            if (engines.Count == 0) return ("", "В Windows нет пакета распознавания текста. Добавь его в «Время и язык → Язык»: у языка «Русский» — «Оптическое распознавание символов».");
 
             using var mem = new InMemoryRandomAccessStream();
             using (var w = new DataWriter(mem.GetOutputStreamAt(0)))
@@ -76,15 +96,13 @@ public static class Ocr
             };
             using var bitmap = await decoder.GetSoftwareBitmapAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, transform,
                 ExifOrientationMode.IgnoreExifOrientation, ColorManagementMode.DoNotColorManage);
-            var result = await engine.RecognizeAsync(bitmap);
-            var lines = result.Lines.Select(l =>
+            var variants = new List<IReadOnlyList<OcrLine>>();
+            foreach (var engine in engines)
             {
-                var words = l.Words.ToList();
-                var top = words.Count == 0 ? 0 : words.Min(x => x.BoundingRect.Y);
-                var height = words.Count == 0 ? 0 : words.Max(x => x.BoundingRect.Height);
-                return (l.Text, (double)top, (double)height);
-            }).ToList();
-            var text = OcrLayout.Join(lines);
+                var result = await engine.RecognizeAsync(bitmap);
+                variants.Add(result.Lines.Select(Line).ToList());
+            }
+            var text = OcrLayout.Join(OcrLayout.Merge(variants));
             return (text, text.Length == 0 ? "Текст не найден. Попробуй выделить область крупнее или другой язык." : null);
         }
         catch (Exception e)
@@ -92,6 +110,17 @@ public static class Ocr
             Log.Error("распознавание текста", e);
             return ("", "Распознать не получилось. Подробности в журнале оболочки.");
         }
+    }
+
+    static OcrLine Line(Windows.Media.Ocr.OcrLine l)
+    {
+        var words = l.Words.ToList();
+        if (words.Count == 0) return new OcrLine(l.Text, 0, 0, 0, 0);
+        var left = words.Min(x => x.BoundingRect.X);
+        var top = words.Min(x => x.BoundingRect.Y);
+        var right = words.Max(x => x.BoundingRect.X + x.BoundingRect.Width);
+        var height = words.Max(x => x.BoundingRect.Height);
+        return new OcrLine(l.Text, left, top, right - left, height);
     }
 
     /// `--ocr-test`: рисует строку текста и распознаёт её каждым языком. Итог — `ocr-test.txt`.
@@ -124,14 +153,20 @@ public static class Ocr
                 g.DrawString(sample2, font, D.Brushes.Black, 8, 34);
             }
             var png = Png(bmp);
-            foreach (var tag in langs.Select(l => l.Tag).DefaultIfEmpty(null))
+            var tags = langs.Select(l => (string?)l.Tag).ToList();
+            if (langs.Count > 1) tags.Insert(0, Auto);
+            if (tags.Count == 0) tags.Add(null);
+            foreach (var tag in tags)
             {
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 var (text, error) = Recognize(png, tag).GetAwaiter().GetResult();
                 var flat = text.Replace('\n', ' ');
-                var ok = tag != null && tag.StartsWith("ru", StringComparison.OrdinalIgnoreCase)
-                    ? flat.Contains("Привет", StringComparison.OrdinalIgnoreCase) && flat.Contains("2026") && flat.Contains("Hello", StringComparison.OrdinalIgnoreCase)
-                    : flat.Contains("Hello", StringComparison.OrdinalIgnoreCase);
+                // «Авто» должно прочитать обе строки верно; один язык — хотя бы свою.
+                var ok = tag == Auto
+                    ? flat.Contains("Привет, мир 2026") && flat.Contains("Hello world")
+                    : tag != null && tag.StartsWith("ru", StringComparison.OrdinalIgnoreCase)
+                        ? flat.Contains("Привет", StringComparison.OrdinalIgnoreCase) && flat.Contains("2026")
+                        : flat.Contains("Hello", StringComparison.OrdinalIgnoreCase);
                 Say($"{tag ?? "профиль"}: {(ok ? "OK" : "НЕТ")} за {sw.ElapsedMilliseconds} мс → «{flat}»{(error != null ? $" ({error})" : "")}");
             }
         }
