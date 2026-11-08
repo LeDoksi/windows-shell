@@ -12,11 +12,15 @@
   <ItemGroup>
     <Compile Include="../../Shell/Island/Core/**/*.cs" LinkBase="Core" />
     <Compile Include="../../Shell/Kanban/KanbanData.cs;../../Shell/Kanban/Board.cs" LinkBase="Kanban" />
+    <Compile Include="../../Shell/Notices/NoticeStore.cs" LinkBase="Notices" />
+    <Compile Include="../../Shell/Clips/TextFix.cs" LinkBase="Clips" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="WindowsShell.Island.Core" />
     <Using Include="WindowsShell.Kanban" />
+    <Using Include="WindowsShell.Notices" />
+    <Using Include="WindowsShell.Clips" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
