@@ -63,7 +63,6 @@ public sealed class Bars
     readonly List<State> _bars = [];
     readonly DispatcherQueueTimer _tick;
     volatile State[] _snapshot = [];
-    volatile HashSet<string> _fullscreen = [];
     bool _animating;
     long _lastFrame;
     bool _held;
@@ -146,9 +145,12 @@ public sealed class Bars
     /// Пересчитать (закрепление поменялось).
     public void Update() => Evaluate();
 
-    public bool IsFullscreen(Screen screen) => _fullscreen.Contains(screen.Name);
+    public bool IsFullscreen(Screen screen) => Fullscreen.Full.Contains(screen.Name);
 
-    /// Набор мониторов в fullscreen поменялся (поток интерфейса).
+    /// Где сейчас fullscreen — одно правило на всю оболочку (док, остров, заряд, «Монитор ПК»).
+    public Island.FullscreenWatch Fullscreen { get; } = new();
+
+    /// Набор мониторов в fullscreen (или монитор эксклюзивной игры) поменялся (поток интерфейса).
     public event Action? FullscreenChanged;
 
     // ---------- фоновый поток ----------
@@ -168,10 +170,10 @@ public sealed class Bars
                 if (tick % 15 == 0)
                 {
                     screens = _monitors.All;
-                    var full = FullscreenScreens(screens);
-                    if (!full.SetEquals(_fullscreen))
+                    if (Fullscreen.Update(screens))
                     {
-                        _fullscreen = full;
+                        var (full, excl) = (Fullscreen.Full, Fullscreen.Exclusive);
+                        Log.Write($"весь экран — {(full.Count == 0 ? "нигде" : string.Join(", ", full))}{(excl is { } x ? $", эксклюзив на {x}" : "")}");
                         _queue.TryEnqueue(() => { Evaluate(); FullscreenChanged?.Invoke(); });
                     }
                 }
@@ -224,53 +226,6 @@ public sealed class Bars
         // Зажали над полосой — держим её; отпустили — снова как обычно.
         if (held && !_held) _held = _bars.Any(b => b.Inside);
         if (!held) _held = false;
-    }
-
-    /// Мониторы, на которых сейчас полноэкранная игра или видео (не просто развёрнутое окно).
-    HashSet<string> FullscreenScreens(IReadOnlyList<Screen> screens)
-    {
-        var set = new HashSet<string>();
-        var fg = GetForegroundWindow();
-        if (fg == IntPtr.Zero || ProcessId(fg) == (uint)Environment.ProcessId) return set;
-        var cls = ClassName(fg);
-        // Пуск и поиск Windows по клавише Win, переключатель задач: впереди на миг, игра не
-        // «снимается» и не «появляется» (E22: окно Explorer по Win считалось «весь экран»).
-        if (Island.Core.ShellUi.Is(cls, ProcNames.Of(fg))) return cls is "Progman" or "WorkerW" ? set : _fullscreen;
-        if (!GetWindowRect(fg, out var r)) return set;
-        var screen = screens.FirstOrDefault(s => s.Contains((r.Left + r.Right) / 2, (r.Top + r.Bottom) / 2));
-        if (screen is null) return set;
-        SHQueryUserNotificationState(out var state);
-        // 3 — Direct3D на весь экран, 4 — презентация.
-        var exclusive = state is 3 or 4;
-        var covers = r.Left <= screen.Bounds.Left && r.Top <= screen.Bounds.Top && r.Right >= screen.Bounds.Right && r.Bottom >= screen.Bounds.Bottom;
-        // Развёрнутое окно тоже закрывает монитор (панель задач спрятана), но это не игра (1.6):
-        // док выезжает над ним (WSH-95), поэтому и «2 — занят» от Windows не в счёт. Общее правило
-        // для любых программ: развёрнутое окно можно тянуть за края (рамка WS_THICKFRAME есть даже
-        // у окон без заголовка — ChatGPT, Electron), а полный экран рамку снимает (Chrome и
-        // Electron в F11 остаются «развёрнутыми», но без неё). Заголовок не смотрим (WSH-100).
-        const long WS_THICKFRAME = 0x00040000;
-        var style = (long)GetWindowLongPtrW(fg, GWL_STYLE);
-        var zoomed = IsZoomed(fg);
-        var resizable = (style & WS_THICKFRAME) != 0;
-        // Эксклюзив общий на весь сеанс: «полным» считается только окно-владелец (E22, И2).
-        var full = _exclusive.Judge((long)fg, exclusive, covers, zoomed, resizable);
-        if (full) set.Add(screen.Name);
-        // В журнал — каждое новое решение по окну, чтобы разбирать «док не выезжает над X».
-        var why = $"{cls} стиль {style:X8} развёрнуто {zoomed} весь экран {covers} состояние {state} → {(full ? "полный экран" : "обычное")}";
-        if (covers && (fg != _lastFg || why != _lastWhy)) Log.Write($"окно {ProcessName(fg)}: {why}");
-        _lastFg = fg;
-        _lastWhy = why;
-        return set;
-    }
-
-    IntPtr _lastFg;
-    string? _lastWhy;
-    readonly Island.Core.ExclusiveOwner _exclusive = new();
-
-    static string ProcessName(IntPtr h)
-    {
-        try { return System.Diagnostics.Process.GetProcessById((int)ProcessId(h)).ProcessName; }
-        catch { return "?"; }
     }
 
     // ---------- поток интерфейса ----------
@@ -395,8 +350,6 @@ public sealed class Bars
     struct APPBARDATA { public uint cbSize; public IntPtr hWnd; public uint uCallbackMessage, uEdge; public RECT rc; public IntPtr lParam; }
 
     [DllImport("shell32.dll")] static extern UIntPtr SHAppBarMessage(uint msg, ref APPBARDATA data);
-    [DllImport("shell32.dll")] static extern int SHQueryUserNotificationState(out int state);
     [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
-    [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr h);
     [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr ctx);
 }

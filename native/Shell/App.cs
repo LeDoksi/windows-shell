@@ -140,10 +140,13 @@ public sealed class App : Application, IXamlMetadataProvider
                 Kanban = new Kanban.KanbanService(queue, config, messages),
             };
             Ui.Popup.RestoreForeground = tracker.RestoreForeground;
+            // Обычное окно оболочки впереди — монитор не «весь экран» (список окон читается из потока Bars).
+            services.Bars.Fullscreen.OwnWindow = h => tracker.Windows.Any(w => w.Hwnd == h && w.Own != null);
             tracker.Start();
             step = "док и панель";
             _host = new ShellHost(services);
             _host.Start();
+            UiLag.Start(queue, messages);
             Log.Write($"оболочка запущена: мониторов {monitors.All.Count}");
         }
         catch (Exception e)
