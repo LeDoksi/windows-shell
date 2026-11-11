@@ -43,11 +43,4 @@ public class ShapeTests
         var r = IslandLayout.Place(new RectI(-2560, -300, 0, 1140), 1.5, 560, 62);
         Assert.Equal(new RectI(-1700, -300, -860, -207), r);
     }
-
-    [Fact] public void Sizes_FromAcceptedSketch()
-    {
-        Assert.Equal((190.0, 3.0), IslandSizes.Of(IslandMode.Rest));
-        Assert.Equal((560.0, 62.0), IslandSizes.Of(IslandMode.Ribbon));
-        Assert.Equal((600.0, 300.0), IslandSizes.Of(IslandMode.Net));
-    }
 }

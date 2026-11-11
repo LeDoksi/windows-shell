@@ -18,9 +18,6 @@ public sealed class App : Application, IXamlMetadataProvider
 {
     readonly XamlControlsXamlMetaDataProvider _metadata = new();
     ShellHost? _host;
-    // Проба тела острова (--island-spike): своё приложение без дока, сторожа и мьютекса.
-    static Island.Spike.SpikeOptions? _spikeOptions;
-    Island.Spike.IslandSpike? _spike;
 
     [STAThread]
     public static void Main(string[] args)
@@ -38,19 +35,7 @@ public sealed class App : Application, IXamlMetadataProvider
         if (Kanban.SelfTest.Cli(args)) return;
         if (Perf.PerfAccess.Cli(args)) return;
         if (Island.SelfTest.Cli(args)) return;
-        if (Island.Spike.OvertopTest.Cli(args)) return;
-        if (Island.Spike.NotifTest.Cli(args)) return;
-        if (Island.Spike.GamesTest.Cli(args)) return;
-        if (Island.Spike.SpikeArgs.Parse(args) is { } spike)
-        {
-            // Без сторожа и мьютекса: проба работает рядом с запущенной оболочкой и её не трогает.
-            _spikeOptions = spike;
-            Log.Write($"---- проба острова {spike.Strategy}{(spike.Auto ? " (авто)" : "")}");
-            TaskScheduler.UnobservedTaskException += (_, e) => Log.Error("задача", e.Exception);
-            WinRT.ComWrappersSupport.InitializeComWrappers();
-            StartApp();
-            return;
-        }
+        if (Notices.NotifTest.Cli(args)) return;
         Log.Write(args.Contains(Native.Autostart.Arg) ? "---- запуск вместе с Windows"
             : args.Contains(Native.Watchdog.RecoveredArg) ? "---- запуск после сбоя (сторож)" : "---- запуск");
         // Без отчёта Windows об ошибке: он держит упавший процесс ещё секунд 7, и сторож дольше
@@ -114,13 +99,6 @@ public sealed class App : Application, IXamlMetadataProvider
         {
             Resources.MergedDictionaries.Add(new XamlControlsResources());
             var queue = DispatcherQueue.GetForCurrentThread();
-            if (_spikeOptions is { } spike)
-            {
-                step = "проба острова";
-                _spike = new Island.Spike.IslandSpike(spike, queue);
-                _spike.Start();
-                return;
-            }
             step = "конфиг";
             var config = ShellConfig.Load();
             Autostart.Refresh();

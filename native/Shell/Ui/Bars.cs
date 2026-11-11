@@ -127,9 +127,6 @@ public sealed class Bars
         _snapshot = [.. _bars];
     }
 
-    /// Показана ли полоса сейчас.
-    public bool IsShown(IBar bar) => _bars.FirstOrDefault(b => b.Bar == bar)?.Shown ?? false;
-
     /// Показать полосу сразу (переименование, запуск) — уедет как обычно, когда курсор уйдёт,
     /// но не раньше чем через `holdMs`.
     /// <param name="force">Вызвали клавишей (Пуск, Win+X, Win+T): выезжает и над полноэкранным окном.</param>

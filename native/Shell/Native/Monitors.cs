@@ -76,9 +76,6 @@ public sealed class Monitors
         return All.FirstOrDefault(s => s.Name == name) ?? Primary;
     }
 
-    /// Есть ли соседний монитор за точкой (курсор может «проскочить» через этот край).
-    public bool HasNeighbour(int x, int y) => All.Any(s => s.Contains(x, y));
-
     /// Мониторы сейчас, без подписки на изменения (самопроверкам без интерфейса).
     public static IReadOnlyList<Screen> Snapshot() => Read();
 

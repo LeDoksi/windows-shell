@@ -4,8 +4,7 @@ using System.Text.Json.Serialization;
 
 namespace WindowsShell.Config;
 
-// Схема конфига та же, что у версии на Tauri (`src-tauri/src/config.rs`, schemaVersion 1):
-// так её файл переезжает целиком, без потерь (док, категории, виджеты, профили звука).
+// Схема конфига — schemaVersion 1 (та же, что была у первой версии на Tauri).
 
 public sealed class LauncherItem
 {
@@ -114,14 +113,13 @@ public sealed class ConfigData
 
 /// Конфиг оболочки на диске: `%APPDATA%\WindowsShellNative\config.json`. Запись атомарная,
 /// предыдущая версия лежит рядом в `config.json.bak`, испорченный файл откладывается в
-/// `config.broken.json`. Первый запуск берёт всё из конфига версии на Tauri (его не трогаем),
-/// а закреплённое в доке — из файла прототипа, если он есть (там свежее).
+/// `config.broken.json`. Самый первый запуск берёт в док закреплённое в панели задач Windows.
+/// Переезд с версий на Tauri и прототипа убран в WSH-E27: он давно прошёл, а при недоступном
+/// конфиге мог вернуть раскладку полугодовой давности (WSH-99).
 public sealed class ShellConfig
 {
     public static readonly string Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WindowsShellNative");
     static readonly string FilePath = Path.Combine(Dir, "config.json");
-    static readonly string TauriDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "com.ledoksi.windowsshell");
-    static readonly string PrototypeFile = Path.Combine(Dir, "prototype.json");
 
     static readonly JsonSerializerOptions Json = new()
     {
@@ -167,7 +165,7 @@ public sealed class ShellConfig
         var (bak, bakState) = c.TryRead(FilePath + ".bak");
         if (ownState == Read.Broken || bakState != Read.Missing || c.NewestDaily() != null)
         {
-            // Конфиг был, но не прочитался: это не первый запуск, конфиг Tauri сюда не берём.
+            // Конфиг был, но не прочитался: это не первый запуск, панель задач сюда не берём.
             // Испорченный файл откладываем с датой, чтобы ничего не потерять.
             if (ownState == Read.Broken)
                 try { File.Copy(FilePath, Path.Combine(Dir, $"config.broken-{DateTime.Now:yyyyMMdd-HHmmss}.json"), overwrite: true); } catch { }
@@ -186,11 +184,9 @@ public sealed class ShellConfig
             if (bakState == Read.Unavailable) c.WaitForFile(); else c.Save();
             return c;
         }
-        // Первый запуск: переезд с версии на Tauri.
-        var (tauri, _) = c.TryRead(Path.Combine(TauriDir, "config.json"));
-        c.Data = tauri ?? Defaults();
-        c.ImportPrototypePins();
-        if (tauri is null && !File.Exists(PrototypeFile)) c.ImportTaskbarPins();
+        // Первый запуск.
+        c.Data = Defaults();
+        c.ImportTaskbarPins();
         c.Normalize();
         c.Save();
         Log.Write($"конфиг создан: {c.Pins.Count} в доке, {c.Categories.Count} категорий");
@@ -276,24 +272,6 @@ public sealed class ShellConfig
                 return (null, Read.Broken);
             }
         }
-    }
-
-    /// Прототип (WSH-E13) хранил закреплённое в своём файле, и Георгий мог его поменять.
-    void ImportPrototypePins()
-    {
-        try
-        {
-            if (!File.Exists(PrototypeFile)) return;
-            var root = JsonNode.Parse(File.ReadAllText(PrototypeFile));
-            var pins = new List<Pin>();
-            foreach (var p in root?["pins"]?.AsArray() ?? [])
-            {
-                if ((string?)p?["id"] is { } id && (string?)p?["title"] is { } title && (string?)p?["target"] is { } target)
-                    pins.Add(new Pin(id, title, target));
-            }
-            if (pins.Count > 0) Data.Dock.Pinned = pins;
-        }
-        catch { }
     }
 
     /// Совсем первый запуск (раздел 8): в док — то, что закреплено в панели задач Windows, в

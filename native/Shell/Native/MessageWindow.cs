@@ -56,7 +56,7 @@ public sealed class MessageWindow
 
     const uint WM_DISPLAYCHANGE = 0x007E, WM_SETTINGCHANGE = 0x001A, WM_DPICHANGED = 0x02E0, WM_POWERBROADCAST = 0x0218, WM_HOTKEY = 0x0312;
     const int PBT_APMRESUMEAUTOMATIC = 0x12, PBT_APMRESUMESUSPEND = 0x7;
-    const int HSHELL_FLASH = 0x8006, HSHELL_RUDEAPPACTIVATED = 0x8004;
+    const int HSHELL_FLASH = 0x8006;
     const uint SPI_SETWORKAREA = 0x2F;
 
     IntPtr Proc(IntPtr h, uint msg, IntPtr w, IntPtr l)
