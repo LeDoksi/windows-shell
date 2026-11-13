@@ -8,9 +8,15 @@ namespace WindowsShell.Island;
 /// Fullscreen по каждому монитору (И2, правки из E22): полное окно запоминается за своим
 /// монитором, пока его не закроют, не свернут или там не выйдет вперёд обычное окно; эксклюзив
 /// принадлежит одному окну-игре; Пуск, поиск, переключатель задач Windows ничего не меняют.
-/// Зовётся из фонового потока острова 4 раза в секунду.
+/// Одно на всю оболочку (WSH-167): док, остров, заряд и «Монитор ПК» спрашивают его. Раньше у
+/// дока было своё правило (только окно в фокусе), и клик на второй монитор «снимал» игру с
+/// первого — док выезжал над игрой. Зовётся из фонового потока Bars 4 раза в секунду.
 public sealed class FullscreenWatch
 {
+    /// Обычное окно самой оболочки (настройки, канбан, «Монитор ПК», редактор снимка): впереди
+    /// оно — как любое обычное окно, монитор уже не «весь экран». Меню, Пуск и остров — нет.
+    public Func<IntPtr, bool> OwnWindow { get; set; } = _ => false;
+
     readonly FullscreenMap _map = new();
     readonly ExclusiveOwner _exclusive = new();
     IntPtr _lastFg;
@@ -29,7 +35,11 @@ public sealed class FullscreenWatch
         var exclusiveState = state is 3 or 4;
         if (!exclusiveState) _exclusive.Judge(0, false, false, false, false);
         var fg = GetForegroundWindow();
-        if (fg != IntPtr.Zero && ProcessId(fg) != (uint)Environment.ProcessId)
+        var own = fg != IntPtr.Zero && ProcessId(fg) == (uint)Environment.ProcessId;
+        if (own && OwnWindow(fg) && GetWindowRect(fg, out var or)
+            && screens.FirstOrDefault(s => s.Contains((or.Left + or.Right) / 2, (or.Top + or.Bottom) / 2)) is { } ownScreen)
+            _map.Observe(ownScreen.Name, (long)fg, false);
+        else if (fg != IntPtr.Zero && !own)
         {
             var cls = ClassName(fg);
             if (!ShellUi.Is(cls, ProcNames.Of(fg)) && GetWindowRect(fg, out var r)
@@ -41,7 +51,7 @@ public sealed class FullscreenWatch
                 var full = _exclusive.Judge((long)fg, exclusiveState, covers, zoomed, resizable);
                 _map.Observe(screen.Name, (long)fg, full);
                 var why = $"{screen.Name}: {cls} состояние {state} весь экран {covers} развёрнуто {zoomed} рамка {resizable} → {(full ? "полный экран" : "обычное")}";
-                if (covers && (fg != _lastFg || why != _lastWhy)) Log.Write($"остров: окно {ProcNames.Of(fg)} — {why}");
+                if (covers && (fg != _lastFg || why != _lastWhy)) Log.Write($"весь экран: окно {ProcNames.Of(fg)} — {why}");
                 _lastFg = fg;
                 _lastWhy = why;
             }

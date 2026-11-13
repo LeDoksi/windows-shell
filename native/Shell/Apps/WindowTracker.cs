@@ -135,10 +135,12 @@ public sealed class WindowTracker
     {
         if (idObject != OBJID_WINDOW || idChild != 0) return;
         if (ev == EVENT_SYSTEM_FOREGROUND) NoteForeground(hwnd);
-        // Создание и уничтожение дочерних окон приходит тысячами: интересны только верхние.
-        if ((ev == EVENT_OBJECT_CREATE || ev == EVENT_OBJECT_DESTROY || ev == EVENT_OBJECT_NAMECHANGE)
-            && GetAncestor(hwnd, 1 /* GA_PARENT */) != IntPtr.Zero
-            && GetAncestor(hwnd, 2 /* GA_ROOT */) != hwnd)
+        // События дочерних окон (кнопки, поля, полосы прокрутки любых программ) приходят тысячами:
+        // интересны только верхние. Раньше показ и скрытие дочерних окон не отсеивались, и каждый
+        // такой всплеск пересчитывал весь список окон в потоке интерфейса (WSH-168). Исключение —
+        // окно UWP: его содержимое (CoreWindow) появляется дочерним окном рамки чуть позже неё.
+        if (GetAncestor(hwnd, 1 /* GA_PARENT */) != IntPtr.Zero && GetAncestor(hwnd, 2 /* GA_ROOT */) is var root && root != hwnd
+            && !((ev == EVENT_OBJECT_SHOW || ev == EVENT_OBJECT_HIDE) && ClassName(root) == "ApplicationFrameWindow"))
             return;
         Schedule();
     }
@@ -207,7 +209,25 @@ public sealed class WindowTracker
         if (Attention.Add(root)) AttentionChanged?.Invoke();
     }
 
+    long _slowLogged;
+
     public void Scan()
+    {
+        var sw = Stopwatch.StartNew();
+        try { ScanNow(); }
+        finally
+        {
+            // Пересчёт идёт в потоке интерфейса: долгий — в журнал (не чаще раза в минуту).
+            var ms = sw.ElapsedMilliseconds;
+            if (ms >= 50 && Environment.TickCount64 - _slowLogged > 60_000)
+            {
+                _slowLogged = Environment.TickCount64;
+                Log.Write($"список окон пересчитан за {ms} мс ({Windows.Count} окон в доке)");
+            }
+        }
+    }
+
+    void ScanNow()
     {
         var handles = new List<IntPtr>();
         EnumWindows((h, _) => { handles.Add(h); return true; }, IntPtr.Zero);

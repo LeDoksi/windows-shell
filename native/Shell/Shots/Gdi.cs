@@ -53,14 +53,11 @@ internal static class Gdi
     [DllImport("gdi32.dll")] public static extern bool Rectangle(IntPtr dc, int l, int t, int r, int b);
     [DllImport("gdi32.dll")] public static extern bool Ellipse(IntPtr dc, int l, int t, int r, int b);
     [DllImport("gdi32.dll")] public static extern bool RoundRect(IntPtr dc, int l, int t, int r, int b, int w, int h);
-    [DllImport("gdi32.dll")] public static extern bool MoveToEx(IntPtr dc, int x, int y, IntPtr prev);
-    [DllImport("gdi32.dll")] public static extern bool LineTo(IntPtr dc, int x, int y);
     [DllImport("gdi32.dll")] public static extern int SetBkMode(IntPtr dc, int mode);
     [DllImport("gdi32.dll")] public static extern int SetTextColor(IntPtr dc, int colorref);
     [DllImport("gdi32.dll")] public static extern bool SetViewportOrgEx(IntPtr dc, int x, int y, IntPtr prev);
     [DllImport("gdi32.dll")] public static extern IntPtr CreateEllipticRgn(int l, int t, int r, int b);
     [DllImport("gdi32.dll")] public static extern int SelectClipRgn(IntPtr dc, IntPtr rgn);
-    [DllImport("gdi32.dll")] public static extern int OffsetClipRgn(IntPtr dc, int x, int y);
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
     public static extern IntPtr CreateFontW(int height, int width, int escapement, int orientation, int weight, uint italic, uint underline, uint strike,
         uint charset, uint outPrecision, uint clipPrecision, uint quality, uint pitch, string face);

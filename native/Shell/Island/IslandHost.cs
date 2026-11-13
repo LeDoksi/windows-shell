@@ -20,7 +20,8 @@ public sealed class IslandHost
 {
     readonly Services _s;
     readonly Dictionary<string, IslandBody> _bodies = [];
-    readonly FullscreenWatch _full = new();
+    /// Общее правило «весь экран» (его обновляет поток Bars, WSH-167).
+    FullscreenWatch _full => _s.Bars.Fullscreen;
     volatile RECT[] _zones = [];
     volatile bool _active, _timers, _running;
     bool _rendering, _lastHeld, _lastEsc, _started;
@@ -49,6 +50,7 @@ public sealed class IslandHost
         _started = true;
         _s.Config.Changed += Apply;
         _s.Monitors.Changed += () => { if (_running) Sync(); };
+        _s.Bars.FullscreenChanged += () => { if (_running) OnFullChanged(); };
         _s.Messages.Resumed += () => { foreach (var b in _bodies.Values) b.Sleep(restoreFocus: false); };
         _s.Messages.TaskbarCreated += () => _s.Queue.TryEnqueue(() => { foreach (var b in _bodies.Values) b.Raise(); });
         void Indicators() { foreach (var b in _bodies.Values) b.RefreshIndicators(); }
@@ -173,7 +175,6 @@ public sealed class IslandHost
             if (!_running) continue;
             try
             {
-                if (tick % 15 == 0 && _full.Update(_s.Monitors.All)) _s.Queue.TryEnqueue(OnFullChanged);
                 if (!GetCursorPos(out var p)) continue;
                 var held = (GetAsyncKeyState(0x01) | GetAsyncKeyState(0x02)) < 0;
                 var esc = GetAsyncKeyState(0x1B) < 0;
@@ -224,7 +225,6 @@ public sealed class IslandHost
         foreach (var (name, b) in _bodies) b.SetFull(full.Contains(name));
         UpdateRecording();
         UpdatePinned();
-        Log.Write($"остров: fullscreen — {(full.Count == 0 ? "нигде" : string.Join(", ", full))}{(_full.Exclusive is { } x ? $", эксклюзив на {x}" : "")}");
     }
 
     /// Где курсор интересен опросу — снимок для фонового потока.

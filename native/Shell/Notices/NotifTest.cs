@@ -4,7 +4,7 @@ using Windows.UI.Notifications;
 using Windows.UI.Notifications.Management;
 using WindowsShell.Native;
 
-namespace WindowsShell.Island.Spike;
+namespace WindowsShell.Notices;
 
 /// Проба доступа к уведомлениям (И3): `WindowsShellNative.exe --notif-test`. Может ли оболочка
 /// без пакета читать уведомления Windows, получать события о новых и убирать их. Чужие
