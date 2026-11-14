@@ -61,11 +61,15 @@ public sealed class RibbonView
         _wheelTimer.Tick += (_, _) => { _wheelShown = false; Refresh(); };
     }
 
-    /// Ширина ленты, DIP.
+    /// Ширина ленты, DIP. Зовётся перед раскрытием, когда лента ещё свёрнута (Collapsed), а
+    /// свёрнутый элемент меряется как 0 — остров раскрывался шириной 200 и резал ленту с двух
+    /// сторон, если значок поменялся, пока остров спал (WSH-171). Поэтому сначала показываем:
+    /// раскрытие всё равно делает её видимой, а прозрачность в покое — 0.
     public double Width
     {
         get
         {
+            Panel.Visibility = Visibility.Visible;
             Panel.Measure(new Windows.Foundation.Size(double.PositiveInfinity, Height));
             return Math.Max(200, Panel.DesiredSize.Width);
         }
