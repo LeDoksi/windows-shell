@@ -743,18 +743,16 @@ public sealed class IslandBody
         // П21: точка — есть непрочитанное в нашем центре (и в «Не беспокоить» острова: тихо, но видно).
         _dot.Visibility = rest && !_s.Shots.Recording && _s.Notifications.Unread ? Visibility.Visible : Visibility.Collapsed;
 
-        // Область кликов = контур: вне его клики уходят окнам под островом.
-        var poly = new POINT[pts.Count];
-        for (var i = 0; i < pts.Count; i++) poly[i] = new POINT { X = (int)Math.Round((pts[i].X + cx) * s), Y = (int)Math.Round(pts[i].Y * s) };
-        var rgn = CreatePolygonRgn(poly, poly.Length, 2 /* WINDING */);
-        if (_probe)
-        {
-            // Приём файлов: у края полоса пошире кромки, чтобы перетаскивание её задело.
-            var strip = CreateRectRgn((int)((cx - 170) * s), 0, (int)((cx + 170) * s), (int)(24 * s));
-            CombineRgn(rgn, rgn, strip, 2 /* RGN_OR */);
-            DeleteObject(strip);
-        }
-        if (SetWindowRgn(_win.Hwnd, rgn, true) == 0) DeleteObject(rgn);
+        // Область кликов = контур без носика магнита: вне его клики уходят окнам под островом.
+        // Окно получает новую область, только когда она правда поменялась. WinUI на каждую смену
+        // области под неподвижным курсором шлёт PointerExited, и подсветка значка под курсором
+        // мигала и гасла, пока носик магнита дотухал после входа курсора в ленту (WSH-172).
+        var hit = IslandShape.Outline(w, h, 0, NoMagnet);
+        var poly = new POINT[hit.Count];
+        for (var i = 0; i < hit.Count; i++) poly[i] = new POINT { X = (int)Math.Round((hit[i].X + cx) * s), Y = (int)Math.Round(hit[i].Y * s) };
+        if (_probe == _regionProbe && poly.AsSpan().SequenceEqual(_region)) poly = [];
+        else { _region = poly; _regionProbe = _probe; }
+        if (poly.Length > 0) SetRegion(poly, cx, s);
 
         // Содержимое стоит; видно только то, что внутри тела.
         _content.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(_targetW / 2 - w / 2, 0, w, h) };
@@ -769,6 +767,23 @@ public sealed class IslandBody
         }
         if (Mode is BodyMode.Event or BodyMode.Badge) _pillHost.Opacity = Math.Clamp((progress - 2.0 / 3) * 3, 0, 1);
         if (Mode == BodyMode.Drop) _drop.View.Opacity = Math.Clamp((progress - 2.0 / 3) * 3, 0, 1);
+    }
+
+    static readonly Magnet NoMagnet = new();
+    POINT[] _region = [];
+    bool _regionProbe;
+
+    void SetRegion(POINT[] poly, double cx, double s)
+    {
+        var rgn = CreatePolygonRgn(poly, poly.Length, 2 /* WINDING */);
+        if (_probe)
+        {
+            // Приём файлов: у края полоса пошире кромки, чтобы перетаскивание её задело.
+            var strip = CreateRectRgn((int)((cx - 170) * s), 0, (int)((cx + 170) * s), (int)(24 * s));
+            CombineRgn(rgn, rgn, strip, 2 /* RGN_OR */);
+            DeleteObject(strip);
+        }
+        if (SetWindowRgn(_win.Hwnd, rgn, true) == 0) DeleteObject(rgn);
     }
 
     double Progress()
